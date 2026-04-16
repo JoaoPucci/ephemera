@@ -13,16 +13,17 @@ cp .env.example .env
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-## Provision the sender account (once)
+## Provision the first user (once)
 
 ```bash
-./venv/bin/python -m app.admin init
+./venv/bin/python -m app.admin init <username>
 ```
 
-Prompts for a password, shows a QR to scan into an authenticator app
-(1Password, Google Authenticator, Aegis, Bitwarden, etc.), and prints 10
-one-time recovery codes. **Save the recovery codes somewhere safe — they are
-shown only once.** For everything else the CLI can do, see
+Pick a username (`admin` is a fine default), supply a password, scan the QR
+into an authenticator app (1Password, Google Authenticator, Aegis, Bitwarden,
+etc.), and save the 10 one-time recovery codes that get printed. **The
+recovery codes are shown only once.** Additional users can be added later with
+`add-user`. For everything else the CLI can do, see
 [Admin CLI reference](#admin-cli-reference) below.
 
 ## Run the dev server
@@ -36,7 +37,8 @@ The app starts at **http://127.0.0.1:8000** with `--reload` enabled.
 ## Browser smoke test
 
 1. Open **http://127.0.0.1:8000/send** — you get the sign-in page.
-2. Enter your password and the current 6-digit code from your authenticator.
+2. Enter your **username**, password, and the current 6-digit code from your
+   authenticator.
 3. You land on the create form. Type a message, pick an expiry, (optional)
    passphrase, submit. You get back a URL with a `#fragment`.
 4. Open that URL in a **private/incognito** window (or a different browser) to
@@ -56,29 +58,39 @@ running.
 ./venv/bin/python -m app.admin <command> [args]
 ```
 
-### Provisioning
+Every command that targets a specific user accepts `--user <name>` (or `-u <name>`).
+When exactly one user exists, `--user` is optional — the CLI picks them automatically.
+
+### User management
 
 | Command | Reauth? | What it does |
 |---|---|---|
-| `init` | — | First-time setup. Prompts for a password (≥10 chars, confirmed twice), generates the TOTP secret, prints a terminal-rendered QR code for your authenticator, and prints 10 one-time recovery codes. Refuses to run if a user already exists. |
+| `init <username>` | — | First-time setup. Creates the initial user with that username, a password, TOTP secret (QR + manual fallback), and 10 one-time recovery codes. Refuses to run if any user already exists. |
+| `add-user <username>` | yes (as any existing user) | Provision another user. Same prompts as `init`. The re-auth requirement means shell access alone isn't enough to silently mint accounts. |
+| `list-users` | — | Show id, username, and created_at for every user. |
+| `remove-user <username>` | yes (as that user) | Delete a user and cascade-drop all their secrets and API tokens. Refuses if it would leave the server empty. |
 
 ### Credential rotation
 
-All require re-auth (password + TOTP or recovery code) before running.
+All require re-auth (password + TOTP or recovery code) as the target user.
 
 | Command | What it does |
 |---|---|
-| `reset-password` | Change the password. |
-| `rotate-totp` | Generate a new TOTP secret and print a new QR. The old authenticator entry becomes dead — rescan on every device you use. |
-| `regen-recovery-codes` | Invalidate the current 10 recovery codes and print 10 fresh ones. Save them before closing the terminal. |
+| `reset-password [--user <name>]` | Change the password. |
+| `rotate-totp [--user <name>]` | Generate a new TOTP secret and print a new QR. The old authenticator entry dies — rescan on every device you use. |
+| `regen-recovery-codes [--user <name>]` | Invalidate the current 10 recovery codes and print 10 fresh ones. Save them before closing the terminal. |
 
 ### API tokens (for scripts / CI / automation)
 
+Each token belongs to one user; the server scopes every call made with it to
+that user. Token names are unique per user, not globally — two users can both
+have a token named `cli-laptop`.
+
 | Command | Reauth? | What it does |
 |---|---|---|
-| `create-token <name>` | yes | Mint a new revocable API token. Plaintext (`eph_…`) is printed ONCE — save it in a password manager. Only the SHA-256 hash is stored. |
-| `list-tokens` | — | Show all tokens with their name, status, created/last-used timestamps. |
-| `revoke-token <name>` | yes | Revoke a token by its name. Revocation is immediate; active requests using it will start failing on next call. |
+| `create-token <name> [--user <u>]` | yes | Mint a new revocable API token. Plaintext (`eph_…`) is printed ONCE — save it in a password manager. Only the SHA-256 hash is stored server-side. |
+| `list-tokens [--user <u>]` | — | Show that user's tokens with name, status, created / last-used. |
+| `revoke-token <name> [--user <u>]` | yes | Revoke a token. Revocation is immediate; next API call with it fails. |
 
 Use a token with `Authorization: Bearer <token>` on `/api/secrets` and
 `/api/secrets/{id}/status`:
@@ -98,19 +110,22 @@ you already have shell access — helpfulness beats ceremony.
 
 | Command | What it does |
 |---|---|
-| `diagnose` | Print server time, current TOTP step, the stored `totp_last_step`, and the 3 codes that would currently be accepted (previous / current / next step). Compare with what your authenticator is showing. |
-| `verify` | Prompt for password + code and print `OK` / `MISMATCH` for each factor independently. Does NOT mutate `totp_last_step`, so you can run it repeatedly. |
+| `diagnose [--user <name>]` | Print server time, current TOTP step, the stored `totp_last_step`, and the 3 codes that would currently be accepted (previous / current / next step). Compare with what your authenticator is showing. |
+| `verify [--user <name>]` | Prompt for password + code and print `OK` / `MISMATCH` for each factor independently. Does NOT mutate `totp_last_step`, so you can run it repeatedly. |
 
 ### Common scenarios
 
 | Situation | What to do |
 |---|---|
-| I forgot my password | No server-side recovery — wipe the user row and re-init: `sqlite3 ephemera.db "DELETE FROM users; DELETE FROM api_tokens;"` then `python -m app.admin init`. |
-| I lost access to my authenticator | Log in with a recovery code (login form → "Use a recovery code"), then `rotate-totp` to generate a fresh one. If you lost recovery codes too, you're in the "forgot password" case. |
+| I want to add someone to my instance | `add-user <their-username>` — re-authenticates you first, then prompts them (or you) for a password and shows a QR + recovery codes. They log in at `/send` with their own username. |
+| I want to remove a user | `remove-user <username>` — requires password + TOTP of **that user** to confirm. Cascade-drops their secrets and tokens. Refuses if they're the last user. |
+| I forgot my password but have my TOTP / recovery code | No path for this — `reset-password` requires the current password. Wipe just that user: `sqlite3 ephemera.db "DELETE FROM users WHERE username='<name>';"` then `add-user <name>` (or `init <name>` if they were the only user). Foreign-key cascades drop their secrets + tokens. |
+| I lost my authenticator | Log in with a recovery code (login page → "Use a recovery code"). Once in, `rotate-totp` for a fresh QR and `regen-recovery-codes` to top up codes. |
+| I lost everything (password, TOTP, and recovery codes) | Same as "forgot password" — nuclear option. Wipe that user and re-provision, or `rm -f ephemera.db* && python -m app.admin init <username>` for a completely fresh server. |
 | My TOTP code keeps being rejected | `diagnose` → compare to authenticator. If the "current step" code doesn't match your authenticator, you have a stale entry; delete it and rescan from the last `init` / `rotate-totp` output — or just `rotate-totp` for a fresh secret. |
-| Account locked (423 at login) | 10 failed attempts trigger a 1-hour lockout. No unlock command by design. In dev: `sqlite3 ephemera.db "UPDATE users SET lockout_until=NULL, failed_attempts=0"`. |
+| Account locked (423 at login) | 10 failed attempts trigger a 1-hour lockout. Wait it out, or in dev: `sqlite3 ephemera.db "UPDATE users SET lockout_until=NULL, failed_attempts=0 WHERE username='<name>';"`. |
 | I pasted an API token in a commit / log | `revoke-token <name>` immediately, then `create-token <name>` to mint a replacement. |
-| I need a fresh, empty dev setup | `rm -f ephemera.db* && python -m app.admin init` (wipes secrets too). |
+| I need a fresh, empty dev setup | `rm -f ephemera.db* && python -m app.admin init admin` (wipes all users, secrets, tokens). |
 
 ## Run the test suite
 
@@ -119,8 +134,9 @@ you already have shell access — helpfulness beats ceremony.
 ```
 
 All tests isolate their own SQLite DB and reset in-memory rate limiters between
-runs. Expect 109 passing. Runtime is ~2 minutes because bcrypt cost 12 is
-intentionally slow — tests exercise the real security configuration.
+runs. Expect 128 passing (includes multi-user isolation + migration coverage).
+Runtime is ~4 minutes because bcrypt cost 12 is intentionally slow — tests
+exercise the real security configuration.
 
 ## Things to try
 
