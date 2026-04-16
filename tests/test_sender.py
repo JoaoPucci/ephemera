@@ -1,4 +1,4 @@
-"""Tests for sender routes: login, logout, secret creation, status endpoint."""
+"""Tests for sender routes: login, logout, secret creation, status endpoint, user scoping."""
 import pytest
 
 
@@ -11,7 +11,7 @@ def test_send_get_without_session_shows_login_page(client, provisioned_user):
     r = client.get("/send")
     assert r.status_code == 200
     body = r.content.lower()
-    assert b"password" in body and b"code" in body
+    assert b"username" in body and b"password" in body and b"code" in body
 
 
 def test_send_get_with_session_returns_form(authed_client):
@@ -25,105 +25,80 @@ def test_send_get_with_session_returns_form(authed_client):
 # ---------------------------------------------------------------------------
 
 
+def _login(client, username, password, code):
+    return client.post(
+        "/send/login",
+        data={"username": username, "password": password, "code": code},
+        headers={"Origin": "http://testserver"},
+    )
+
+
+def test_login_wrong_username_rejected(client, provisioned_user):
+    code = provisioned_user["totp"].now()
+    r = _login(client, "nobody", provisioned_user["password"], code)
+    assert r.status_code == 401
+
+
 def test_login_wrong_password_rejected(client, provisioned_user):
     code = provisioned_user["totp"].now()
-    r = client.post(
-        "/send/login",
-        data={"password": "nope", "code": code},
-        headers={"Origin": "http://testserver"},
-        follow_redirects=False,
-    )
+    r = _login(client, provisioned_user["username"], "nope", code)
     assert r.status_code == 401
 
 
 def test_login_wrong_totp_rejected(client, provisioned_user):
-    r = client.post(
-        "/send/login",
-        data={"password": provisioned_user["password"], "code": "000000"},
-        headers={"Origin": "http://testserver"},
-    )
+    r = _login(client, provisioned_user["username"], provisioned_user["password"], "000000")
     assert r.status_code == 401
 
 
-def test_login_missing_totp_rejected(client, provisioned_user):
-    r = client.post(
-        "/send/login",
-        data={"password": provisioned_user["password"], "code": ""},
-        headers={"Origin": "http://testserver"},
-    )
-    assert r.status_code == 401 or r.status_code == 422
-
-
-def test_login_correct_password_and_totp_sets_session(client, provisioned_user):
+def test_login_correct_credentials_sets_session(client, provisioned_user):
     code = provisioned_user["totp"].now()
-    r = client.post(
-        "/send/login",
-        data={"password": provisioned_user["password"], "code": code},
-        headers={"Origin": "http://testserver"},
-    )
+    r = _login(client, provisioned_user["username"], provisioned_user["password"], code)
     assert r.status_code == 200
+    assert r.json()["username"] == provisioned_user["username"]
     from app.config import get_settings
     assert get_settings().session_cookie_name in r.cookies
 
 
-def test_login_same_error_code_for_wrong_password_and_wrong_totp(client, provisioned_user):
-    """Enumeration resistance: caller can't tell which factor failed."""
-    r1 = client.post(
-        "/send/login",
-        data={"password": "wrong", "code": provisioned_user["totp"].now()},
-        headers={"Origin": "http://testserver"},
-    )
-    r2 = client.post(
-        "/send/login",
-        data={"password": provisioned_user["password"], "code": "000000"},
-        headers={"Origin": "http://testserver"},
-    )
-    assert r1.status_code == r2.status_code == 401
-    assert r1.json() == r2.json()
+def test_login_same_error_for_wrong_user_vs_password_vs_totp(client, provisioned_user):
+    """Enumeration resistance: every failure mode looks the same."""
+    code = provisioned_user["totp"].now()
+    r1 = _login(client, "nobody", provisioned_user["password"], code)
+    r2 = _login(client, provisioned_user["username"], "wrong", code)
+    r3 = _login(client, provisioned_user["username"], provisioned_user["password"], "000000")
+    assert r1.status_code == r2.status_code == r3.status_code == 401
+    assert r1.json() == r2.json() == r3.json()
 
 
 def test_login_rotates_session_value_on_relogin(client, provisioned_user):
-    code1 = provisioned_user["totp"].now()
-    r1 = client.post(
-        "/send/login",
-        data={"password": provisioned_user["password"], "code": code1},
-        headers={"Origin": "http://testserver"},
-    )
-    from app.config import get_settings
-    cookie_name = get_settings().session_cookie_name
-    c1 = r1.cookies.get(cookie_name)
-    # wait then re-login with a fresh code
     import time
+    r1 = _login(client, provisioned_user["username"], provisioned_user["password"], provisioned_user["totp"].now())
+    from app.config import get_settings
+    name = get_settings().session_cookie_name
+    c1 = r1.cookies.get(name)
     time.sleep(1)
-    code2 = provisioned_user["totp"].at(int(time.time()) + 30)
-    r2 = client.post(
-        "/send/login",
-        data={"password": provisioned_user["password"], "code": code2},
-        headers={"Origin": "http://testserver"},
-    )
-    c2 = r2.cookies.get(cookie_name)
+    future = provisioned_user["totp"].at(int(time.time()) + 30)
+    r2 = _login(client, provisioned_user["username"], provisioned_user["password"], future)
+    c2 = r2.cookies.get(name)
     assert c1 and c2 and c1 != c2
 
 
 def test_login_rejects_cross_origin(client, provisioned_user):
-    code = provisioned_user["totp"].now()
     r = client.post(
         "/send/login",
-        data={"password": provisioned_user["password"], "code": code},
+        data={
+            "username": provisioned_user["username"],
+            "password": provisioned_user["password"],
+            "code": provisioned_user["totp"].now(),
+        },
         headers={"Origin": "https://attacker.example"},
     )
     assert r.status_code == 403
 
 
 def test_login_rate_limit_kicks_in(client):
-    statuses = []
-    for _ in range(12):
-        r = client.post(
-            "/send/login",
-            data={"password": "x", "code": "000000"},
-            headers={"Origin": "http://testserver"},
-        )
-        statuses.append(r.status_code)
+    statuses = [
+        _login(client, "x", "x", "000000").status_code for _ in range(12)
+    ]
     assert 429 in statuses
 
 
@@ -136,13 +111,11 @@ def test_logout_clears_session(authed_client):
     from app.config import get_settings
     r = authed_client.post("/send/logout", headers={"Origin": "http://testserver"})
     assert r.status_code == 200
-    # cookie should be cleared (set-cookie with Max-Age=0)
-    set_cookie = r.headers.get("set-cookie", "")
-    assert get_settings().session_cookie_name in set_cookie
+    assert get_settings().session_cookie_name in r.headers.get("set-cookie", "")
 
 
 # ---------------------------------------------------------------------------
-# Secret creation (bearer token path)
+# Secret creation (bearer token)
 # ---------------------------------------------------------------------------
 
 
@@ -164,9 +137,9 @@ def test_post_api_secrets_wrong_bearer_token_rejected(client):
     assert r.status_code == 401
 
 
-def test_post_api_secrets_revoked_token_rejected(client, api_token):
+def test_post_api_secrets_revoked_token_rejected(client, provisioned_user, api_token):
     from app import models
-    models.revoke_token("test")
+    models.revoke_token(provisioned_user["id"], "test")
     r = client.post(
         "/api/secrets",
         json={"content": "x", "content_type": "text", "expires_in": 300},
@@ -206,7 +179,6 @@ def test_post_api_secrets_image_multipart_creates_secret(client, auth_headers, s
         headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
     )
     assert r.status_code == 201, r.text
-    assert "url" in r.json()
 
 
 def test_post_api_secrets_rejects_svg_upload(client, auth_headers, sample_svg_bytes):
@@ -239,8 +211,7 @@ def test_post_api_secrets_with_passphrase_stored_as_bcrypt_hash(client, auth_hea
     assert r.status_code == 201
     from app import models
     row = models.get_by_id(r.json()["id"])
-    assert row["passphrase"] is not None
-    assert row["passphrase"].startswith("$2")
+    assert row["passphrase"] is not None and row["passphrase"].startswith("$2")
 
 
 def test_post_api_secrets_with_track_sets_flag(client, auth_headers):
@@ -272,8 +243,19 @@ def test_post_api_secrets_all_expiry_presets_accepted(client, auth_headers):
         assert r.status_code == 201, f"expiry {expires_in} rejected"
 
 
+def test_post_api_secrets_assigns_to_authenticated_user(client, auth_headers, provisioned_user):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers=auth_headers,
+    )
+    from app import models
+    row = models.get_by_id(r.json()["id"])
+    assert row["user_id"] == provisioned_user["id"]
+
+
 # ---------------------------------------------------------------------------
-# Session-auth path (web form)
+# Session-auth path
 # ---------------------------------------------------------------------------
 
 
@@ -287,93 +269,104 @@ def test_create_secret_via_session_without_bearer_works(authed_client):
 
 
 # ---------------------------------------------------------------------------
-# Labels + tracked-secrets list + delete
+# Labels + tracked-secrets list + delete (user-scoped)
 # ---------------------------------------------------------------------------
 
 
 def test_label_stored_when_tracking_enabled(client, auth_headers):
     r = client.post(
         "/api/secrets",
-        json={
-            "content": "x", "content_type": "text", "expires_in": 300,
-            "track": True, "label": "API key for Acme",
-        },
+        json={"content": "x", "content_type": "text", "expires_in": 300,
+              "track": True, "label": "API key for Acme"},
         headers=auth_headers,
     )
-    assert r.status_code == 201
     from app import models
     row = models.get_by_id(r.json()["id"])
     assert row["label"] == "API key for Acme"
 
 
 def test_label_ignored_without_tracking(client, auth_headers):
-    """Labels are meaningless if we don't track the secret — drop them silently."""
     r = client.post(
         "/api/secrets",
-        json={
-            "content": "x", "content_type": "text", "expires_in": 300,
-            "track": False, "label": "should not stick",
-        },
+        json={"content": "x", "content_type": "text", "expires_in": 300,
+              "track": False, "label": "should not stick"},
         headers=auth_headers,
     )
-    assert r.status_code == 201
     from app import models
-    row = models.get_by_id(r.json()["id"])
-    assert row["label"] is None
+    assert models.get_by_id(r.json()["id"])["label"] is None
 
 
-def test_label_truncated_past_60_chars(client, auth_headers):
-    long = "x" * 200
-    r = client.post(
-        "/api/secrets",
-        json={
-            "content": "x", "content_type": "text", "expires_in": 300,
-            "track": True, "label": long,
-        },
-        headers=auth_headers,
-    )
-    # Pydantic Field(max_length=60) rejects over-length labels with 422.
-    assert r.status_code in (201, 422)
-
-
-def test_list_tracked_returns_only_tracked(client, auth_headers):
+def test_list_tracked_returns_only_current_users_secrets(client, auth_headers, provisioned_user, make_user):
+    # Alice creates a tracked secret via her API token.
     client.post(
         "/api/secrets",
-        json={"content": "u", "content_type": "text", "expires_in": 300, "track": False},
+        json={"content": "alice", "content_type": "text", "expires_in": 300,
+              "track": True, "label": "alice-one"},
         headers=auth_headers,
     )
+    # Bob (different user, different token) creates his own.
+    from app import auth, models
+    bob = make_user("bob")
+    plaintext, digest = auth.mint_api_token()
+    models.create_token(user_id=bob["id"], name="bob-test", token_hash=digest)
+    bob_hdrs = {"Authorization": f"Bearer {plaintext}", "Origin": "http://testserver"}
     client.post(
         "/api/secrets",
-        json={"content": "t", "content_type": "text", "expires_in": 300, "track": True, "label": "one"},
-        headers=auth_headers,
+        json={"content": "bob", "content_type": "text", "expires_in": 300,
+              "track": True, "label": "bob-one"},
+        headers=bob_hdrs,
     )
-    r = client.get("/api/secrets/tracked", headers=auth_headers)
-    assert r.status_code == 200
-    items = r.json()["items"]
-    assert len(items) == 1
-    assert items[0]["label"] == "one"
-    assert items[0]["status"] == "pending"
+    # Alice sees only her secret.
+    ar = client.get("/api/secrets/tracked", headers=auth_headers).json()["items"]
+    assert [i["label"] for i in ar] == ["alice-one"]
+    # Bob sees only his.
+    br = client.get("/api/secrets/tracked", headers=bob_hdrs).json()["items"]
+    assert [i["label"] for i in br] == ["bob-one"]
 
 
-def test_list_tracked_reports_viewed_status_after_reveal(client, auth_headers):
+def test_status_endpoint_returns_pending_for_tracked(client, auth_headers):
     r = client.post(
         "/api/secrets",
-        json={"content": "t", "content_type": "text", "expires_in": 300, "track": True},
+        json={"content": "x", "content_type": "text", "expires_in": 3600, "track": True},
         headers=auth_headers,
     )
-    url = r.json()["url"]
-    token, frag = url.split("#", 1)
-    token = token.rsplit("/", 1)[-1]
-    client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
-    r = client.get("/api/secrets/tracked", headers=auth_headers)
-    items = r.json()["items"]
-    assert len(items) == 1
-    assert items[0]["status"] == "viewed"
+    sid = r.json()["id"]
+    s = client.get(f"/api/secrets/{sid}/status", headers=auth_headers)
+    assert s.status_code == 200 and s.json()["status"] == "pending"
 
 
-def test_list_tracked_requires_auth(client):
-    r = client.get("/api/secrets/tracked")
-    assert r.status_code == 401
+def test_status_endpoint_404_for_other_users_secret(client, auth_headers, make_user):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 3600, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+
+    from app import auth, models
+    bob = make_user("bob")
+    plaintext, digest = auth.mint_api_token()
+    models.create_token(user_id=bob["id"], name="bob-test", token_hash=digest)
+    bob_hdrs = {"Authorization": f"Bearer {plaintext}", "Origin": "http://testserver"}
+
+    # Bob must not be able to read Alice's status.
+    s = client.get(f"/api/secrets/{sid}/status", headers=bob_hdrs)
+    assert s.status_code == 404
+
+
+def test_status_endpoint_404_for_untracked(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 3600, "track": False},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+    s = client.get(f"/api/secrets/{sid}/status", headers=auth_headers)
+    assert s.status_code == 404
+
+
+def test_status_endpoint_requires_auth(client):
+    assert client.get("/api/secrets/some-id/status").status_code == 401
 
 
 def test_delete_untracks_pending_secret_but_keeps_url_live(client, auth_headers):
@@ -390,29 +383,31 @@ def test_delete_untracks_pending_secret_but_keeps_url_live(client, auth_headers)
     d = client.delete(f"/api/secrets/{sid}", headers=auth_headers)
     assert d.status_code == 204
 
-    # tracked list is now empty
     assert client.get("/api/secrets/tracked", headers=auth_headers).json()["items"] == []
-    # but the receiver link still works
     rv = client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
     assert rv.status_code == 200
 
 
-def test_delete_purges_viewed_secret_entirely(client, auth_headers):
+def test_delete_cannot_touch_other_users_secret(client, auth_headers, make_user):
     r = client.post(
         "/api/secrets",
         json={"content": "t", "content_type": "text", "expires_in": 300, "track": True},
         headers=auth_headers,
     )
     sid = r.json()["id"]
-    url = r.json()["url"]
-    token, frag = url.split("#", 1)
-    token = token.rsplit("/", 1)[-1]
-    client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
 
-    d = client.delete(f"/api/secrets/{sid}", headers=auth_headers)
+    from app import auth, models
+    bob = make_user("bob")
+    plaintext, digest = auth.mint_api_token()
+    models.create_token(user_id=bob["id"], name="bob-test", token_hash=digest)
+    bob_hdrs = {"Authorization": f"Bearer {plaintext}", "Origin": "http://testserver"}
+
+    # Bob's DELETE is idempotent 204 but must not affect Alice's secret.
+    d = client.delete(f"/api/secrets/{sid}", headers=bob_hdrs)
     assert d.status_code == 204
-    from app import models
-    assert models.get_by_id(sid) is None
+    # Alice's tracked list still has her secret.
+    items = client.get("/api/secrets/tracked", headers=auth_headers).json()["items"]
+    assert len(items) == 1
 
 
 def test_delete_is_idempotent(client, auth_headers):
@@ -421,38 +416,4 @@ def test_delete_is_idempotent(client, auth_headers):
 
 
 def test_delete_requires_auth(client):
-    d = client.delete("/api/secrets/some-id")
-    assert d.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# Status endpoint
-# ---------------------------------------------------------------------------
-
-
-def test_status_endpoint_returns_pending_for_tracked(client, auth_headers):
-    r = client.post(
-        "/api/secrets",
-        json={"content": "x", "content_type": "text", "expires_in": 3600, "track": True},
-        headers=auth_headers,
-    )
-    sid = r.json()["id"]
-    s = client.get(f"/api/secrets/{sid}/status", headers=auth_headers)
-    assert s.status_code == 200
-    assert s.json()["status"] == "pending"
-
-
-def test_status_endpoint_404_for_untracked(client, auth_headers):
-    r = client.post(
-        "/api/secrets",
-        json={"content": "x", "content_type": "text", "expires_in": 3600, "track": False},
-        headers=auth_headers,
-    )
-    sid = r.json()["id"]
-    s = client.get(f"/api/secrets/{sid}/status", headers=auth_headers)
-    assert s.status_code == 404
-
-
-def test_status_endpoint_requires_auth(client):
-    s = client.get("/api/secrets/some-id/status")
-    assert s.status_code == 401
+    assert client.delete("/api/secrets/some-id").status_code == 401

@@ -25,6 +25,8 @@ encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
 | 12| Tracked-secrets storage   | Server-authoritative list via `/api/secrets/tracked`; localStorage only caches `{id: url}` because the URL fragment never leaves the creating browser |
 | 13| Tracked-list refresh      | Client polls `/api/secrets/tracked` every 5 s while any item is pending; diff-based re-render skips DOM churn; polling stops when nothing is pending |
 | 14| Theme                     | Light (default) + dark via CSS custom properties on `[data-theme]`; user choice persisted in localStorage; `prefers-color-scheme` on first visit |
+| 15| Multi-user data model     | `users` has real PK + unique `username`; every `secrets` and `api_tokens` row carries `user_id` FK with `ON DELETE CASCADE`. All authenticated reads/writes scope by the caller's user_id. Lets A (single-user) -> B (CLI-provisioned small group) -> C (open signup) be incremental, not a rewrite. |
+| 16| Owner vs. user boundary   | The "owner" is whoever has shell access (CLI). Public signup (future) only ever creates regular users. Prevents the "first-signup-becomes-admin" race seen on Gitea et al. |
 
 ---
 
@@ -322,26 +324,50 @@ CREATE INDEX idx_secrets_token ON secrets(token);
 CREATE INDEX idx_secrets_expires_at ON secrets(expires_at);
 
 CREATE TABLE users (
-    id                    INTEGER PRIMARY KEY,   -- always 1 (single-user)
-    password_hash         TEXT NOT NULL,          -- bcrypt, cost 12
-    totp_secret           TEXT NOT NULL,          -- base32, 32 chars
-    totp_last_step        INTEGER DEFAULT 0,      -- anti-replay: reject step <= this
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    username              TEXT NOT NULL,           -- unique via idx_users_username
+    email                 TEXT,                    -- unique-if-set; nullable until email flows land
+    password_hash         TEXT NOT NULL,           -- bcrypt, cost 12
+    totp_secret           TEXT NOT NULL,           -- base32, 32 chars
+    totp_last_step        INTEGER DEFAULT 0,       -- anti-replay: reject step <= this
     recovery_code_hashes  TEXT DEFAULT '[]',       -- JSON: [{"hash": bcrypt, "used_at": ISO8601|null}]
     failed_attempts       INTEGER DEFAULT 0,
     lockout_until         TEXT,                    -- ISO8601 or NULL
     created_at, updated_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX idx_users_username ON users(username);
+CREATE UNIQUE INDEX idx_users_email    ON users(email) WHERE email IS NOT NULL;
+
+-- secrets.user_id ties every secret to its creator. ON DELETE CASCADE drops
+-- a user's secrets when the user is removed.
+ALTER TABLE secrets ADD COLUMN user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE;
+CREATE INDEX idx_secrets_user_id ON secrets(user_id);
 
 CREATE TABLE api_tokens (
-    id            INTEGER PRIMARY KEY,
-    name          TEXT UNIQUE NOT NULL,            -- human label: "cli-laptop", "ci-runner"
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name          TEXT NOT NULL,                   -- human label: "cli-laptop", "ci-runner"
     token_hash    TEXT NOT NULL,                   -- SHA-256 hex of plaintext
     created_at    TEXT NOT NULL,
     last_used_at  TEXT,
     revoked_at    TEXT                             -- non-NULL once revoked
 );
 CREATE INDEX idx_api_tokens_hash ON api_tokens(token_hash);
+CREATE INDEX idx_api_tokens_user_id ON api_tokens(user_id);
+CREATE UNIQUE INDEX idx_api_tokens_user_name ON api_tokens(user_id, name);  -- token names unique per-user, not globally
 ```
+
+### Migration from the single-user era
+
+`init_db()` runs a small ALTER-TABLE-ADD-COLUMN migration on existing DBs:
+- `users.username` (backfilled to `'admin'`), `users.email` (null)
+- `secrets.user_id` (backfilled to 1)
+- `api_tokens.user_id` (backfilled to 1)
+
+Indices are created after migration so they apply to the new columns. The
+legacy single-user DB continues to work, with the former lone user renamed
+`admin` and all their data tagged `user_id=1`. Covered by
+`test_legacy_db_migrates_to_multiuser_schema`.
 
 On reveal:
 - If `track = 0`: entire row is deleted.
@@ -482,10 +508,12 @@ Renders the sender form if a valid session exists, otherwise the login page.
 Both are static HTML files.
 
 #### `POST /send/login`
-Verifies password + TOTP (or recovery code), rotates and sets the session cookie.
-Form body: `password`, `code`. Rate-limited (10/min per IP) with account
-lockout after 10 failures in 15 minutes. Returns 401 with an identical body for
-any failure reason except lockout (423 with the unlock timestamp).
+Verifies username + password + TOTP (or recovery code), rotates and sets the
+session cookie. Form body: `username`, `password`, `code`. Rate-limited
+(10/min per IP) with account lockout after 10 failures in 15 minutes (per
+user). Returns 401 with an identical body for any failure reason (wrong
+username, wrong password, wrong code) except lockout (423 with the unlock
+timestamp).
 
 #### `POST /send/logout`
 Clears the session cookie. Requires same-origin.

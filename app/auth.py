@@ -5,12 +5,13 @@ Design notes:
 - TOTP: RFC 6238 via pyotp. Accept codes within +/-1 step (30s skew either side)
   with an anti-replay check (stored last_step; new step must be strictly greater).
 - Backup codes: 10 single-use codes, each bcrypt-hashed, marked consumed on use.
-- Lockout: after MAX_FAILURES failures within LOCKOUT_WINDOW, lock the account
-  for LOCKOUT_DURATION. Failed_attempts counter is reset on any success.
-- Identical error paths for wrong password vs wrong code vs locked, to prevent
-  attackers from enumerating which factor they got wrong.
-- Session cookies are signed timestamped tokens (itsdangerous). On every
-  successful login we rotate the session value to defeat session fixation.
+- Lockout: per-user. After MAX_FAILURES failures within LOCKOUT_WINDOW, lock the
+  account for LOCKOUT_DURATION. Counter resets on any success.
+- Identical error paths for wrong-user vs wrong-password vs wrong-code vs locked,
+  to prevent attackers from enumerating which factor / account they got wrong.
+- Sessions: signed cookies (itsdangerous) carrying the user_id. On every
+  successful login we re-sign with a fresh timestamp -> cookie value rotates,
+  defeating session fixation.
 """
 import hmac
 import json
@@ -42,7 +43,7 @@ RECOVERY_CODE_LENGTH = 10         # visible chars (base32), grouped XXXXX-XXXXX
 
 
 # ----------------------------------------------------------------------------
-# Generic credential errors -- never leak which factor was wrong.
+# Generic credential errors -- never leak which factor / user was wrong.
 # ----------------------------------------------------------------------------
 
 
@@ -94,11 +95,6 @@ def _current_step() -> int:
 
 
 def verify_totp(secret: str, code: str, last_step: int) -> Optional[int]:
-    """Return the step used if valid and not replayed, else None.
-
-    Checks step-1..step+1 for clock skew; requires matched_step > last_step
-    to prevent replay within the tolerance window.
-    """
     if not code.isdigit() or len(code) != TOTP_DIGITS:
         return None
     totp = pyotp.TOTP(secret, digits=TOTP_DIGITS, interval=TOTP_INTERVAL)
@@ -108,7 +104,6 @@ def verify_totp(secret: str, code: str, last_step: int) -> Optional[int]:
         if step <= last_step:
             continue
         candidate = totp.at(step * TOTP_INTERVAL)
-        # constant-time comparison (both values are 6-digit strings)
         if hmac.compare_digest(candidate, code):
             return step
     return None
@@ -119,7 +114,7 @@ def verify_totp(secret: str, code: str, last_step: int) -> Optional[int]:
 # ----------------------------------------------------------------------------
 
 
-_RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I ambiguity
+_RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
 
 
 def _random_recovery_code() -> str:
@@ -128,10 +123,6 @@ def _random_recovery_code() -> str:
 
 
 def generate_recovery_codes() -> tuple[list[str], str]:
-    """Return (plaintext_codes, json_blob_of_hashes).
-
-    Plaintext is shown to the user ONCE; only hashes are stored.
-    """
     codes = [_random_recovery_code() for _ in range(RECOVERY_CODE_COUNT)]
     hashes = [
         {"hash": bcrypt.hashpw(c.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode(), "used_at": None}
@@ -148,7 +139,6 @@ def _normalize_backup_code(code: str) -> str:
 
 
 def consume_backup_code(code: str, stored_json: str) -> Optional[str]:
-    """If `code` matches an unused hash, return the updated JSON with it marked used; else None."""
     code = _normalize_backup_code(code)
     try:
         entries = json.loads(stored_json)
@@ -168,7 +158,7 @@ def consume_backup_code(code: str, stored_json: str) -> Optional[str]:
 
 
 # ----------------------------------------------------------------------------
-# Lockout / failure tracking
+# Lockout / failure tracking (per-user)
 # ----------------------------------------------------------------------------
 
 
@@ -194,14 +184,13 @@ def record_failure(user: dict) -> None:
         until = _utcnow() + timedelta(seconds=LOCKOUT_DURATION_SECONDS)
         updates["lockout_until"] = until.strftime("%Y-%m-%dT%H:%M:%SZ")
         updates["failed_attempts"] = 0
-    models.update_user(**updates)
+    models.update_user(user["id"], **updates)
 
 
-def record_success(updates: dict) -> None:
-    """Apply success-path updates plus reset of attempts/lockout."""
+def record_success(user_id: int, updates: dict) -> None:
     updates["failed_attempts"] = 0
     updates["lockout_until"] = None
-    models.update_user(**updates)
+    models.update_user(user_id, **updates)
 
 
 # ----------------------------------------------------------------------------
@@ -209,23 +198,24 @@ def record_success(updates: dict) -> None:
 # ----------------------------------------------------------------------------
 
 
-def authenticate(password: str, code: str) -> None:
-    """Verify password + (TOTP code OR backup code).
+def authenticate(username: str, password: str, code: str) -> dict:
+    """Verify username + password + (TOTP code OR backup code).
 
-    Raises AuthError on any failure (identical surface regardless of reason,
-    except LockoutError which the caller may surface as 429/423 with a hint).
-    On success, updates the user row (last_step or used backup, failed=0).
+    Returns the authenticated user dict on success. Raises AuthError on any
+    failure (same error surface for unknown user, wrong password, wrong code),
+    or LockoutError when the account is locked. On success, mutates the user
+    row to record TOTP step / consumed backup code and reset failure counters.
     """
-    user = models.get_user()
+    user = models.get_user_by_username(username.strip()) if username else None
     if user is None:
-        # Do constant-ish-time work so an unprovisioned server looks the same.
+        # Constant-ish time: still do a bcrypt+totp-cost worth of work so
+        # timing doesn't leak whether the username exists.
         bcrypt.checkpw(b"dummy", bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS)))
-        raise AuthError("no user")
+        raise AuthError("invalid credentials")
     check_not_locked(user)
 
     pw_ok = verify_password(password, user["password_hash"])
 
-    # Try TOTP first (6 digits), then backup code.
     totp_step = None
     consumed_backup_json: Optional[str] = None
     stripped = code.strip()
@@ -243,7 +233,8 @@ def authenticate(password: str, code: str) -> None:
         updates["totp_last_step"] = totp_step
     if consumed_backup_json is not None:
         updates["recovery_code_hashes"] = consumed_backup_json
-    record_success(updates)
+    record_success(user["id"], updates)
+    return user
 
 
 # ----------------------------------------------------------------------------
@@ -265,7 +256,10 @@ def mint_api_token() -> tuple[str, str]:
 
 
 def lookup_api_token(plaintext: str) -> Optional[dict]:
-    """Return the token row if valid and not revoked, else None. Touches last_used_at."""
+    """Return the token row (with user_id) if valid; None otherwise.
+
+    On hit, touches last_used_at.
+    """
     import hashlib
 
     if not plaintext or not plaintext.startswith(TOKEN_PREFIX):

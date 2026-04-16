@@ -158,13 +158,14 @@ def test_reveal_returns_image_as_base64(client, auth_headers, sample_png_bytes):
     assert base64.b64decode(body["content"]) == sample_png_bytes
 
 
-def test_reveal_404_for_expired_secret(client, auth_headers):
+def test_reveal_404_for_expired_secret(client, auth_headers, provisioned_user):
     from app import models, crypto
     # Create directly with negative expiry.
     key = crypto.generate_key()
     server_half, client_half = crypto.split_key(key)
     ct = crypto.encrypt(b"x", key)
     r = models.create_secret(
+        user_id=provisioned_user["id"],
         content_type="text", mime_type=None, ciphertext=ct,
         server_key=server_half, passphrase_hash=None, track=False, expires_in=-60,
     )

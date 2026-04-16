@@ -1,25 +1,26 @@
-"""CLI for single-user provisioning and token management.
+"""CLI for user provisioning and token management.
 
 Usage:
     python -m app.admin <command> [args]
 
 Commands:
-    init                     Create the user (password + TOTP + recovery codes).
-    reset-password           Change password (requires TOTP).
-    rotate-totp              Generate a new TOTP secret (requires password).
-    regen-recovery-codes     Print 10 fresh recovery codes (requires password+TOTP).
-    list-tokens              Show all API tokens.
-    create-token <name>      Mint a new API token (requires password+TOTP).
-    revoke-token <name>      Revoke a token by name.
-    diagnose                 Print server time + the 3 currently-valid TOTP codes
-                             (for debugging "my code keeps failing").
-    verify                   Prompt for password + code and say exactly which one
-                             (if any) is wrong. UI hides this to prevent enumeration;
-                             safe to expose at the CLI since you already have shell.
+    init <username>                  First-time setup: create the initial user.
+    add-user <username>              Provision another user (requires re-auth).
+    list-users                       Show all users.
+    remove-user <username>           Delete a user (and all their data).
+    reset-password [--user <name>]   Change password for a user (default: yourself).
+    rotate-totp [--user <name>]      Generate a new TOTP secret.
+    regen-recovery-codes [--user <name>]  Print 10 fresh recovery codes.
+    list-tokens [--user <name>]      Show API tokens for a user.
+    create-token <name> [--user <u>] Mint a new API token.
+    revoke-token <name> [--user <u>] Revoke a token by name.
+    diagnose [--user <name>]         Print server time + currently-valid TOTP codes.
+    verify [--user <name>]           Check whether a password+code pair would authenticate.
 
-All "sensitive" commands require re-authentication via the same password+TOTP
-path the web login uses, so a stolen terminal session alone can't rotate
-credentials.
+User-selection rules:
+- Commands without a positional user and no --user flag default to the sole
+  user if there is exactly one (single-user convenience), otherwise they ask.
+- Sensitive commands re-authenticate against the target user before mutating.
 """
 import getpass
 import io
@@ -27,6 +28,7 @@ import json
 import sys
 import time
 from datetime import datetime, timezone
+from typing import Optional
 
 import pyotp
 import qrcode
@@ -64,26 +66,59 @@ def _prompt_new_password() -> str:
         return p1
 
 
-def _reauth() -> dict:
-    user = models.get_user()
-    if user is None:
-        print("no user yet — run `init` first.", file=sys.stderr)
+def _parse_user_flag(args: list[str]) -> tuple[Optional[str], list[str]]:
+    """Extract '--user <name>' (or '-u <name>') from args, return (name, remaining)."""
+    out = []
+    i = 0
+    username: Optional[str] = None
+    while i < len(args):
+        a = args[i]
+        if a in ("--user", "-u") and i + 1 < len(args):
+            username = args[i + 1]
+            i += 2
+            continue
+        out.append(a)
+        i += 1
+    return username, out
+
+
+def _resolve_user(username: Optional[str]) -> dict:
+    """Pick the target user: explicit flag, or the only user, or prompt."""
+    if username:
+        user = models.get_user_by_username(username)
+        if user is None:
+            print(f"no user named '{username}'.", file=sys.stderr)
+            sys.exit(1)
+        return user
+    users = models.list_users()
+    if len(users) == 0:
+        print("no users yet — run `init <username>` first.", file=sys.stderr)
         sys.exit(1)
+    if len(users) == 1:
+        return models.get_user_by_id(users[0]["id"])
+    # Multiple users, no flag. Ask.
+    print("Multiple users exist; specify --user <name>. Known users:", file=sys.stderr)
+    for u in users:
+        print(f"  {u['username']}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _reauth(user: dict) -> dict:
+    """Re-authenticate as `user` before any sensitive action."""
     password = _prompt_password()
     code = input("6-digit code (or recovery code): ").strip()
     try:
-        auth.authenticate(password, code)
+        return auth.authenticate(user["username"], password, code)
     except auth.LockoutError as e:
         print(f"account locked until {e.until_iso}.", file=sys.stderr)
         sys.exit(2)
     except auth.AuthError:
         print("invalid credentials.", file=sys.stderr)
         sys.exit(2)
-    return models.get_user()
 
 
-def _print_totp_setup(secret: str) -> None:
-    uri = auth.provisioning_uri(secret)
+def _print_totp_setup(secret: str, username: str) -> None:
+    uri = auth.provisioning_uri(secret, account_name=username)
     print()
     print("Scan this QR in your authenticator app (1Password, Google Authenticator, Aegis, ...):")
     print()
@@ -104,55 +139,111 @@ def _print_recovery_codes(codes: list[str]) -> None:
     print()
 
 
+def _provision_user(username: str) -> tuple[int, str, list[str]]:
+    """Shared bootstrap for `init` and `add-user`: returns (user_id, totp_secret, recovery_codes)."""
+    if models.get_user_by_username(username):
+        print(f"username '{username}' already exists.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Creating user '{username}'.")
+    password = _prompt_new_password()
+    secret = auth.generate_totp_secret()
+    codes, codes_json = auth.generate_recovery_codes()
+    uid = models.create_user(
+        username=username,
+        password_hash=auth.hash_password(password),
+        totp_secret=secret,
+        recovery_code_hashes=codes_json,
+    )
+    return uid, secret, codes
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
 
-def cmd_init() -> None:
+def cmd_init(username: str) -> None:
     models.init_db()
-    if models.get_user() is not None:
-        print("user already exists — refusing to overwrite.", file=sys.stderr)
-        print("use `reset-password` or `rotate-totp` to change credentials.", file=sys.stderr)
+    if models.user_count() > 0:
+        print("at least one user already exists — refusing to run init.", file=sys.stderr)
+        print("use `add-user` for additional users, or rotation commands to change credentials.", file=sys.stderr)
         sys.exit(1)
-    print("Creating the ephemera sender account.")
-    password = _prompt_new_password()
-    secret = auth.generate_totp_secret()
-    codes, codes_json = auth.generate_recovery_codes()
-    models.create_user(
-        password_hash=auth.hash_password(password),
-        totp_secret=secret,
-        recovery_code_hashes=codes_json,
-    )
-    _print_totp_setup(secret)
+    _, secret, codes = _provision_user(username)
+    _print_totp_setup(secret, username)
     _print_recovery_codes(codes)
     print("Bootstrap complete. You can now sign in at /send.")
 
 
-def cmd_reset_password() -> None:
-    _reauth()
+def cmd_add_user(username: str) -> None:
+    # Require re-auth as an existing user to prevent anyone with shell-less
+    # elevated SQLite access from silently minting friends' accounts.
+    existing = models.list_users()
+    if not existing:
+        print("no users yet — run `init <username>` first.", file=sys.stderr)
+        sys.exit(1)
+    # Re-auth as whichever user the caller prefers (or the sole one).
+    actor = _resolve_user(None)
+    print(f"Re-authenticate as '{actor['username']}' to add a new user.")
+    _reauth(actor)
+    _, secret, codes = _provision_user(username)
+    _print_totp_setup(secret, username)
+    _print_recovery_codes(codes)
+    print(f"User '{username}' created.")
+
+
+def cmd_list_users() -> None:
+    users = models.list_users()
+    if not users:
+        print("(no users)")
+        return
+    for u in users:
+        print(f"  {u['id']:>3}  {u['username']:<20}  created {u['created_at']}")
+
+
+def cmd_remove_user(username: str) -> None:
+    target = models.get_user_by_username(username)
+    if target is None:
+        print(f"no user named '{username}'.", file=sys.stderr)
+        sys.exit(1)
+    if models.user_count() == 1:
+        print("refusing to remove the only remaining user.", file=sys.stderr)
+        sys.exit(1)
+    # Require re-auth as the target (so anyone removing an account has to have
+    # its credentials, same bar as a password rotation).
+    print(f"Re-authenticate as '{username}' to confirm removal.")
+    _reauth(target)
+    models.delete_user(target["id"])
+    print(f"User '{username}' and all their data deleted.")
+
+
+def cmd_reset_password(username: Optional[str]) -> None:
+    user = _resolve_user(username)
+    _reauth(user)
     new_pw = _prompt_new_password()
-    models.update_user(password_hash=auth.hash_password(new_pw))
-    print("password updated.")
+    models.update_user(user["id"], password_hash=auth.hash_password(new_pw))
+    print(f"password updated for '{user['username']}'.")
 
 
-def cmd_rotate_totp() -> None:
-    _reauth()
+def cmd_rotate_totp(username: Optional[str]) -> None:
+    user = _resolve_user(username)
+    _reauth(user)
     secret = auth.generate_totp_secret()
-    models.update_user(totp_secret=secret, totp_last_step=0)
-    _print_totp_setup(secret)
+    models.update_user(user["id"], totp_secret=secret, totp_last_step=0)
+    _print_totp_setup(secret, user["username"])
     print("new TOTP active. The old authenticator entry will stop working after you re-scan.")
 
 
-def cmd_regen_recovery_codes() -> None:
-    _reauth()
+def cmd_regen_recovery_codes(username: Optional[str]) -> None:
+    user = _resolve_user(username)
+    _reauth(user)
     codes, codes_json = auth.generate_recovery_codes()
-    models.update_user(recovery_code_hashes=codes_json)
+    models.update_user(user["id"], recovery_code_hashes=codes_json)
     _print_recovery_codes(codes)
 
 
-def cmd_list_tokens() -> None:
-    rows = models.list_tokens()
+def cmd_list_tokens(username: Optional[str]) -> None:
+    user = _resolve_user(username)
+    rows = models.list_tokens(user["id"])
     if not rows:
         print("(no tokens)")
         return
@@ -162,46 +253,37 @@ def cmd_list_tokens() -> None:
         print(f"  [{state}] {r['name']}  created {r['created_at']}  last used {last}")
 
 
-def cmd_create_token(name: str) -> None:
-    _reauth()
+def cmd_create_token(name: str, username: Optional[str]) -> None:
+    user = _resolve_user(username)
+    _reauth(user)
     plaintext, digest = auth.mint_api_token()
     try:
-        models.create_token(name=name, token_hash=digest)
+        models.create_token(user_id=user["id"], name=name, token_hash=digest)
     except Exception as e:
         if "UNIQUE" in str(e):
-            print(f"token name '{name}' already exists.", file=sys.stderr)
+            print(f"token name '{name}' already exists for user '{user['username']}'.", file=sys.stderr)
             sys.exit(1)
         raise
     print()
-    print(f"API token '{name}' created. Save this now — it will NOT be shown again:")
+    print(f"API token '{name}' created for user '{user['username']}'. Save this now — it will NOT be shown again:")
     print()
     print(f"  {plaintext}")
     print()
     print("Use as: Authorization: Bearer <token>")
 
 
-def cmd_revoke_token(name: str) -> None:
-    _reauth()
-    if models.revoke_token(name):
+def cmd_revoke_token(name: str, username: Optional[str]) -> None:
+    user = _resolve_user(username)
+    _reauth(user)
+    if models.revoke_token(user["id"], name):
         print(f"token '{name}' revoked.")
     else:
-        print(f"no active token named '{name}'.", file=sys.stderr)
+        print(f"no active token named '{name}' for user '{user['username']}'.", file=sys.stderr)
         sys.exit(1)
 
 
-def cmd_diagnose() -> None:
-    """Print the codes a correctly-configured authenticator SHOULD show right now.
-
-    Compare with what your authenticator displays:
-      - exact match on "now"    → secret OK, clock OK, code should work
-      - match on prev/next      → clock drift up to 30s (still accepted)
-      - no match                → authenticator has a stale/different secret
-    """
-    user = models.get_user()
-    if user is None:
-        print("no user provisioned yet. run `init` first.", file=sys.stderr)
-        sys.exit(1)
-
+def cmd_diagnose(username: Optional[str]) -> None:
+    user = _resolve_user(username)
     secret = user["totp_secret"]
     totp = pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL)
 
@@ -212,6 +294,7 @@ def cmd_diagnose() -> None:
     seconds_left = auth.TOTP_INTERVAL - seconds_into
 
     print()
+    print(f"User:                '{user['username']}' (id={user['id']})")
     print(f"Server time (UTC):   {datetime.now(timezone.utc).isoformat()}")
     print(f"Server unix ts:      {now_ts}")
     print(f"Current TOTP step:   {step}  ({seconds_into}s in, {seconds_left}s until next rotation)")
@@ -224,12 +307,37 @@ def cmd_diagnose() -> None:
     print()
     print(f"Stored TOTP secret:  {secret}")
     print()
-    print(f"Password length (bytes): {len(user['password_hash'])}  (stored bcrypt hash length)")
-    print()
     print("If your authenticator shows a different code for the 'current step':")
     print("  -> your authenticator has an OLD entry from a previous `init` / `rotate-totp`.")
     print("     Delete that entry in the authenticator and re-scan the QR from your last")
     print("     `init` or `rotate-totp`. Or run `rotate-totp` to generate a fresh secret + QR.")
+
+
+def cmd_verify(username: Optional[str]) -> None:
+    user = _resolve_user(username)
+    password = getpass.getpass("Password: ")
+    code = input("6-digit code: ").strip()
+
+    pw_ok = auth.verify_password(password, user["password_hash"])
+    totp_step = None
+    if code.isdigit() and len(code) == auth.TOTP_DIGITS:
+        totp_step = auth.verify_totp(user["totp_secret"], code, last_step=user["totp_last_step"])
+
+    print()
+    print(f"user:      '{user['username']}' (id={user['id']})")
+    print(f"password:  {'OK' if pw_ok else 'MISMATCH'}")
+    print(f"totp:      {'OK (step ' + str(totp_step) + ')' if totp_step is not None else 'MISMATCH'}")
+    print(f"stored totp_last_step: {user['totp_last_step']}")
+    print()
+
+    if not pw_ok and totp_step is None:
+        print("Both password and TOTP are wrong.")
+    elif not pw_ok:
+        print("Password is wrong; TOTP is correct.")
+    elif totp_step is None:
+        print("Password is right; TOTP is wrong (clock drift or stale authenticator entry).")
+    else:
+        print("Both correct. Login via the web UI should succeed with these values.")
 
 
 # ---------------------------------------------------------------------------
@@ -237,55 +345,20 @@ def cmd_diagnose() -> None:
 # ---------------------------------------------------------------------------
 
 
-def cmd_verify() -> None:
-    """Say exactly which factor is wrong. For self-debugging only."""
-    user = models.get_user()
-    if user is None:
-        print("no user provisioned yet. run `init` first.", file=sys.stderr)
-        sys.exit(1)
-
-    password = getpass.getpass("Password: ")
-    code = input("6-digit code: ").strip()
-
-    pw_ok = auth.verify_password(password, user["password_hash"])
-    # Evaluate TOTP without mutating totp_last_step, so we can re-test freely.
-    totp_step = None
-    if code.isdigit() and len(code) == auth.TOTP_DIGITS:
-        totp_step = auth.verify_totp(user["totp_secret"], code, last_step=user["totp_last_step"])
-
-    print()
-    print(f"password:  {'OK' if pw_ok else 'MISMATCH'}")
-    print(f"totp:      {'OK (step ' + str(totp_step) + ')' if totp_step is not None else 'MISMATCH'}")
-    print(f"stored totp_last_step: {user['totp_last_step']}")
-    print()
-
-    if not pw_ok and totp_step is None:
-        print("Both password and TOTP are wrong. If you've forgotten the password,")
-        print("wipe the DB and run `init` again (no real secrets exist yet).")
-    elif not pw_ok:
-        print("Password is wrong; TOTP is correct.")
-        print("If you've forgotten the password, wipe the DB and run `init` again.")
-    elif totp_step is None:
-        print("Password is right; TOTP is wrong.")
-        print("Most likely: clock drift or a stale authenticator entry.")
-        print("Run `rotate-totp` to regenerate the secret and rescan the QR.")
-    else:
-        print("Both correct. Login via the web UI should succeed with these values.")
-        print("If the UI still rejects them, check: (a) you are sending to the same")
-        print("server you diagnosed against, and (b) the DB path (EPHEMERA_DB_PATH)")
-        print("used by the server matches the one this CLI is using.")
-
-
 COMMANDS = {
-    "init": (cmd_init, 0),
-    "reset-password": (cmd_reset_password, 0),
-    "rotate-totp": (cmd_rotate_totp, 0),
-    "regen-recovery-codes": (cmd_regen_recovery_codes, 0),
-    "list-tokens": (cmd_list_tokens, 0),
-    "create-token": (cmd_create_token, 1),
-    "revoke-token": (cmd_revoke_token, 1),
-    "diagnose": (cmd_diagnose, 0),
-    "verify": (cmd_verify, 0),
+    # name: (fn, positional_arity, takes_user_flag)
+    "init":                 (cmd_init,                 1, False),
+    "add-user":             (cmd_add_user,             1, False),
+    "list-users":           (cmd_list_users,           0, False),
+    "remove-user":          (cmd_remove_user,          1, False),
+    "reset-password":       (cmd_reset_password,       0, True),
+    "rotate-totp":          (cmd_rotate_totp,          0, True),
+    "regen-recovery-codes": (cmd_regen_recovery_codes, 0, True),
+    "list-tokens":          (cmd_list_tokens,          0, True),
+    "create-token":         (cmd_create_token,         1, True),
+    "revoke-token":         (cmd_revoke_token,         1, True),
+    "diagnose":             (cmd_diagnose,             0, True),
+    "verify":               (cmd_verify,               0, True),
 }
 
 
@@ -294,13 +367,17 @@ def main(argv: list[str] | None = None) -> None:
     if not argv or argv[0] not in COMMANDS:
         print(__doc__)
         sys.exit(0 if not argv else 2)
-    fn, arity = COMMANDS[argv[0]]
-    args = argv[1:]
-    if len(args) != arity:
+    fn, arity, takes_user = COMMANDS[argv[0]]
+    rest = argv[1:]
+    user_flag, rest = (_parse_user_flag(rest) if takes_user else (None, rest))
+    if len(rest) != arity:
         print(f"`{argv[0]}` expects {arity} positional arg(s).", file=sys.stderr)
         sys.exit(2)
     models.init_db()
-    fn(*args)
+    if takes_user:
+        fn(*rest, user_flag)
+    else:
+        fn(*rest)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+TEST_USERNAME = "alice"
 TEST_PASSWORD = "test-password-xyz"
 
 
@@ -31,36 +32,50 @@ def tmp_db_path(tmp_path, monkeypatch):
     config.get_settings.cache_clear()
 
 
-@pytest.fixture
-def provisioned_user(tmp_db_path):
-    """Create the single admin user with a known password and TOTP secret.
-
-    Returns a dict with password, totp_secret, and a pyotp.TOTP helper.
-    """
+def _provision(username: str, password: str = TEST_PASSWORD) -> dict:
+    """Create a user directly via the data layer. Returns a dict with the
+    created user's id, password, totp_secret, and a pyotp.TOTP helper."""
     import pyotp
     from app import auth, models
 
     secret = pyotp.random_base32(length=32)
     _codes, codes_json = auth.generate_recovery_codes()
-    models.create_user(
-        password_hash=auth.hash_password(TEST_PASSWORD),
+    uid = models.create_user(
+        username=username,
+        password_hash=auth.hash_password(password),
         totp_secret=secret,
         recovery_code_hashes=codes_json,
     )
     return {
-        "password": TEST_PASSWORD,
+        "id": uid,
+        "username": username,
+        "password": password,
         "totp_secret": secret,
         "totp": pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL),
     }
 
 
 @pytest.fixture
+def provisioned_user(tmp_db_path):
+    """Default single user for tests that don't need multi-user coverage."""
+    return _provision(TEST_USERNAME)
+
+
+@pytest.fixture
+def make_user(tmp_db_path):
+    """Factory for creating additional users on demand (multi-user tests)."""
+    def _make(username: str, password: str = TEST_PASSWORD) -> dict:
+        return _provision(username, password)
+    return _make
+
+
+@pytest.fixture
 def api_token(provisioned_user):
-    """Mint a test API token and return its plaintext value."""
+    """Mint a test API token bound to the default provisioned user."""
     from app import auth, models
 
     plaintext, digest = auth.mint_api_token()
-    models.create_token(name="test", token_hash=digest)
+    models.create_token(user_id=provisioned_user["id"], name="test", token_hash=digest)
     return plaintext
 
 
@@ -82,11 +97,15 @@ def client(tmp_db_path):
 
 @pytest.fixture
 def authed_client(client, provisioned_user):
-    """A TestClient that has already logged in via password+TOTP."""
+    """A TestClient already logged in as the default provisioned user."""
     code = provisioned_user["totp"].now()
     r = client.post(
         "/send/login",
-        data={"password": provisioned_user["password"], "code": code},
+        data={
+            "username": provisioned_user["username"],
+            "password": provisioned_user["password"],
+            "code": code,
+        },
         headers={"Origin": "http://testserver"},
     )
     assert r.status_code == 200, r.text

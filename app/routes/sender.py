@@ -9,9 +9,6 @@ from fastapi import (
     HTTPException,
     Request,
     Response,
-    UploadFile,
-    File,
-    status,
 )
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -88,15 +85,14 @@ def send_page(request: Request):
 )
 def send_login(
     request: Request,
+    username: str = Form(...),
     password: str = Form(...),
     code: str = Form(...),
     settings: Settings = Depends(get_settings),
 ):
     try:
-        auth_mod.authenticate(password, code)
+        user = auth_mod.authenticate(username, password, code)
     except auth_mod.LockoutError as e:
-        # Give the user a hint about how long. Still non-enumerating because
-        # lockouts only trigger after many failures.
         raise HTTPException(
             status_code=423,
             detail={"error": "locked", "until": e.until_iso},
@@ -104,9 +100,9 @@ def send_login(
     except auth_mod.AuthError:
         raise HTTPException(status_code=401, detail="invalid credentials")
 
-    # Session rotation: new random value on every successful login.
-    cookie_value = make_session_cookie()
-    response = JSONResponse({"ok": True})
+    # Session rotation: re-signing with a fresh timestamp gives a new cookie value.
+    cookie_value = make_session_cookie(user["id"])
+    response = JSONResponse({"ok": True, "username": user["username"]})
     response.set_cookie(
         key=settings.session_cookie_name,
         value=cookie_value,
@@ -126,7 +122,7 @@ def send_logout(settings: Settings = Depends(get_settings)):
 
 
 # ---------------------------------------------------------------------------
-# Secret creation + status
+# Secret creation + status (all scoped to the authenticated user)
 # ---------------------------------------------------------------------------
 
 
@@ -134,13 +130,13 @@ def send_logout(settings: Settings = Depends(get_settings)):
     "/api/secrets",
     status_code=201,
     dependencies=[
-        Depends(verify_api_token_or_session),
         Depends(create_rate_limit),
         Depends(verify_same_origin),
     ],
 )
 async def create_secret(
     request: Request,
+    user: dict = Depends(verify_api_token_or_session),
     settings: Settings = Depends(get_settings),
 ):
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -194,6 +190,7 @@ async def create_secret(
     passphrase_hash = _bcrypt.hashpw(passphrase.encode(), _bcrypt.gensalt()).decode() if passphrase else None
 
     row = models.create_secret(
+        user_id=user["id"],
         content_type=content_type,
         mime_type=mime,
         ciphertext=ciphertext,
@@ -211,36 +208,30 @@ async def create_secret(
     }
 
 
-@router.get(
-    "/api/secrets/{sid}/status",
-    dependencies=[Depends(verify_api_token_or_session)],
-)
-def secret_status(sid: str):
-    status_row = models.get_status(sid)
+@router.get("/api/secrets/{sid}/status")
+def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
+    status_row = models.get_status(sid, user["id"])
     if status_row is None:
         raise HTTPException(status_code=404, detail="not found")
     return status_row
 
 
-@router.get(
-    "/api/secrets/tracked",
-    dependencies=[Depends(verify_api_token_or_session)],
-)
-def list_tracked():
-    """List all tracked secrets (server is authoritative; replaces localStorage)."""
-    return {"items": models.list_tracked_secrets()}
+@router.get("/api/secrets/tracked")
+def list_tracked(user: dict = Depends(verify_api_token_or_session)):
+    """List all tracked secrets owned by the authenticated user."""
+    return {"items": models.list_tracked_secrets(user["id"])}
 
 
 @router.delete(
     "/api/secrets/{sid}",
-    dependencies=[Depends(verify_api_token_or_session), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin)],
 )
-def untrack_secret(sid: str):
-    """Remove a secret from the tracked list.
+def untrack_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
+    """Remove a secret from the authenticated user's tracked list.
 
-    If still pending: sets track=0 (URL continues to work).
-    If viewed/burned/expired: deletes the row entirely.
-    Idempotent: 204 even if the id was already gone.
+    Scoped to user_id so one user cannot untrack another's secrets. If still
+    pending: sets track=0 (URL continues to work). If viewed/burned/expired:
+    deletes the row. Idempotent: 204 even if the id doesn't belong to this user.
     """
-    models.untrack(sid)
+    models.untrack(sid, user["id"])
     return Response(status_code=204)

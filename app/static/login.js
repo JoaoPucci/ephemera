@@ -51,9 +51,10 @@
     e.preventDefault();
     err.hidden = true;
 
+    const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const code = codeInput.value;
-    const body = new URLSearchParams({ password, code });
+    const body = new URLSearchParams({ username, password, code });
 
     const res = await fetch('/send/login', {
       method: 'POST',
