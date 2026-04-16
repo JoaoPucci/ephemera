@@ -1,4 +1,29 @@
 (() => {
+  // ---------- URL cache (client-side only; server never sees the fragment) ----------
+  const URL_STORE_KEY = 'ephemera_urls_v1';
+  function loadUrls() {
+    try { return JSON.parse(localStorage.getItem(URL_STORE_KEY) || '{}'); } catch { return {}; }
+  }
+  function saveUrls(obj) {
+    try { localStorage.setItem(URL_STORE_KEY, JSON.stringify(obj)); } catch {}
+  }
+  function cacheUrl(id, url) {
+    const m = loadUrls(); m[id] = url; saveUrls(m);
+  }
+  function forgetUrl(id) {
+    const m = loadUrls(); if (m[id]) { delete m[id]; saveUrls(m); }
+  }
+  function getUrl(id) { return loadUrls()[id] || null; }
+  function gcUrls(knownIds) {
+    const m = loadUrls();
+    const known = new Set(knownIds);
+    let changed = false;
+    for (const id of Object.keys(m)) {
+      if (!known.has(id)) { delete m[id]; changed = true; }
+    }
+    if (changed) saveUrls(m);
+  }
+
   const form = document.getElementById('secret-form');
   const compose = document.getElementById('compose');
   const tabs = document.querySelectorAll('.tab');
@@ -86,6 +111,7 @@
         throw new Error(msg);
       }
       const data = await res.json();
+      if (track && data.url && data.id) cacheUrl(data.id, data.url);
       showResult(data);
     } catch (err) {
       errBox.textContent = err.message || 'Something went wrong.';
@@ -169,14 +195,16 @@
   }
 
   async function fetchTracked() {
+    // Returns null on failure (so callers can leave local state alone)
+    // and an array (possibly empty) on success.
     try {
       const res = await fetch('/api/secrets/tracked');
-      if (res.status === 401) { window.location.reload(); return []; }
-      if (!res.ok) return [];
+      if (res.status === 401) { window.location.reload(); return null; }
+      if (!res.ok) return null;
       const body = await res.json();
       return body.items || [];
     } catch {
-      return [];
+      return null;
     }
   }
 
@@ -194,6 +222,9 @@
     const toggle = document.getElementById('tracked-toggle');
 
     const items = await fetchTracked();
+    if (items === null) return;          // fetch failed; leave UI + URL cache alone
+    gcUrls(items.map(i => i.id));
+
     if (items.length === 0) {
       section.hidden = true;
       return;
@@ -204,50 +235,128 @@
     for (const item of items) {
       const li = document.createElement('li');
       li.className = 'tracked-item';
+
       const fallback = item.content_type === 'image' ? 'Image secret' : 'Text secret';
       const labelText = (item.label && item.label.trim()) ? item.label : fallback;
       const subtext = (item.label && item.label.trim()) ? (fallback + ' · ') : '';
+
       const labelEl = document.createElement('span');
       labelEl.className = 'label';
       labelEl.textContent = labelText;
+
       const timeEl = document.createElement('span');
       timeEl.className = 'time';
-      timeEl.textContent = subtext + 'created ' + fmtRelative(item.created_at);
+      const timeText = subtext + 'created ' + fmtRelative(item.created_at);
+      timeEl.textContent = timeText;
+
       const meta = document.createElement('div');
       meta.className = 'tracked-meta';
       meta.appendChild(labelEl);
       meta.appendChild(timeEl);
+
       const pill = document.createElement('span');
       pill.className = 'status-pill ' + item.status;
       pill.textContent = item.status;
+
       const rm = document.createElement('button');
       rm.type = 'button';
       rm.className = 'tracked-remove';
       rm.setAttribute('aria-label', 'remove from list');
       rm.title = 'remove';
       rm.textContent = '×';
+
       const right = document.createElement('div');
       right.className = 'tracked-right';
       right.appendChild(pill);
       right.appendChild(rm);
+
       li.appendChild(meta);
       li.appendChild(right);
-      rm.addEventListener('click', async () => {
+
+      const cachedUrl = getUrl(item.id);
+      const copyable = Boolean(cachedUrl) && item.status === 'pending';
+
+      if (copyable) {
+        li.classList.add('copyable');
+        li.setAttribute('role', 'button');
+        li.setAttribute('tabindex', '0');
+        li.title = 'Click to copy link';
+        const activate = async (e) => {
+          // Ignore clicks that originated on the remove button.
+          if (e.target && e.target.closest('.tracked-remove')) return;
+          await copyRowUrl(li, timeEl, timeText, cachedUrl);
+        };
+        li.addEventListener('click', activate);
+        li.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(e); }
+        });
+      } else if (!cachedUrl && item.status === 'pending') {
+        // Tracked on this server but we don't have the URL -- it was created in a
+        // different browser (or this browser's storage got cleared). We can never
+        // reconstruct it server-side because the key fragment never leaves the
+        // creating browser. Make the row clearly "informational, not actionable".
+        li.classList.add('orphan');
+        li.title =
+          'The URL includes an encryption key stored only in the browser where this ' +
+          'secret was created. Open ephemera in that browser to copy the link.';
+        const hint = document.createElement('span');
+        hint.className = 'orphan-hint';
+        hint.textContent = 'created elsewhere';
+        meta.appendChild(hint);
+      }
+
+      rm.addEventListener('click', async (e) => {
+        e.stopPropagation();
         await untrackOnServer(item.id);
+        forgetUrl(item.id);
         renderTrackedList();
       });
+
       list.appendChild(li);
     }
 
     toggle.textContent = list.hidden ? `show (${items.length})` : 'hide';
   }
 
+  async function copyRowUrl(li, timeEl, originalTimeText, url) {
+    if (li.dataset.busy === '1') return;
+    li.dataset.busy = '1';
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        ok = true;
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch {
+      ok = false;
+    }
+    li.classList.add(ok ? 'flash-copy' : 'flash-error');
+    timeEl.textContent = ok ? 'copied to clipboard' : 'copy failed';
+    li.setAttribute('aria-live', 'polite');
+    setTimeout(() => {
+      li.classList.remove('flash-copy', 'flash-error');
+      timeEl.textContent = originalTimeText;
+      delete li.dataset.busy;
+    }, 1500);
+  }
+
   document.getElementById('tracked-toggle').addEventListener('click', async () => {
     const list = document.getElementById('tracked-list');
     list.hidden = !list.hidden;
     const items = await fetchTracked();
+    const count = (items || []).length;
     document.getElementById('tracked-toggle').textContent =
-      list.hidden ? `show (${items.length})` : 'hide';
+      list.hidden ? `show (${count})` : 'hide';
   });
 
   document.getElementById('copy-url').addEventListener('click', (e) => {

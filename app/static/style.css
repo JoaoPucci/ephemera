@@ -506,6 +506,46 @@ button.copy-error:hover {
 
 .tracked-item:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 
+/* Clickable rows (have a cached URL we can re-copy). */
+.tracked-item.copyable {
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 80ms ease;
+}
+.tracked-item.copyable:hover {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.tracked-item.copyable:active { transform: translateY(1px); }
+.tracked-item.copyable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tracked-item.flash-copy {
+  background: color-mix(in srgb, var(--success) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.tracked-item.flash-copy .time { color: var(--success); }
+
+.tracked-item.flash-error {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+.tracked-item.flash-error .time { color: var(--danger); }
+
+/* Rows we can't re-copy (server has them, browser doesn't hold the URL). */
+.tracked-item.orphan { cursor: default; opacity: 0.75; }
+.tracked-item.orphan:hover { border-color: var(--border); background: var(--bg); }
+.tracked-item.orphan .label { font-weight: 400; }
+.orphan-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+  letter-spacing: 0.01em;
+  margin-top: 0.05rem;
+}
+
 .tracked-meta { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .tracked-meta .label { color: var(--text); font-weight: 500; }
 .tracked-meta .time { color: var(--muted); font-size: 0.8rem; }
