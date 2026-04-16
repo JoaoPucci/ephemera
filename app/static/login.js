@@ -5,6 +5,13 @@
   const codeLabel = document.getElementById('code-label');
   const toggle = document.getElementById('toggle-code-mode');
 
+  // Browsers often restore form values on reload. A TOTP code is one-shot
+  // by definition, so wipe it on page load. Also wipe if the page is
+  // restored from the bfcache (back button).
+  const clearOneShotFields = () => { codeInput.value = ''; };
+  clearOneShotFields();
+  window.addEventListener('pageshow', clearOneShotFields);
+
   let backupMode = false;
 
   // Password visibility toggle
