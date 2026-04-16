@@ -44,6 +44,11 @@
 
 * { box-sizing: border-box; }
 
+/* The browser's default [hidden] { display: none } is loses to any author rule
+   that sets `display` on the same element (e.g. our #tracked-list has display:flex).
+   Enforce "hidden means hidden" across the whole app. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
