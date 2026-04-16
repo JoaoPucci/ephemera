@@ -153,6 +153,44 @@ input:focus, select:focus, textarea:focus {
 
 textarea { resize: vertical; min-height: 140px; }
 
+/* Input with an inline action button (e.g., password show/hide toggle) */
+.input-with-action {
+  position: relative;
+  display: block;
+}
+.input-with-action > input {
+  padding-right: 4rem; /* leave room for the action button */
+}
+.input-action {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  padding: 0.3rem 0.55rem;
+  min-height: auto;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  cursor: pointer;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.input-action:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  transform: translateY(-50%);
+  box-shadow: none;
+}
+.input-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* ===================================================================
    Buttons
    =================================================================== */

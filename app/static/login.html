@@ -12,7 +12,11 @@
   <main class="card">
     <form id="login-form">
       <label for="password">Password</label>
-      <input type="password" id="password" name="password" autocomplete="current-password" required>
+      <div class="input-with-action">
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <button type="button" id="toggle-password" class="input-action"
+                aria-label="show password" aria-pressed="false">show</button>
+      </div>
 
       <label for="code" id="code-label">6-digit code</label>
       <input type="text" id="code" name="code" autocomplete="one-time-code"

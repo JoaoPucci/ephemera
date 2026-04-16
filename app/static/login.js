@@ -7,6 +7,17 @@
 
   let backupMode = false;
 
+  // Password visibility toggle
+  const pwInput = document.getElementById('password');
+  const pwToggle = document.getElementById('toggle-password');
+  pwToggle.addEventListener('click', () => {
+    const showing = pwInput.getAttribute('type') === 'text';
+    pwInput.setAttribute('type', showing ? 'password' : 'text');
+    pwToggle.textContent = showing ? 'show' : 'hide';
+    pwToggle.setAttribute('aria-pressed', String(!showing));
+    pwToggle.setAttribute('aria-label', showing ? 'show password' : 'hide password');
+  });
+
   function setMode(backup) {
     backupMode = backup;
     if (backup) {
@@ -55,8 +66,12 @@
         : 'Too many failed attempts. Account locked.';
     } else if (res.status === 429) {
       err.textContent = 'Too many attempts. Please wait a moment.';
-    } else {
+    } else if (res.status === 422) {
+      err.textContent = 'Form fields out of date — hard-refresh the page (Ctrl+Shift+R) and try again.';
+    } else if (res.status === 401) {
       err.textContent = 'Invalid credentials.';
+    } else {
+      err.textContent = `Unexpected error (HTTP ${res.status}). Check server logs.`;
     }
     err.hidden = false;
   });

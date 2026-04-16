@@ -11,6 +11,11 @@ Commands:
     list-tokens              Show all API tokens.
     create-token <name>      Mint a new API token (requires password+TOTP).
     revoke-token <name>      Revoke a token by name.
+    diagnose                 Print server time + the 3 currently-valid TOTP codes
+                             (for debugging "my code keeps failing").
+    verify                   Prompt for password + code and say exactly which one
+                             (if any) is wrong. UI hides this to prevent enumeration;
+                             safe to expose at the CLI since you already have shell.
 
 All "sensitive" commands require re-authentication via the same password+TOTP
 path the web login uses, so a stolen terminal session alone can't rotate
@@ -20,7 +25,10 @@ import getpass
 import io
 import json
 import sys
+import time
+from datetime import datetime, timezone
 
+import pyotp
 import qrcode
 
 from . import auth, models
@@ -181,9 +189,91 @@ def cmd_revoke_token(name: str) -> None:
         sys.exit(1)
 
 
+def cmd_diagnose() -> None:
+    """Print the codes a correctly-configured authenticator SHOULD show right now.
+
+    Compare with what your authenticator displays:
+      - exact match on "now"    → secret OK, clock OK, code should work
+      - match on prev/next      → clock drift up to 30s (still accepted)
+      - no match                → authenticator has a stale/different secret
+    """
+    user = models.get_user()
+    if user is None:
+        print("no user provisioned yet. run `init` first.", file=sys.stderr)
+        sys.exit(1)
+
+    secret = user["totp_secret"]
+    totp = pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL)
+
+    now_ts = int(time.time())
+    step = now_ts // auth.TOTP_INTERVAL
+    last_step = int(user.get("totp_last_step") or 0)
+    seconds_into = now_ts - step * auth.TOTP_INTERVAL
+    seconds_left = auth.TOTP_INTERVAL - seconds_into
+
+    print()
+    print(f"Server time (UTC):   {datetime.now(timezone.utc).isoformat()}")
+    print(f"Server unix ts:      {now_ts}")
+    print(f"Current TOTP step:   {step}  ({seconds_into}s in, {seconds_left}s until next rotation)")
+    print(f"Last step used:      {last_step}")
+    print()
+    print("If your authenticator's current code matches any of these, login will work:")
+    print(f"  previous step ({step - 1}):  {totp.at(now_ts - auth.TOTP_INTERVAL)}")
+    print(f"  current  step ({step}):      {totp.at(now_ts)}   <-- this is what it should show now")
+    print(f"  next     step ({step + 1}):  {totp.at(now_ts + auth.TOTP_INTERVAL)}")
+    print()
+    print(f"Stored TOTP secret:  {secret}")
+    print()
+    print(f"Password length (bytes): {len(user['password_hash'])}  (stored bcrypt hash length)")
+    print()
+    print("If your authenticator shows a different code for the 'current step':")
+    print("  -> your authenticator has an OLD entry from a previous `init` / `rotate-totp`.")
+    print("     Delete that entry in the authenticator and re-scan the QR from your last")
+    print("     `init` or `rotate-totp`. Or run `rotate-totp` to generate a fresh secret + QR.")
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
+
+
+def cmd_verify() -> None:
+    """Say exactly which factor is wrong. For self-debugging only."""
+    user = models.get_user()
+    if user is None:
+        print("no user provisioned yet. run `init` first.", file=sys.stderr)
+        sys.exit(1)
+
+    password = getpass.getpass("Password: ")
+    code = input("6-digit code: ").strip()
+
+    pw_ok = auth.verify_password(password, user["password_hash"])
+    # Evaluate TOTP without mutating totp_last_step, so we can re-test freely.
+    totp_step = None
+    if code.isdigit() and len(code) == auth.TOTP_DIGITS:
+        totp_step = auth.verify_totp(user["totp_secret"], code, last_step=user["totp_last_step"])
+
+    print()
+    print(f"password:  {'OK' if pw_ok else 'MISMATCH'}")
+    print(f"totp:      {'OK (step ' + str(totp_step) + ')' if totp_step is not None else 'MISMATCH'}")
+    print(f"stored totp_last_step: {user['totp_last_step']}")
+    print()
+
+    if not pw_ok and totp_step is None:
+        print("Both password and TOTP are wrong. If you've forgotten the password,")
+        print("wipe the DB and run `init` again (no real secrets exist yet).")
+    elif not pw_ok:
+        print("Password is wrong; TOTP is correct.")
+        print("If you've forgotten the password, wipe the DB and run `init` again.")
+    elif totp_step is None:
+        print("Password is right; TOTP is wrong.")
+        print("Most likely: clock drift or a stale authenticator entry.")
+        print("Run `rotate-totp` to regenerate the secret and rescan the QR.")
+    else:
+        print("Both correct. Login via the web UI should succeed with these values.")
+        print("If the UI still rejects them, check: (a) you are sending to the same")
+        print("server you diagnosed against, and (b) the DB path (EPHEMERA_DB_PATH)")
+        print("used by the server matches the one this CLI is using.")
 
 
 COMMANDS = {
@@ -194,6 +284,8 @@ COMMANDS = {
     "list-tokens": (cmd_list_tokens, 0),
     "create-token": (cmd_create_token, 1),
     "revoke-token": (cmd_revoke_token, 1),
+    "diagnose": (cmd_diagnose, 0),
+    "verify": (cmd_verify, 0),
 }
 
 
