@@ -281,8 +281,20 @@
 
       const timeEl = document.createElement('span');
       timeEl.className = 'time';
-      const timeText = subtext + 'created ' + fmtRelative(item.created_at);
+      let timeText = subtext + 'created ' + fmtRelative(item.created_at);
+      if (item.status === 'viewed' && item.viewed_at) {
+        timeText += ' · viewed ' + fmtRelative(item.viewed_at);
+      } else if (item.status === 'burned' && item.viewed_at) {
+        timeText += ' · burned ' + fmtRelative(item.viewed_at);
+      } else if (item.status === 'expired') {
+        timeText += ' · expired ' + fmtRelative(item.expires_at);
+      }
       timeEl.textContent = timeText;
+      // Exact timestamps on hover for older entries where "3d ago" is ambiguous.
+      const hoverBits = [`created ${new Date(item.created_at).toLocaleString()}`];
+      if (item.viewed_at) hoverBits.push(`${item.status} ${new Date(item.viewed_at).toLocaleString()}`);
+      else if (item.status === 'expired') hoverBits.push(`expired ${new Date(item.expires_at).toLocaleString()}`);
+      timeEl.title = hoverBits.join(' · ');
 
       const meta = document.createElement('div');
       meta.className = 'tracked-meta';
