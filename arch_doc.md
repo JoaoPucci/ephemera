@@ -22,6 +22,9 @@ encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
 | 9 | Sender authentication     | bcrypt password + TOTP with ±1 step + backup codes; lockout after 10 fails in 15 min |
 | 10| External API auth         | DB-issued named tokens (SHA-256 hash stored), revocable, replace the old static `EPHEMERA_API_KEY` |
 | 11| Provisioning              | CLI tool (`python -m app.admin init`); no web setup wizard   |
+| 12| Tracked-secrets storage   | Server-authoritative list via `/api/secrets/tracked`; localStorage only caches `{id: url}` because the URL fragment never leaves the creating browser |
+| 13| Tracked-list refresh      | Client polls `/api/secrets/tracked` every 5 s while any item is pending; diff-based re-render skips DOM churn; polling stops when nothing is pending |
+| 14| Theme                     | Light (default) + dark via CSS custom properties on `[data-theme]`; user choice persisted in localStorage; `prefers-color-scheme` on first visit |
 
 ---
 
@@ -355,29 +358,36 @@ ephemera/
   app/
     __init__.py            # FastAPI app factory, lifespan, security headers middleware
     config.py              # Configuration from env vars with defaults (pydantic-settings)
-    models.py              # DB init, secret CRUD operations
+    models.py              # DB init + CRUD for secrets, users, api_tokens; lightweight migrations
     crypto.py              # Key generation, splitting, encrypt/decrypt
     validation.py          # MIME checking, file magic validation, size limits
-    cleanup.py             # Async background task for expired secret purge
-    dependencies.py        # FastAPI dependencies: auth, rate limiting, session
+    auth.py                # Password, TOTP (pyotp) with +/-1 step + anti-replay, recovery codes, lockout, API-token mint/lookup
+    admin.py               # CLI: init, reset-password, rotate-totp, regen-recovery-codes, create/list/revoke tokens, diagnose, verify
+    cleanup.py             # Async background task for expired + 30-day tracked purge
+    dependencies.py        # FastAPI dependencies: session cookie, api-token-or-session, origin check
+    limiter.py             # In-memory sliding-window rate limiters (login, reveal, create)
     routes/
       __init__.py
       sender.py            # /send family + /api/secrets (create, status, list tracked, delete)
       receiver.py          # GET /s/{token}, GET /s/{token}/meta, POST /s/{token}/reveal
     static/
-      login.html           # API key entry for /send (served via FileResponse)
-      sender.html          # Secret creation form (text/image, expiry, passphrase, track)
+      login.html           # Password + TOTP (or recovery) sign-in form
+      sender.html          # Secret creation form; tracked-list section; logout button
       landing.html         # Receiver: explanation + reveal button; JS toggles passphrase UI
-      gone.html            # Secret expired, already viewed, or burned (fallback)
-      style.css            # Clean, minimal styling
+      gone.html            # Secret expired, already viewed, or burned (fallback page)
+      style.css            # Design tokens + light/dark themes via [data-theme]
+      theme.js             # Theme picker: persists `ephemera_theme_v1`, applied pre-render
+      copy.js              # Shared copy-to-clipboard with label-swap feedback
+      login.js             # Login submit, password visibility toggle, one-time-code field wipe
+      sender.js            # Form submit, tab toggle, drag-drop, tracked-list render + 5s poll
       reveal.js            # Calls /meta, reads URL fragment, sends reveal POST, renders result
-      sender.js            # Tab toggle, drag-drop, form submission, result display
   tests/
-    conftest.py            # Fixtures: httpx AsyncClient, test DB, sample secrets
+    conftest.py            # Fixtures: sync TestClient, isolated DB, provisioned user, API token
     test_crypto.py         # Key gen, split, encrypt, decrypt, round-trip
     test_validation.py     # MIME check, magic bytes, size limits, SVG rejection
     test_models.py         # CRUD, expiry, tracking, deletion behavior
-    test_sender.py         # Auth, form rendering, secret creation, status endpoint
+    test_auth.py           # Password verify, TOTP skew+replay, recovery codes, lockout, tokens
+    test_sender.py         # Login, logout, create, status, tracked list, delete, labels
     test_receiver.py       # Landing page, reveal flow, passphrase flow, burn-on-fail
     test_cleanup.py        # Expired purge, tracked metadata purge
     test_security.py       # Headers, rate limiting, origin validation
@@ -393,6 +403,73 @@ client-side by `reveal.js` after the JSON response from the reveal endpoint.
 No separate `revealed_text.html` / `revealed_image.html` templates needed --
 the landing page transforms in place. Similarly, `sender.js` handles the
 success state inline, eliminating `sender_result.html`.
+
+---
+
+## Client-Side State
+
+The app has three distinct data locations. Knowing which is which is how you
+reason about consistency bugs, device-boundary behaviour, and what survives
+a DB wipe.
+
+| Where | What | Why it lives here |
+|---|---|---|
+| SQLite on the server | Users, secrets, API tokens, labels, tracked-status timestamps | Authoritative; survives restarts; the only source of truth that multiple browsers can share |
+| `localStorage` on the sender's browser | Theme choice (`ephemera_theme_v1`), URL cache (`ephemera_urls_v1`: `{id: url}`) | Either per-device preference, or data the server cannot hold without breaking the zero-knowledge property |
+| In-memory on the client | Tracked-list render state, copy-flash timers, polling interval handle | Ephemeral UI state; lost on reload, which is fine |
+
+### Why the URL cache is client-side only
+
+The URL returned from `POST /api/secrets` looks like `/s/{token}#{client_half}`.
+The `#fragment` is the client half of the Fernet key and **never hits the
+server**. That's the whole point of key splitting (see Security Design). So
+if a sender wants to re-copy the URL from the tracked list later, we cannot
+rebuild it server-side -- we have to cache it in the browser that created it.
+
+We cache the URL under the server-issued UUID `id` (stable, unique, present
+in every `/api/secrets/tracked` item). On render we join:
+- item in server list + URL in localStorage -> clickable row
+- item in server list, no URL locally -> "created elsewhere" hint, removable
+- URL locally, not in server list -> silently garbage-collected
+
+This keeps the server authoritative (labels, statuses, who's tracked) while
+not leaking key material.
+
+### Tracked-list refresh
+
+The tracked list polls `GET /api/secrets/tracked` every 5 s while at least
+one row is `pending`. Per tick:
+
+1. Fetch; on network failure, return `null` and leave UI + URL cache alone
+   (transient errors never trigger destructive cleanup).
+2. Diff the ids and per-row status against the rendered DOM. If identical,
+   do nothing. Otherwise, re-render (unless a `data-busy="1"` attribute is
+   present on any row -- that's the 1.5 s copy-flash animation, which we
+   don't interrupt).
+3. When no rows remain `pending`, stop the interval. It restarts the next
+   time a new pending tracked row appears (create, or renewed polling after
+   the list is rebuilt).
+
+Polling is the right fit here because:
+- The load is trivial: single-user, one indexed `SELECT`, ~12 req/min peak
+  per open tab. SQLite handles this without thinking about it.
+- The data is low-frequency -- most tracked secrets sit in `pending` until
+  someone reveals them, which for a sharing tool is minutes to hours.
+- Simplicity and testability beat the ceremony of SSE / WebSockets at this
+  scale.
+
+If ephemera ever grew to many concurrent users or a more real-time UX (e.g.
+showing "the receiver opened the link just now" within a second), the right
+next step would be server-sent events: HTTP-streaming, one-way, cheap on the
+server, same security model as normal endpoints.
+
+### Theme
+
+`theme.js` loads in `<head>` (before body render) so `data-theme` is set on
+`<html>` before paint -- no flash of wrong theme. First-time resolution is
+`prefers-color-scheme`; user clicks on the toggle persist `light` or `dark`
+to `localStorage`. System-preference changes are followed only until the
+user expresses an explicit choice, at which point their pick wins.
 
 ---
 
