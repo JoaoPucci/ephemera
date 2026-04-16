@@ -49,6 +49,8 @@
 
     let res;
     try {
+      const track = document.getElementById('track').checked;
+      const label = track ? (document.getElementById('label').value || '').trim() : '';
       if (activeTab === 'text') {
         const content = document.getElementById('content').value;
         if (!content.trim()) throw new Error('Please enter a message.');
@@ -57,8 +59,9 @@
           content_type: 'text',
           expires_in: Number(document.getElementById('expires_in').value),
           passphrase: document.getElementById('passphrase').value || null,
-          track: document.getElementById('track').checked,
+          track,
         };
+        if (label) body.label = label;
         res = await fetch('/api/secrets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -71,7 +74,8 @@
         fd.append('expires_in', document.getElementById('expires_in').value);
         const pw = document.getElementById('passphrase').value;
         if (pw) fd.append('passphrase', pw);
-        fd.append('track', document.getElementById('track').checked ? 'true' : 'false');
+        fd.append('track', track ? 'true' : 'false');
+        if (label) fd.append('label', label);
         res = await fetch('/api/secrets', { method: 'POST', body: fd });
       }
 
@@ -101,15 +105,7 @@
     const track = document.getElementById('track').checked;
     const widget = document.getElementById('status-widget');
     if (track) {
-      const type = activeTab === 'image' ? 'image' : 'text';
-      const label = (document.getElementById('label').value || '').trim();
-      window.trackedStore.save({
-        id,
-        type,
-        created_at: new Date().toISOString(),
-        expires_at,
-        label,
-      });
+      // The server is already authoritative — creation wrote track=1 + label.
       widget.hidden = false;
       startPolling(id);
       renderTrackedList();
@@ -172,12 +168,32 @@
     return Math.floor(diff / 86400) + ' d ago';
   }
 
+  async function fetchTracked() {
+    try {
+      const res = await fetch('/api/secrets/tracked');
+      if (res.status === 401) { window.location.reload(); return []; }
+      if (!res.ok) return [];
+      const body = await res.json();
+      return body.items || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async function untrackOnServer(id) {
+    try {
+      await fetch(`/api/secrets/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+    } catch {}
+  }
+
   async function renderTrackedList() {
     const section = document.getElementById('tracked-section');
     const list = document.getElementById('tracked-list');
     const toggle = document.getElementById('tracked-toggle');
 
-    const items = window.trackedStore.read();
+    const items = await fetchTracked();
     if (items.length === 0) {
       section.hidden = true;
       return;
@@ -188,7 +204,7 @@
     for (const item of items) {
       const li = document.createElement('li');
       li.className = 'tracked-item';
-      const fallback = item.type === 'image' ? 'Image secret' : 'Text secret';
+      const fallback = item.content_type === 'image' ? 'Image secret' : 'Text secret';
       const labelText = (item.label && item.label.trim()) ? item.label : fallback;
       const subtext = (item.label && item.label.trim()) ? (fallback + ' · ') : '';
       const labelEl = document.createElement('span');
@@ -202,9 +218,8 @@
       meta.appendChild(labelEl);
       meta.appendChild(timeEl);
       const pill = document.createElement('span');
-      pill.className = 'status-pill pending';
-      pill.dataset.status = '';
-      pill.textContent = 'pending';
+      pill.className = 'status-pill ' + item.status;
+      pill.textContent = item.status;
       const rm = document.createElement('button');
       rm.type = 'button';
       rm.className = 'tracked-remove';
@@ -217,29 +232,20 @@
       right.appendChild(rm);
       li.appendChild(meta);
       li.appendChild(right);
-      rm.addEventListener('click', () => {
-        window.trackedStore.remove(item.id);
+      rm.addEventListener('click', async () => {
+        await untrackOnServer(item.id);
         renderTrackedList();
       });
       list.appendChild(li);
-      fetchStatus(item.id).then((data) => {
-        if (!data) { pill.className = 'status-pill gone'; pill.textContent = 'unknown'; return; }
-        pill.classList.remove('pending');
-        pill.classList.add(data.status);
-        pill.textContent = data.status === 'gone' ? 'no longer tracked' : data.status;
-        if (data.status === 'gone') {
-          window.trackedStore.remove(item.id);
-        }
-      });
     }
 
     toggle.textContent = list.hidden ? `show (${items.length})` : 'hide';
   }
 
-  document.getElementById('tracked-toggle').addEventListener('click', () => {
+  document.getElementById('tracked-toggle').addEventListener('click', async () => {
     const list = document.getElementById('tracked-list');
     list.hidden = !list.hidden;
-    const items = window.trackedStore.read();
+    const items = await fetchTracked();
     document.getElementById('tracked-toggle').textContent =
       list.hidden ? `show (${items.length})` : 'hide';
   });

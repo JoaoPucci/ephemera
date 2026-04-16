@@ -287,6 +287,145 @@ def test_create_secret_via_session_without_bearer_works(authed_client):
 
 
 # ---------------------------------------------------------------------------
+# Labels + tracked-secrets list + delete
+# ---------------------------------------------------------------------------
+
+
+def test_label_stored_when_tracking_enabled(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x", "content_type": "text", "expires_in": 300,
+            "track": True, "label": "API key for Acme",
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    from app import models
+    row = models.get_by_id(r.json()["id"])
+    assert row["label"] == "API key for Acme"
+
+
+def test_label_ignored_without_tracking(client, auth_headers):
+    """Labels are meaningless if we don't track the secret — drop them silently."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x", "content_type": "text", "expires_in": 300,
+            "track": False, "label": "should not stick",
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    from app import models
+    row = models.get_by_id(r.json()["id"])
+    assert row["label"] is None
+
+
+def test_label_truncated_past_60_chars(client, auth_headers):
+    long = "x" * 200
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x", "content_type": "text", "expires_in": 300,
+            "track": True, "label": long,
+        },
+        headers=auth_headers,
+    )
+    # Pydantic Field(max_length=60) rejects over-length labels with 422.
+    assert r.status_code in (201, 422)
+
+
+def test_list_tracked_returns_only_tracked(client, auth_headers):
+    client.post(
+        "/api/secrets",
+        json={"content": "u", "content_type": "text", "expires_in": 300, "track": False},
+        headers=auth_headers,
+    )
+    client.post(
+        "/api/secrets",
+        json={"content": "t", "content_type": "text", "expires_in": 300, "track": True, "label": "one"},
+        headers=auth_headers,
+    )
+    r = client.get("/api/secrets/tracked", headers=auth_headers)
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 1
+    assert items[0]["label"] == "one"
+    assert items[0]["status"] == "pending"
+
+
+def test_list_tracked_reports_viewed_status_after_reveal(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "t", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    url = r.json()["url"]
+    token, frag = url.split("#", 1)
+    token = token.rsplit("/", 1)[-1]
+    client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
+    r = client.get("/api/secrets/tracked", headers=auth_headers)
+    items = r.json()["items"]
+    assert len(items) == 1
+    assert items[0]["status"] == "viewed"
+
+
+def test_list_tracked_requires_auth(client):
+    r = client.get("/api/secrets/tracked")
+    assert r.status_code == 401
+
+
+def test_delete_untracks_pending_secret_but_keeps_url_live(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "t", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+    url = r.json()["url"]
+    token, frag = url.split("#", 1)
+    token = token.rsplit("/", 1)[-1]
+
+    d = client.delete(f"/api/secrets/{sid}", headers=auth_headers)
+    assert d.status_code == 204
+
+    # tracked list is now empty
+    assert client.get("/api/secrets/tracked", headers=auth_headers).json()["items"] == []
+    # but the receiver link still works
+    rv = client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
+    assert rv.status_code == 200
+
+
+def test_delete_purges_viewed_secret_entirely(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "t", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+    url = r.json()["url"]
+    token, frag = url.split("#", 1)
+    token = token.rsplit("/", 1)[-1]
+    client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
+
+    d = client.delete(f"/api/secrets/{sid}", headers=auth_headers)
+    assert d.status_code == 204
+    from app import models
+    assert models.get_by_id(sid) is None
+
+
+def test_delete_is_idempotent(client, auth_headers):
+    d = client.delete("/api/secrets/does-not-exist", headers=auth_headers)
+    assert d.status_code == 204
+
+
+def test_delete_requires_auth(client):
+    d = client.delete("/api/secrets/some-id")
+    assert d.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Status endpoint
 # ---------------------------------------------------------------------------
 

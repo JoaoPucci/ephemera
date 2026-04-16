@@ -128,7 +128,7 @@ intentionally slow — tests exercise the real security configuration.
 |---|---|
 | Passphrase-protected secret | Set a passphrase when creating; receiver must enter it before reveal |
 | Burn after 5 wrong passphrases | Submit 5 wrong passphrases; secret is permanently burned (410) |
-| Tracked secret + label | Tick "Track viewing status", add a label; view it in the Tracked list |
+| Tracked secret + label | Tick "Track viewing status", add a label; view it in the Tracked list (server-backed, visible from any browser after login) |
 | Expired secret | Set `expires_in: 300` and wait 5 minutes; background cleanup purges it |
 | Account lockout | 10 wrong password attempts → locked 1 h (returns 423 with unlock time) |
 | Cross-origin CSRF block | Send a reveal POST with `Origin: https://example.com` → 403 |

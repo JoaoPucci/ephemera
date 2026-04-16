@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS secrets (
     track         INTEGER NOT NULL DEFAULT 0,
     status        TEXT NOT NULL DEFAULT 'pending',
     attempts      INTEGER NOT NULL DEFAULT 0,
+    label         TEXT,
     created_at    TEXT NOT NULL,
     expires_at    TEXT NOT NULL,
     viewed_at     TEXT
@@ -70,6 +71,10 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(SCHEMA)
+        # Lightweight migration: add the `label` column to pre-existing DBs.
+        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(secrets)").fetchall()}
+        if "label" not in existing_cols:
+            conn.execute("ALTER TABLE secrets ADD COLUMN label TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -85,6 +90,7 @@ def create_secret(
     passphrase_hash: Optional[str],
     track: bool,
     expires_in: int,
+    label: Optional[str] = None,
 ) -> dict:
     now = _utcnow()
     sid = str(uuid.uuid4())
@@ -97,11 +103,11 @@ def create_secret(
             """
             INSERT INTO secrets (id, token, server_key, ciphertext, content_type,
                                  mime_type, passphrase, track, status, attempts,
-                                 created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+                                 label, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
             """,
             (sid, token, server_key, ciphertext, content_type, mime_type,
-             passphrase_hash, int(bool(track)), created_at, expires_at),
+             passphrase_hash, int(bool(track)), label, created_at, expires_at),
         )
     return {"id": sid, "token": token, "created_at": created_at, "expires_at": expires_at}
 
@@ -226,6 +232,60 @@ def _force_viewed_at(sid: str, viewed_at: str) -> None:
     """Test helper: overwrite viewed_at so retention logic can be exercised."""
     with _connect() as conn:
         conn.execute("UPDATE secrets SET viewed_at = ? WHERE id = ?", (viewed_at, sid))
+
+
+def list_tracked_secrets() -> list[dict]:
+    """Return all secrets with track=1, newest first, with a snapshot of current status."""
+    now_iso = _iso(_utcnow())
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, content_type, mime_type, label, status, created_at, expires_at, viewed_at,
+                   CASE
+                     WHEN status = 'viewed'  THEN 'viewed'
+                     WHEN status = 'burned'  THEN 'burned'
+                     WHEN expires_at <= ?    THEN 'expired'
+                     ELSE 'pending'
+                   END AS effective_status
+              FROM secrets
+             WHERE track = 1
+             ORDER BY created_at DESC
+            """,
+            (now_iso,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "content_type": r["content_type"],
+            "mime_type": r["mime_type"],
+            "label": r["label"],
+            "status": r["effective_status"],
+            "created_at": r["created_at"],
+            "expires_at": r["expires_at"],
+            "viewed_at": r["viewed_at"],
+        }
+        for r in rows
+    ]
+
+
+def untrack(sid: str) -> bool:
+    """Stop showing this secret in the tracked list.
+
+    If the payload is already gone (viewed / burned / expired), delete the row.
+    If it's still live (pending), just flip track=0 so the URL keeps working.
+    Returns True if anything changed.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, ciphertext FROM secrets WHERE id = ?", (sid,)
+        ).fetchone()
+        if row is None:
+            return False
+        if row["ciphertext"] is None:
+            conn.execute("DELETE FROM secrets WHERE id = ?", (sid,))
+        else:
+            conn.execute("UPDATE secrets SET track = 0 WHERE id = ?", (sid,))
+    return True
 
 
 # ---------------------------------------------------------------------------

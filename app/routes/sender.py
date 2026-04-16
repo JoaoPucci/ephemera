@@ -41,6 +41,7 @@ class CreateTextSecret(BaseModel):
     expires_in: int
     passphrase: Optional[str] = Field(default=None, max_length=200)
     track: bool = False
+    label: Optional[str] = Field(default=None, max_length=60)
 
     @field_validator("expires_in")
     @classmethod
@@ -48,6 +49,15 @@ class CreateTextSecret(BaseModel):
         if v not in EXPIRY_PRESETS:
             raise ValueError("expires_in must be one of the presets")
         return v
+
+
+def _clean_label(raw) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    return s[:60]
 
 
 def _build_url(token: str, client_half: bytes) -> str:
@@ -135,6 +145,7 @@ async def create_secret(
 ):
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
 
+    label: Optional[str] = None
     if ctype == "application/json":
         try:
             raw = await request.json()
@@ -147,6 +158,7 @@ async def create_secret(
         expires_in = payload.expires_in
         passphrase = payload.passphrase
         track = payload.track
+        label = _clean_label(payload.label)
 
     elif ctype == "multipart/form-data":
         form = await request.form()
@@ -161,6 +173,7 @@ async def create_secret(
             raise HTTPException(status_code=422, detail="expires_in must be a preset")
         passphrase = form.get("passphrase") or None
         track = str(form.get("track", "")).lower() in ("1", "true", "on", "yes")
+        label = _clean_label(form.get("label"))
         data = await file.read()
         if len(data) > settings.max_image_bytes:
             raise HTTPException(status_code=413, detail="file too large")
@@ -188,6 +201,7 @@ async def create_secret(
         passphrase_hash=passphrase_hash,
         track=bool(track),
         expires_in=int(expires_in),
+        label=label if track else None,  # labels are meaningless without tracking
     )
 
     return {
@@ -206,3 +220,27 @@ def secret_status(sid: str):
     if status_row is None:
         raise HTTPException(status_code=404, detail="not found")
     return status_row
+
+
+@router.get(
+    "/api/secrets/tracked",
+    dependencies=[Depends(verify_api_token_or_session)],
+)
+def list_tracked():
+    """List all tracked secrets (server is authoritative; replaces localStorage)."""
+    return {"items": models.list_tracked_secrets()}
+
+
+@router.delete(
+    "/api/secrets/{sid}",
+    dependencies=[Depends(verify_api_token_or_session), Depends(verify_same_origin)],
+)
+def untrack_secret(sid: str):
+    """Remove a secret from the tracked list.
+
+    If still pending: sets track=0 (URL continues to work).
+    If viewed/burned/expired: deletes the row entirely.
+    Idempotent: 204 even if the id was already gone.
+    """
+    models.untrack(sid)
+    return Response(status_code=204)

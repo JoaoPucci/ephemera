@@ -309,6 +309,7 @@ CREATE TABLE secrets (
     track         INTEGER DEFAULT 0,  -- whether to keep metadata after reveal
     status        TEXT DEFAULT 'pending', -- 'pending', 'viewed', 'burned', 'expired'
     attempts      INTEGER DEFAULT 0,  -- failed passphrase attempts
+    label         TEXT,                -- sender-supplied nickname for the tracked list (NULL if untracked or unset)
     created_at    TEXT NOT NULL,       -- ISO8601 UTC
     expires_at    TEXT NOT NULL,       -- ISO8601 UTC
     viewed_at     TEXT                 -- ISO8601 UTC, set on reveal
@@ -361,7 +362,7 @@ ephemera/
     dependencies.py        # FastAPI dependencies: auth, rate limiting, session
     routes/
       __init__.py
-      sender.py            # GET /send, POST /api/secrets, GET /api/secrets/{id}/status
+      sender.py            # /send family + /api/secrets (create, status, list tracked, delete)
       receiver.py          # GET /s/{token}, GET /s/{token}/meta, POST /s/{token}/reveal
     static/
       login.html           # API key entry for /send (served via FileResponse)
@@ -449,7 +450,7 @@ Response 201:
 Returns status of a tracked secret.
 
 ```
-Headers: Authorization: Bearer {API_KEY}
+Headers: Authorization: Bearer <api-token>  or valid session cookie
 
 Response 200 (tracked):
 { "status": "pending", "created_at": "...", "expires_at": "..." }
@@ -458,6 +459,49 @@ Response 200 (viewed):
 { "status": "viewed", "created_at": "...", "viewed_at": "...", "expires_at": "..." }
 
 Response 404: secret not found, not tracked, or purged
+```
+
+#### `GET /api/secrets/tracked`
+Returns the full list of tracked secrets owned by the authenticated caller.
+This is the server-side source of truth for the sender's tracked-list UI
+(the localStorage cache used in earlier versions is retired).
+
+```
+Headers: Authorization: Bearer <api-token>  or valid session cookie
+
+Response 200:
+{
+  "items": [
+    {
+      "id": "<uuid>",
+      "content_type": "text" | "image",
+      "mime_type": "image/png" | null,
+      "label": "API key for Acme" | null,
+      "status": "pending" | "viewed" | "burned" | "expired",
+      "created_at": "ISO8601",
+      "expires_at": "ISO8601",
+      "viewed_at": "ISO8601" | null
+    },
+    ...
+  ]
+}
+```
+
+#### `DELETE /api/secrets/{id}`
+Removes a secret from the tracked list.
+
+- If the secret is still live (pending), flips `track` to 0 so it stops
+  appearing in the list but the receiver URL keeps working.
+- If the payload is already gone (viewed / burned / expired), deletes the
+  row entirely so the metadata doesn't linger until the 30-day purge.
+
+Idempotent: returns `204` even when the id doesn't exist.
+
+```
+Headers: Authorization: Bearer <api-token>  or valid session cookie
+Response 204: no body
+Response 401: not authenticated
+Response 403: cross-origin (for browser callers)
 ```
 
 ### Receiver (unauthenticated)
