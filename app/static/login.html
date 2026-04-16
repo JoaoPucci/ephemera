@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ephemera — sign in</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wordmark">ephemera</div>
+  <main class="card">
+    <form id="login-form">
+      <label for="api-key">API key</label>
+      <input type="password" id="api-key" name="api_key" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+      <p class="error" id="login-error" hidden></p>
+    </form>
+  </main>
+  <script src="/static/login.js"></script>
+</body>
+</html>

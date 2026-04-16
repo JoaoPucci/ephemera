@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ephemera — create secret</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wordmark">ephemera</div>
+  <main class="card" id="main-card">
+    <section id="tracked-section" hidden>
+      <div class="tracked-header">
+        <h2>Tracked</h2>
+        <button type="button" id="tracked-toggle" class="link">show</button>
+      </div>
+      <ul id="tracked-list" hidden></ul>
+    </section>
+
+    <div id="compose">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="text" type="button">Text</button>
+        <button class="tab" data-tab="image" type="button">Image</button>
+      </div>
+
+      <form id="secret-form">
+      <section id="panel-text" class="panel">
+        <label for="content">Enter your secret</label>
+        <textarea id="content" name="content" rows="8" placeholder="Type your message..."></textarea>
+      </section>
+
+      <section id="panel-image" class="panel" hidden>
+        <label>Image</label>
+        <div id="dropzone" class="dropzone" tabindex="0">
+          <p>Drop image here or click to browse</p>
+          <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+          <div id="preview" hidden>
+            <span id="file-name"></span>
+            <button type="button" id="clear-file" class="link">clear</button>
+          </div>
+        </div>
+      </section>
+
+      <label for="expires_in">Expires in</label>
+      <select id="expires_in" name="expires_in">
+        <option value="300">5 minutes</option>
+        <option value="1800">30 minutes</option>
+        <option value="3600">1 hour</option>
+        <option value="14400">4 hours</option>
+        <option value="43200">12 hours</option>
+        <option value="86400" selected>24 hours</option>
+        <option value="259200">3 days</option>
+        <option value="604800">7 days</option>
+      </select>
+
+      <label for="passphrase">Passphrase (optional)</label>
+      <input type="text" id="passphrase" name="passphrase">
+
+      <label class="checkbox">
+        <input type="checkbox" id="track" name="track"> Track viewing status
+      </label>
+
+      <div id="label-wrap" hidden>
+        <label for="label">Label (for your tracked list)</label>
+        <input type="text" id="label" maxlength="60" placeholder="e.g. API key for Acme">
+      </div>
+
+      <button type="submit" id="submit-btn">Create Secret</button>
+      <p class="error" id="sender-error" hidden></p>
+    </form>
+    </div>
+
+    <section id="result" hidden>
+      <h2 class="success">Secret created.</h2>
+      <div class="url-box"><code id="result-url"></code></div>
+      <button type="button" id="copy-url" class="copy-btn">Copy URL</button>
+      <p id="result-expiry" class="muted"></p>
+      <div id="status-widget" class="status-widget" hidden>
+        <span class="status-label">Status</span>
+        <span id="status-value" class="status-pill pending">pending</span>
+        <span id="status-detail" class="muted-inline"></span>
+      </div>
+      <button type="button" id="create-another" class="link">Create another</button>
+    </section>
+  </main>
+  <script src="/static/copy.js"></script>
+  <script src="/static/tracked.js"></script>
+  <script src="/static/sender.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ephemera</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wordmark">ephemera</div>
+  <main class="card" id="main-card">
+    <section id="state-loading">
+      <p class="muted">Loading…</p>
+    </section>
+
+    <section id="state-ready" hidden>
+      <h1>Someone shared a secret with you.</h1>
+      <p>This message can only be viewed once. After you reveal it, it will be permanently destroyed.</p>
+      <div id="passphrase-wrap" hidden>
+        <label for="passphrase">Passphrase</label>
+        <input type="text" id="passphrase" autocomplete="off">
+      </div>
+      <button id="reveal-btn" type="button">Reveal Secret</button>
+      <p class="error" id="reveal-error" hidden></p>
+    </section>
+
+    <section id="state-text" hidden>
+      <pre id="revealed-text" class="revealed-text"></pre>
+      <button type="button" id="copy-btn" class="copy-btn" hidden>Copy to clipboard</button>
+      <p class="muted">This secret has been destroyed.</p>
+    </section>
+
+    <section id="state-image" hidden>
+      <img id="revealed-image" alt="">
+      <p class="muted">This secret has been destroyed.</p>
+    </section>
+
+    <section id="state-gone" hidden>
+      <h1>This secret is no longer available.</h1>
+      <p class="muted">It may have already been viewed or has expired.</p>
+    </section>
+  </main>
+  <script src="/static/copy.js"></script>
+  <script src="/static/reveal.js"></script>
+</body>
+</html>
