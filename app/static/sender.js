@@ -194,6 +194,38 @@
     return Math.floor(diff / 86400) + ' d ago';
   }
 
+  // ---------- tracked-list status polling ----------
+  let trackedPollId = null;
+  const TRACKED_POLL_MS = 5000;
+
+  function startTrackedPoll() {
+    if (trackedPollId) return;
+    trackedPollId = setInterval(pollTrackedOnce, TRACKED_POLL_MS);
+  }
+  function stopTrackedPoll() {
+    if (trackedPollId) { clearInterval(trackedPollId); trackedPollId = null; }
+  }
+
+  async function pollTrackedOnce() {
+    const items = await fetchTracked();
+    if (items === null) return;  // transient network error; try again next tick
+
+    const list = document.getElementById('tracked-list');
+    const existing = [...list.querySelectorAll('li[data-id]')];
+    const existingMap = new Map(existing.map(li => [li.dataset.id, li.dataset.status]));
+    const serverMap = new Map(items.map(i => [i.id, i.status]));
+
+    const same = existing.length === items.length
+      && [...serverMap].every(([id, s]) => existingMap.get(id) === s);
+
+    // Respect in-flight user interaction (copy flash, remove click).
+    const busy = list.querySelector('[data-busy="1"]') !== null;
+
+    if (!same && !busy) await renderTrackedList();
+
+    if (!items.some(i => i.status === 'pending')) stopTrackedPoll();
+  }
+
   async function fetchTracked() {
     // Returns null on failure (so callers can leave local state alone)
     // and an array (possibly empty) on success.
@@ -227,6 +259,7 @@
 
     if (items.length === 0) {
       section.hidden = true;
+      stopTrackedPoll();
       return;
     }
     section.hidden = false;
@@ -235,6 +268,8 @@
     for (const item of items) {
       const li = document.createElement('li');
       li.className = 'tracked-item';
+      li.dataset.id = item.id;
+      li.dataset.status = item.status;
 
       const fallback = item.content_type === 'image' ? 'Image secret' : 'Text secret';
       const labelText = (item.label && item.label.trim()) ? item.label : fallback;
@@ -316,6 +351,9 @@
     }
 
     toggle.textContent = list.hidden ? `show (${items.length})` : 'hide';
+
+    if (items.some(i => i.status === 'pending')) startTrackedPoll();
+    else stopTrackedPoll();
   }
 
   async function copyRowUrl(li, timeEl, originalTimeText, url) {
