@@ -13,7 +13,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    api_key: str = Field(default="dev-api-key")
     secret_key: str = Field(default="dev-secret-key-change-me")
     db_path: str = Field(default="./ephemera.db")
     base_url: str = Field(default="http://localhost:8000")

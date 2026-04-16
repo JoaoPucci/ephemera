@@ -29,8 +29,28 @@ class RateLimiter:
 
 
 reveal_limiter = RateLimiter(max_hits=10, window_seconds=60)
+login_limiter = RateLimiter(max_hits=10, window_seconds=60)
+create_limiter = RateLimiter(max_hits=60, window_seconds=3600)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def reveal_rate_limit(request: Request) -> None:
-    ip = request.client.host if request.client else "unknown"
-    reveal_limiter.check(ip)
+    reveal_limiter.check(_client_ip(request))
+
+
+def login_rate_limit(request: Request) -> None:
+    login_limiter.check(_client_ip(request))
+
+
+def create_rate_limit(request: Request) -> None:
+    """Per-session rate limit on secret creation. Falls back to IP if unauthenticated
+    (which shouldn't happen on authed routes, but keeps the limiter safe)."""
+    from .dependencies import read_session_cookie
+    from .config import get_settings
+
+    raw = request.cookies.get(get_settings().session_cookie_name)
+    key = read_session_cookie(raw) if raw else None
+    create_limiter.check(key or _client_ip(request))

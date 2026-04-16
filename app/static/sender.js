@@ -260,6 +260,16 @@
     setTab('text');
   });
 
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/send/logout', { method: 'POST' });
+      } catch {}
+      window.location.href = '/send';
+    });
+  }
+
   const trackCheckbox = document.getElementById('track');
   const labelWrap = document.getElementById('label-wrap');
   function syncLabelVisibility() {

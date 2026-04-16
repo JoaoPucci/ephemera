@@ -1,40 +1,157 @@
-"""Tests for sender routes: auth, form rendering, secret creation, status endpoint."""
-import io
-
+"""Tests for sender routes: login, logout, secret creation, status endpoint."""
 import pytest
 
 
-def test_send_get_without_session_shows_login_page(client):
+# ---------------------------------------------------------------------------
+# /send page rendering
+# ---------------------------------------------------------------------------
+
+
+def test_send_get_without_session_shows_login_page(client, provisioned_user):
     r = client.get("/send")
     assert r.status_code == 200
-    assert b"API key" in r.content or b"api_key" in r.content.lower()
+    body = r.content.lower()
+    assert b"password" in body and b"code" in body
 
 
-def test_send_login_wrong_api_key_rejected(client):
-    r = client.post("/send/login", data={"api_key": "wrong"}, follow_redirects=False)
-    assert r.status_code in (401, 403)
+def test_send_get_with_session_returns_form(authed_client):
+    r = authed_client.get("/send")
+    assert r.status_code == 200
+    assert b"create" in r.content.lower()
 
 
-def test_send_login_correct_api_key_sets_session_cookie(client, api_key):
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
+
+
+def test_login_wrong_password_rejected(client, provisioned_user):
+    code = provisioned_user["totp"].now()
     r = client.post(
         "/send/login",
-        data={"api_key": api_key},
+        data={"password": "nope", "code": code},
+        headers={"Origin": "http://testserver"},
         follow_redirects=False,
     )
-    assert r.status_code in (200, 302, 303)
+    assert r.status_code == 401
+
+
+def test_login_wrong_totp_rejected(client, provisioned_user):
+    r = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": "000000"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 401
+
+
+def test_login_missing_totp_rejected(client, provisioned_user):
+    r = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": ""},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 401 or r.status_code == 422
+
+
+def test_login_correct_password_and_totp_sets_session(client, provisioned_user):
+    code = provisioned_user["totp"].now()
+    r = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": code},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
     from app.config import get_settings
     assert get_settings().session_cookie_name in r.cookies
 
 
-def test_send_get_with_session_returns_form(client, api_key):
-    client.post("/send/login", data={"api_key": api_key})
-    r = client.get("/send")
+def test_login_same_error_code_for_wrong_password_and_wrong_totp(client, provisioned_user):
+    """Enumeration resistance: caller can't tell which factor failed."""
+    r1 = client.post(
+        "/send/login",
+        data={"password": "wrong", "code": provisioned_user["totp"].now()},
+        headers={"Origin": "http://testserver"},
+    )
+    r2 = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": "000000"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r1.status_code == r2.status_code == 401
+    assert r1.json() == r2.json()
+
+
+def test_login_rotates_session_value_on_relogin(client, provisioned_user):
+    code1 = provisioned_user["totp"].now()
+    r1 = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": code1},
+        headers={"Origin": "http://testserver"},
+    )
+    from app.config import get_settings
+    cookie_name = get_settings().session_cookie_name
+    c1 = r1.cookies.get(cookie_name)
+    # wait then re-login with a fresh code
+    import time
+    time.sleep(1)
+    code2 = provisioned_user["totp"].at(int(time.time()) + 30)
+    r2 = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": code2},
+        headers={"Origin": "http://testserver"},
+    )
+    c2 = r2.cookies.get(cookie_name)
+    assert c1 and c2 and c1 != c2
+
+
+def test_login_rejects_cross_origin(client, provisioned_user):
+    code = provisioned_user["totp"].now()
+    r = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": code},
+        headers={"Origin": "https://attacker.example"},
+    )
+    assert r.status_code == 403
+
+
+def test_login_rate_limit_kicks_in(client):
+    statuses = []
+    for _ in range(12):
+        r = client.post(
+            "/send/login",
+            data={"password": "x", "code": "000000"},
+            headers={"Origin": "http://testserver"},
+        )
+        statuses.append(r.status_code)
+    assert 429 in statuses
+
+
+# ---------------------------------------------------------------------------
+# Logout
+# ---------------------------------------------------------------------------
+
+
+def test_logout_clears_session(authed_client):
+    from app.config import get_settings
+    r = authed_client.post("/send/logout", headers={"Origin": "http://testserver"})
     assert r.status_code == 200
-    assert b"Create Secret" in r.content or b"create" in r.content.lower()
+    # cookie should be cleared (set-cookie with Max-Age=0)
+    set_cookie = r.headers.get("set-cookie", "")
+    assert get_settings().session_cookie_name in set_cookie
+
+
+# ---------------------------------------------------------------------------
+# Secret creation (bearer token path)
+# ---------------------------------------------------------------------------
 
 
 def test_post_api_secrets_without_bearer_token_rejected(client):
-    r = client.post("/api/secrets", json={"content": "x", "content_type": "text", "expires_in": 300})
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers={"Origin": "http://testserver"},
+    )
     assert r.status_code == 401
 
 
@@ -43,6 +160,17 @@ def test_post_api_secrets_wrong_bearer_token_rejected(client):
         "/api/secrets",
         json={"content": "x", "content_type": "text", "expires_in": 300},
         headers={"Authorization": "Bearer wrong", "Origin": "http://testserver"},
+    )
+    assert r.status_code == 401
+
+
+def test_post_api_secrets_revoked_token_rejected(client, api_token):
+    from app import models
+    models.revoke_token("test")
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers={"Authorization": f"Bearer {api_token}", "Origin": "http://testserver"},
     )
     assert r.status_code == 401
 
@@ -65,8 +193,7 @@ def test_post_api_secrets_text_returns_url_with_fragment(client, auth_headers):
         headers=auth_headers,
     )
     url = r.json()["url"]
-    assert "/s/" in url
-    assert "#" in url
+    assert "/s/" in url and "#" in url
     _, frag = url.split("#", 1)
     assert len(frag) >= 16
 
@@ -100,21 +227,20 @@ def test_post_api_secrets_rejects_oversize_image(client, auth_headers):
         data={"expires_in": "3600"},
         headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
     )
-    assert r.status_code == 413 or r.status_code == 400
+    assert r.status_code in (400, 413)
 
 
 def test_post_api_secrets_with_passphrase_stored_as_bcrypt_hash(client, auth_headers):
     r = client.post(
         "/api/secrets",
-        json={"content": "x", "content_type": "text", "expires_in": 3600, "passphrase": "correct horse"},
+        json={"content": "x", "content_type": "text", "expires_in": 3600, "passphrase": "horse"},
         headers=auth_headers,
     )
     assert r.status_code == 201
     from app import models
-    sid = r.json()["id"]
-    row = models.get_by_id(sid)
+    row = models.get_by_id(r.json()["id"])
     assert row["passphrase"] is not None
-    assert row["passphrase"].startswith("$2")  # bcrypt prefix
+    assert row["passphrase"].startswith("$2")
 
 
 def test_post_api_secrets_with_track_sets_flag(client, auth_headers):
@@ -123,18 +249,17 @@ def test_post_api_secrets_with_track_sets_flag(client, auth_headers):
         json={"content": "x", "content_type": "text", "expires_in": 3600, "track": True},
         headers=auth_headers,
     )
-    sid = r.json()["id"]
     from app import models
-    assert models.get_by_id(sid)["track"] in (1, True)
+    assert models.get_by_id(r.json()["id"])["track"] in (1, True)
 
 
 def test_post_api_secrets_invalid_expiry_rejected(client, auth_headers):
     r = client.post(
         "/api/secrets",
-        json={"content": "x", "content_type": "text", "expires_in": 99},  # not a preset
+        json={"content": "x", "content_type": "text", "expires_in": 99},
         headers=auth_headers,
     )
-    assert r.status_code == 422 or r.status_code == 400
+    assert r.status_code in (400, 422)
 
 
 def test_post_api_secrets_all_expiry_presets_accepted(client, auth_headers):
@@ -145,6 +270,25 @@ def test_post_api_secrets_all_expiry_presets_accepted(client, auth_headers):
             headers=auth_headers,
         )
         assert r.status_code == 201, f"expiry {expires_in} rejected"
+
+
+# ---------------------------------------------------------------------------
+# Session-auth path (web form)
+# ---------------------------------------------------------------------------
+
+
+def test_create_secret_via_session_without_bearer_works(authed_client):
+    r = authed_client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# Status endpoint
+# ---------------------------------------------------------------------------
 
 
 def test_status_endpoint_returns_pending_for_tracked(client, auth_headers):

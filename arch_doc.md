@@ -11,7 +11,7 @@ encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
 
 | # | Question                  | Decision                                                    |
 |---|---------------------------|-------------------------------------------------------------|
-| 1 | Sender interface          | Web form at `/send`, protected by API key (session cookie)  |
+| 1 | Sender interface          | Web form at `/send`, password + TOTP login, signed session cookie |
 | 2 | Encryption model          | Key splitting -- half in DB, half in URL fragment            |
 | 3 | Receiver passphrase       | Optional, set by sender at creation time                    |
 | 4 | Image size limit          | 10 MB                                                       |
@@ -19,6 +19,9 @@ encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
 | 6 | Database                  | SQLite                                                      |
 | 7 | Image formats             | PNG, JPEG, GIF, WebP only. SVG rejected.                    |
 | 8 | Deployment                | Uvicorn + Caddy + systemd (Docker migration later)          |
+| 9 | Sender authentication     | bcrypt password + TOTP with ±1 step + backup codes; lockout after 10 fails in 15 min |
+| 10| External API auth         | DB-issued named tokens (SHA-256 hash stored), revocable, replace the old static `EPHEMERA_API_KEY` |
+| 11| Provisioning              | CLI tool (`python -m app.admin init`); no web setup wizard   |
 
 ---
 
@@ -206,15 +209,87 @@ Uploaded images are validated:
 
 ### Sender authentication
 
-- API key configured via `EPHEMERA_API_KEY` env var.
-- `/send` web form: on first visit, a login form asks for the API key. On
-  successful verification, a signed session cookie is set (via `itsdangerous`
-  with `EPHEMERA_SECRET_KEY`). Subsequent requests within the session don't
-  re-prompt.
-- API endpoint (`POST /api/secrets`): `Authorization: Bearer {API_KEY}` header.
-- Both compare using `hmac.compare_digest` to prevent timing attacks.
-- Auth is implemented as a FastAPI dependency (`Depends(verify_api_key)`) for API
-  routes, and a cookie-checking dependency for web routes.
+Two credential types coexist:
+
+1. **Password + TOTP** for the web form at `/send`. Intended for interactive use.
+2. **Named API tokens** for programmatic callers (CLI scripts, CI, future
+   integrations). These are DB-issued and revocable.
+
+#### First-time provisioning
+
+Run the CLI once at install time:
+
+```
+python -m app.admin init
+```
+
+This prompts for a password, generates a random 32-char base32 TOTP secret,
+and prints (a) a terminal-rendered QR to scan into any TOTP authenticator app
+and (b) ten one-time recovery codes shown once and never again. A `users` row
+is created with a bcrypt hash of the password, the TOTP secret, and bcrypt
+hashes of the recovery codes. The CLI refuses to overwrite an existing user;
+credential rotation is explicit via `reset-password` / `rotate-totp` /
+`regen-recovery-codes`, each of which re-authenticates before proceeding.
+
+#### Login flow
+
+```
+POST /send/login
+  form: password=<str>, code=<6-digit TOTP or 12-char recovery code>
+
+server:
+  1. If lockout_until > now → 423 {error: "locked", until: ISO8601}
+  2. bcrypt.checkpw(password, stored_hash)       -- constant-time
+  3. If code is 6 digits → pyotp verify against secret with ±1-step tolerance;
+     check step > totp_last_step (anti-replay); on success, bump totp_last_step.
+     Else treat as recovery code → bcrypt-compare against each unused hash;
+     on match, mark that entry used_at = now.
+  4. If either check fails: failed_attempts++; return 401 "invalid credentials"
+     (identical surface for wrong password vs wrong code vs wrong recovery code).
+     If failed_attempts >= MAX_FAILURES (10): set lockout_until = now + 1h,
+     reset counter.
+  5. On success: reset failed_attempts=0, lockout_until=NULL. Issue a fresh
+     random session value (rotation prevents session fixation) and set a
+     signed cookie via `itsdangerous`.
+```
+
+Rate limits (in-memory sliding window, per client IP):
+- `POST /send/login`: 10 / minute
+- `POST /s/{token}/reveal`: 10 / minute
+
+Per-session rate limit (applies to authenticated callers):
+- `POST /api/secrets`: 60 / hour per session (contains blast radius of a
+  hijacked session).
+
+Session cookies are `HttpOnly`, `SameSite=Strict`, `Secure` in production. A
+logout endpoint (`POST /send/logout`) clears the cookie.
+
+#### API tokens
+
+External callers send `Authorization: Bearer <token>` where `<token>` was
+minted with `python -m app.admin create-token <name>`. The server stores
+`SHA-256(plaintext)` only; lookup is constant-time via a unique-indexed
+hash column. Tokens are revocable by name (`revoke-token`) and listable
+(`list-tokens`). A token is accepted only when `revoked_at IS NULL`; every
+successful use updates `last_used_at`.
+
+Tokens and web sessions are equivalent for `/api/secrets` and the status
+endpoint (`Depends(verify_api_token_or_session)`). The web form doesn't mint
+tokens; it rides the session cookie. This means:
+
+- A leak of a `.env` file no longer yields credentials -- there is no shared
+  secret in env anymore. The only credentials live in the SQLite DB (bcrypt
+  hashes, TOTP secret, SHA-256 token digests).
+- Compromise of one API token can be scoped to one purpose (e.g., "ci-runner")
+  and revoked independently of the rest.
+
+#### Origin enforcement
+
+`Origin` header is validated on all state-changing routes (`POST /send/login`,
+`POST /send/logout`, `POST /api/secrets`, `POST /s/{token}/reveal`). Requests
+from a foreign Origin get 403. Missing Origin (e.g., curl, CLI) is allowed;
+the cookie's `SameSite=Strict` plus the bearer-token model handle CSRF for
+browsers.
 
 ---
 
@@ -226,13 +301,13 @@ Single table, kept minimal:
 CREATE TABLE secrets (
     id            TEXT PRIMARY KEY,   -- UUID4 (for sender status lookups)
     token         TEXT UNIQUE NOT NULL,-- URL-safe random token (for receiver URLs)
-    server_key    BLOB NOT NULL,      -- server half of the Fernet key (16 bytes)
-    ciphertext    BLOB NOT NULL,      -- encrypted payload
+    server_key    BLOB,                -- server half of the Fernet key (16 bytes, NULL after reveal if tracked)
+    ciphertext    BLOB,                -- encrypted payload (NULL after reveal if tracked)
     content_type  TEXT NOT NULL,       -- 'text' or 'image'
     mime_type     TEXT,                -- 'image/png', etc. NULL for text
     passphrase    TEXT,                -- bcrypt hash, NULL if no passphrase
-    track         BOOLEAN DEFAULT 0,  -- whether to keep metadata after reveal
-    status        TEXT DEFAULT 'pending', -- 'pending', 'viewed', 'expired'
+    track         INTEGER DEFAULT 0,  -- whether to keep metadata after reveal
+    status        TEXT DEFAULT 'pending', -- 'pending', 'viewed', 'burned', 'expired'
     attempts      INTEGER DEFAULT 0,  -- failed passphrase attempts
     created_at    TEXT NOT NULL,       -- ISO8601 UTC
     expires_at    TEXT NOT NULL,       -- ISO8601 UTC
@@ -241,6 +316,27 @@ CREATE TABLE secrets (
 
 CREATE INDEX idx_secrets_token ON secrets(token);
 CREATE INDEX idx_secrets_expires_at ON secrets(expires_at);
+
+CREATE TABLE users (
+    id                    INTEGER PRIMARY KEY,   -- always 1 (single-user)
+    password_hash         TEXT NOT NULL,          -- bcrypt, cost 12
+    totp_secret           TEXT NOT NULL,          -- base32, 32 chars
+    totp_last_step        INTEGER DEFAULT 0,      -- anti-replay: reject step <= this
+    recovery_code_hashes  TEXT DEFAULT '[]',       -- JSON: [{"hash": bcrypt, "used_at": ISO8601|null}]
+    failed_attempts       INTEGER DEFAULT 0,
+    lockout_until         TEXT,                    -- ISO8601 or NULL
+    created_at, updated_at TEXT NOT NULL
+);
+
+CREATE TABLE api_tokens (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT UNIQUE NOT NULL,            -- human label: "cli-laptop", "ci-runner"
+    token_hash    TEXT NOT NULL,                   -- SHA-256 hex of plaintext
+    created_at    TEXT NOT NULL,
+    last_used_at  TEXT,
+    revoked_at    TEXT                             -- non-NULL once revoked
+);
+CREATE INDEX idx_api_tokens_hash ON api_tokens(token_hash);
 ```
 
 On reveal:
@@ -304,18 +400,27 @@ success state inline, eliminating `sender_result.html`.
 ### Sender (authenticated)
 
 #### `GET /send`
-Renders the sender form. Redirects to login if no valid session.
+Renders the sender form if a valid session exists, otherwise the login page.
+Both are static HTML files.
 
 #### `POST /send/login`
-Verifies the API key, sets a session cookie.
+Verifies password + TOTP (or recovery code), rotates and sets the session cookie.
+Form body: `password`, `code`. Rate-limited (10/min per IP) with account
+lockout after 10 failures in 15 minutes. Returns 401 with an identical body for
+any failure reason except lockout (423 with the unlock timestamp).
+
+#### `POST /send/logout`
+Clears the session cookie. Requires same-origin.
 
 #### `POST /api/secrets`
-Creates a new secret.
+Creates a new secret. Accepts **either** `Authorization: Bearer <api-token>`
+(DB-issued via the admin CLI) **or** a valid session cookie from the web form.
 
 ```
-Headers: Authorization: Bearer {API_KEY}
-         Content-Type: application/json  (for text)
-                    or multipart/form-data (for images)
+Headers: Authorization: Bearer <api-token>       (for programmatic callers)
+         -- or session cookie set by POST /send/login (for the web UI)
+         Content-Type: application/json          (for text)
+                    or multipart/form-data       (for images)
 
 Body (text):
 {

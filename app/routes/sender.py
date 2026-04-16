@@ -1,32 +1,31 @@
-"""Sender routes: login, secret creation, status lookup."""
-import hmac
-from datetime import datetime
+"""Sender routes: login, logout, secret creation, status lookup."""
 from pathlib import Path
 from typing import Optional
 
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     Form,
     HTTPException,
     Request,
     Response,
     UploadFile,
+    File,
     status,
 )
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from .. import auth as auth_mod
 from .. import crypto, models, validation
 from ..config import Settings, get_settings
 from ..dependencies import (
     is_logged_in,
     make_session_cookie,
-    require_session,
-    verify_api_key,
-    verify_api_key_or_session,
+    verify_api_token_or_session,
+    verify_same_origin,
 )
+from ..limiter import create_rate_limit, login_rate_limit
 
 
 router = APIRouter()
@@ -51,16 +50,15 @@ class CreateTextSecret(BaseModel):
         return v
 
 
-def _bcrypt_hash(passphrase: str) -> str:
-    import bcrypt
-
-    return bcrypt.hashpw(passphrase.encode(), bcrypt.gensalt()).decode()
-
-
 def _build_url(token: str, client_half: bytes) -> str:
     base = get_settings().base_url.rstrip("/")
     encoded = crypto.encode_half(client_half)
     return f"{base}/s/{token}#{encoded}"
+
+
+# ---------------------------------------------------------------------------
+# Web pages (static HTML switched server-side based on session presence)
+# ---------------------------------------------------------------------------
 
 
 @router.get("/send")
@@ -69,16 +67,35 @@ def send_page(request: Request):
     return FileResponse(STATIC_DIR / page)
 
 
-@router.post("/send/login")
+# ---------------------------------------------------------------------------
+# Login / logout
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/send/login",
+    dependencies=[Depends(login_rate_limit), Depends(verify_same_origin)],
+)
 def send_login(
     request: Request,
-    response: Response,
-    api_key: str = Form(...),
+    password: str = Form(...),
+    code: str = Form(...),
     settings: Settings = Depends(get_settings),
 ):
-    if not hmac.compare_digest(api_key.encode(), settings.api_key.encode()):
-        raise HTTPException(status_code=401, detail="invalid api key")
-    cookie_value = make_session_cookie("ok")
+    try:
+        auth_mod.authenticate(password, code)
+    except auth_mod.LockoutError as e:
+        # Give the user a hint about how long. Still non-enumerating because
+        # lockouts only trigger after many failures.
+        raise HTTPException(
+            status_code=423,
+            detail={"error": "locked", "until": e.until_iso},
+        )
+    except auth_mod.AuthError:
+        raise HTTPException(status_code=401, detail="invalid credentials")
+
+    # Session rotation: new random value on every successful login.
+    cookie_value = make_session_cookie()
     response = JSONResponse({"ok": True})
     response.set_cookie(
         key=settings.session_cookie_name,
@@ -86,12 +103,32 @@ def send_login(
         max_age=settings.session_max_age,
         httponly=True,
         samesite="strict",
-        secure=False,  # flipped on in production via a reverse proxy on HTTPS
+        secure=False,  # enabled in prod via reverse-proxy-on-HTTPS env
     )
     return response
 
 
-@router.post("/api/secrets", status_code=201, dependencies=[Depends(verify_api_key_or_session)])
+@router.post("/send/logout", dependencies=[Depends(verify_same_origin)])
+def send_logout(settings: Settings = Depends(get_settings)):
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(settings.session_cookie_name, samesite="strict")
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Secret creation + status
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/api/secrets",
+    status_code=201,
+    dependencies=[
+        Depends(verify_api_token_or_session),
+        Depends(create_rate_limit),
+        Depends(verify_same_origin),
+    ],
+)
 async def create_secret(
     request: Request,
     settings: Settings = Depends(get_settings),
@@ -140,7 +177,8 @@ async def create_secret(
     key = crypto.generate_key()
     server_half, client_half = crypto.split_key(key)
     ciphertext = crypto.encrypt(plaintext, key)
-    passphrase_hash = _bcrypt_hash(passphrase) if passphrase else None
+    import bcrypt as _bcrypt
+    passphrase_hash = _bcrypt.hashpw(passphrase.encode(), _bcrypt.gensalt()).decode() if passphrase else None
 
     row = models.create_secret(
         content_type=content_type,
@@ -159,7 +197,10 @@ async def create_secret(
     }
 
 
-@router.get("/api/secrets/{sid}/status", dependencies=[Depends(verify_api_key_or_session)])
+@router.get(
+    "/api/secrets/{sid}/status",
+    dependencies=[Depends(verify_api_token_or_session)],
+)
 def secret_status(sid: str):
     status_row = models.get_status(sid)
     if status_row is None:

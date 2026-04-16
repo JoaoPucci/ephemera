@@ -26,6 +26,28 @@ CREATE TABLE IF NOT EXISTS secrets (
 );
 CREATE INDEX IF NOT EXISTS idx_secrets_token ON secrets(token);
 CREATE INDEX IF NOT EXISTS idx_secrets_expires_at ON secrets(expires_at);
+
+CREATE TABLE IF NOT EXISTS users (
+    id                    INTEGER PRIMARY KEY,
+    password_hash         TEXT NOT NULL,
+    totp_secret           TEXT NOT NULL,
+    totp_last_step        INTEGER NOT NULL DEFAULT 0,
+    recovery_code_hashes  TEXT NOT NULL DEFAULT '[]', -- JSON: [{"hash": "...", "used_at": null}, ...]
+    failed_attempts       INTEGER NOT NULL DEFAULT 0,
+    lockout_until         TEXT,
+    created_at            TEXT NOT NULL,
+    updated_at            TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT UNIQUE NOT NULL,
+    token_hash    TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_used_at  TEXT,
+    revoked_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
 """
 
 
@@ -204,3 +226,77 @@ def _force_viewed_at(sid: str, viewed_at: str) -> None:
     """Test helper: overwrite viewed_at so retention logic can be exercised."""
     with _connect() as conn:
         conn.execute("UPDATE secrets SET viewed_at = ? WHERE id = ?", (viewed_at, sid))
+
+
+# ---------------------------------------------------------------------------
+# users / api_tokens
+# ---------------------------------------------------------------------------
+
+
+def get_user() -> Optional[dict]:
+    """Return the single user row (id=1) if provisioned, else None."""
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = 1").fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def create_user(*, password_hash: str, totp_secret: str, recovery_code_hashes: str) -> None:
+    now = _iso(_utcnow())
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO users (id, password_hash, totp_secret, recovery_code_hashes,
+                                   created_at, updated_at)
+               VALUES (1, ?, ?, ?, ?, ?)""",
+            (password_hash, totp_secret, recovery_code_hashes, now, now),
+        )
+
+
+def update_user(**fields) -> None:
+    if not fields:
+        return
+    fields["updated_at"] = _iso(_utcnow())
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values())
+    with _connect() as conn:
+        conn.execute(f"UPDATE users SET {cols} WHERE id = 1", values)
+
+
+def list_tokens() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, created_at, last_used_at, revoked_at FROM api_tokens ORDER BY id"
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def create_token(*, name: str, token_hash: str) -> None:
+    now = _iso(_utcnow())
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO api_tokens (name, token_hash, created_at) VALUES (?, ?, ?)",
+            (name, token_hash, now),
+        )
+
+
+def revoke_token(name: str) -> bool:
+    now = _iso(_utcnow())
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE api_tokens SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL",
+            (now, name),
+        )
+    return (cur.rowcount or 0) > 0
+
+
+def get_active_token_by_hash(token_hash: str) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL",
+            (token_hash,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def touch_token_last_used(token_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", (_iso(_utcnow()), token_id))

@@ -1,7 +1,5 @@
 """Shared fixtures for the ephemera test suite."""
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -10,12 +8,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+TEST_PASSWORD = "test-password-xyz"
+
+
 @pytest.fixture
 def tmp_db_path(tmp_path, monkeypatch):
     """Isolated SQLite DB file, wired in via env vars and settings cache reset."""
     db = tmp_path / "test.db"
     monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
-    monkeypatch.setenv("EPHEMERA_API_KEY", "test-api-key")
     monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
     monkeypatch.setenv("EPHEMERA_BASE_URL", "http://testserver")
     monkeypatch.setenv("EPHEMERA_ALLOWED_ORIGINS", "http://testserver")
@@ -32,34 +32,76 @@ def tmp_db_path(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def provisioned_user(tmp_db_path):
+    """Create the single admin user with a known password and TOTP secret.
+
+    Returns a dict with password, totp_secret, and a pyotp.TOTP helper.
+    """
+    import pyotp
+    from app import auth, models
+
+    secret = pyotp.random_base32(length=32)
+    _codes, codes_json = auth.generate_recovery_codes()
+    models.create_user(
+        password_hash=auth.hash_password(TEST_PASSWORD),
+        totp_secret=secret,
+        recovery_code_hashes=codes_json,
+    )
+    return {
+        "password": TEST_PASSWORD,
+        "totp_secret": secret,
+        "totp": pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL),
+    }
+
+
+@pytest.fixture
+def api_token(provisioned_user):
+    """Mint a test API token and return its plaintext value."""
+    from app import auth, models
+
+    plaintext, digest = auth.mint_api_token()
+    models.create_token(name="test", token_hash=digest)
+    return plaintext
+
+
+@pytest.fixture
 def client(tmp_db_path):
-    """FastAPI TestClient bound to an isolated DB, with rate-limiter reset."""
+    """FastAPI TestClient bound to an isolated DB, with rate-limiters reset."""
     from fastapi.testclient import TestClient
     from app import create_app
-    from app.limiter import reveal_limiter
+    from app.limiter import reveal_limiter, login_limiter, create_limiter
 
-    reveal_limiter.reset()
+    for lim in (reveal_limiter, login_limiter, create_limiter):
+        lim.reset()
     app = create_app()
     with TestClient(app) as c:
         yield c
-    reveal_limiter.reset()
+    for lim in (reveal_limiter, login_limiter, create_limiter):
+        lim.reset()
 
 
 @pytest.fixture
-def api_key():
-    return "test-api-key"
+def authed_client(client, provisioned_user):
+    """A TestClient that has already logged in via password+TOTP."""
+    code = provisioned_user["totp"].now()
+    r = client.post(
+        "/send/login",
+        data={"password": provisioned_user["password"], "code": code},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200, r.text
+    return client
 
 
 @pytest.fixture
-def auth_headers(api_key):
-    return {"Authorization": f"Bearer {api_key}", "Origin": "http://testserver"}
+def auth_headers(api_token):
+    """Bearer-token headers for API routes (replaces the old static API key)."""
+    return {"Authorization": f"Bearer {api_token}", "Origin": "http://testserver"}
 
 
 @pytest.fixture
 def sample_png_bytes():
-    # Minimal valid PNG: 1x1 transparent
     import base64
-
     b64 = (
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
         "+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg=="
@@ -69,7 +111,6 @@ def sample_png_bytes():
 
 @pytest.fixture
 def sample_jpeg_bytes():
-    # Minimal JPEG header (not a full valid image, but starts with correct magic)
     return bytes.fromhex("ffd8ffe000104a46494600010101006000600000") + b"\x00" * 32 + bytes.fromhex("ffd9")
 
 
