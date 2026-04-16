@@ -266,7 +266,9 @@
       try {
         await fetch('/send/logout', { method: 'POST' });
       } catch {}
-      window.location.href = '/send';
+      // reload() re-fetches the same URL; setting href to the same URL is a no-op
+      // in most browsers, which is why the old version appeared to "do nothing".
+      window.location.reload();
     });
   }
 
