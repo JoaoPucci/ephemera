@@ -437,8 +437,19 @@ button.copy-error:hover {
   font-size: 0.95rem;
   white-space: pre-wrap;
   word-wrap: break-word;
-  margin: 0 0 1rem;
+  margin: 0 0 0.25rem;
   animation: fadein 300ms ease;
+}
+
+/* Tighten button -> content gap on the receiver pages, and widen the gap
+   before the "This secret has been destroyed." footer line. */
+#state-ready button,
+#state-text .copy-btn {
+  margin-top: 0.6rem;
+}
+#state-text .muted,
+#state-image .muted {
+  margin-top: 2rem;
 }
 
 #revealed-image {
