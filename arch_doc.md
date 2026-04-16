@@ -413,17 +413,47 @@ energy. It should feel like unsealing an envelope, not logging into a dashboard.
 
 **Palette**
 
+Two themes share the same semantic tokens; only the concrete values differ.
+Defined as CSS custom properties on `:root` (light) and `[data-theme="dark"]`.
+
+_Light theme_
+
 | Role        | Value     | Usage                                          |
 |-------------|-----------|-------------------------------------------------|
-| Background  | `#f8f6f1` | Page background -- warm parchment, not clinical white |
+| Background  | `#fafafa` | Page background -- neutral off-white           |
 | Surface     | `#ffffff` | Card/container background                      |
-| Text        | `#2c2c2c` | Body text -- soft black, easier on eyes than `#000` |
-| Text muted  | `#7a756e` | Secondary text, captions, hints                |
-| Accent      | `#b8860b` | Buttons, links, active states -- darkgoldenrod, like a wax seal |
-| Accent hover| `#9a7209` | Button hover, slightly deeper                  |
-| Border      | `#e8e4dd` | Card borders, dividers -- barely there         |
-| Danger      | `#a04040` | Error states, burn warnings                    |
-| Success     | `#4a7a5a` | Confirmation, "secret created" feedback        |
+| Text        | `#09090b` | Body text -- near-black                        |
+| Text muted  | `#71717a` | Secondary text, captions, hints                |
+| Accent      | `#4f46e5` | Buttons, links, active states -- indigo, like ink |
+| Accent hover| `#4338ca` | Button hover, slightly deeper                  |
+| Border      | `#e4e4e7` | Card borders, dividers                         |
+| Danger      | `#dc2626` | Error states, burn warnings                    |
+| Success     | `#16a34a` | Confirmation, "secret created" feedback        |
+
+_Dark theme_
+
+| Role        | Value     | Usage                                          |
+|-------------|-----------|-------------------------------------------------|
+| Background  | `#09090b` | Page background -- near-black                  |
+| Surface     | `#18181b` | Card/container background                      |
+| Text        | `#fafafa` | Body text -- soft off-white                    |
+| Text muted  | `#a1a1aa` | Secondary text, captions, hints                |
+| Accent      | `#818cf8` | Brighter indigo for contrast on dark bg        |
+| Accent hover| `#a5b4fc` | Button hover                                    |
+| Border      | `#27272a` | Card borders, dividers                         |
+| Danger      | `#f87171` | Error states                                    |
+| Success     | `#4ade80` | Confirmation                                    |
+
+Pill backgrounds are derived from the accent/success/danger tokens via
+`color-mix()`, so both themes stay consistent without duplicated values.
+
+### Theme switching
+
+On first visit the theme is chosen from `prefers-color-scheme`. The user can
+toggle between light and dark via a small fixed button in the top-right
+corner; the choice is persisted in `localStorage` under `ephemera_theme_v1`.
+The theme script is loaded in `<head>` and sets `data-theme` on the root
+element before the body renders, so there is no flash of wrong theme.
 
 **Typography**
 
@@ -678,8 +708,7 @@ Replaces the form card content after creation (no page navigation):
 
 ### What the UI Does NOT Have
 
-- No dark mode (keep scope small -- can add later via `prefers-color-scheme`).
-- No animations beyond the reveal fade-in and button hover transitions.
+- No animations beyond the reveal fade-in, status pulse, and button hover transitions.
 - No JavaScript frameworks. Vanilla JS only, under 100 lines total.
 - No external resources (fonts, CDNs, analytics, icons). Fully self-contained.
 - No footer, no "powered by", no version number. The page is just the card.
