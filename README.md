@@ -15,16 +15,15 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ## Provision the sender account (once)
 
-Create your user (password + TOTP + recovery codes):
-
 ```bash
 ./venv/bin/python -m app.admin init
 ```
 
-You'll be asked for a password, then shown a QR code to scan into an
-authenticator app (1Password, Google Authenticator, Aegis, etc.), plus 10
+Prompts for a password, shows a QR to scan into an authenticator app
+(1Password, Google Authenticator, Aegis, Bitwarden, etc.), and prints 10
 one-time recovery codes. **Save the recovery codes somewhere safe — they are
-shown only once.**
+shown only once.** For everything else the CLI can do, see
+[Admin CLI reference](#admin-cli-reference) below.
 
 ## Run the dev server
 
@@ -47,37 +46,71 @@ The app starts at **http://127.0.0.1:8000** with `--reload` enabled.
 
 For images: switch to the **Image** tab, drop a PNG/JPEG/GIF/WebP (10 MB max).
 
-## API tokens (for scripts / CI)
+## Admin CLI reference
 
-Mint a revocable token:
+All commands are subcommands of `python -m app.admin`. They operate on the
+SQLite DB pointed to by `EPHEMERA_DB_PATH`. The server does not need to be
+running.
 
 ```bash
-./venv/bin/python -m app.admin create-token cli-laptop
-# → Authorization: Bearer eph_xxxxx  (shown ONCE)
-
-./venv/bin/python -m app.admin list-tokens
-./venv/bin/python -m app.admin revoke-token cli-laptop
+./venv/bin/python -m app.admin <command> [args]
 ```
 
+### Provisioning
+
+| Command | Reauth? | What it does |
+|---|---|---|
+| `init` | — | First-time setup. Prompts for a password (≥10 chars, confirmed twice), generates the TOTP secret, prints a terminal-rendered QR code for your authenticator, and prints 10 one-time recovery codes. Refuses to run if a user already exists. |
+
+### Credential rotation
+
+All require re-auth (password + TOTP or recovery code) before running.
+
+| Command | What it does |
+|---|---|
+| `reset-password` | Change the password. |
+| `rotate-totp` | Generate a new TOTP secret and print a new QR. The old authenticator entry becomes dead — rescan on every device you use. |
+| `regen-recovery-codes` | Invalidate the current 10 recovery codes and print 10 fresh ones. Save them before closing the terminal. |
+
+### API tokens (for scripts / CI / automation)
+
+| Command | Reauth? | What it does |
+|---|---|---|
+| `create-token <name>` | yes | Mint a new revocable API token. Plaintext (`eph_…`) is printed ONCE — save it in a password manager. Only the SHA-256 hash is stored. |
+| `list-tokens` | — | Show all tokens with their name, status, created/last-used timestamps. |
+| `revoke-token <name>` | yes | Revoke a token by its name. Revocation is immediate; active requests using it will start failing on next call. |
+
+Use a token with `Authorization: Bearer <token>` on `/api/secrets` and
+`/api/secrets/{id}/status`:
+
 ```bash
-# Example API call:
 curl -sS -X POST http://127.0.0.1:8000/api/secrets \
-  -H "Authorization: Bearer eph_xxxxx" \
+  -H "Authorization: Bearer eph_xxxxxxxx" \
   -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:8000" \
+  -H "Origin: http://127.0.0.1:8000" \
   -d '{"content":"hi","content_type":"text","expires_in":300}'
 ```
 
-## Credential rotation
+### Troubleshooting / self-debugging
 
-```bash
-./venv/bin/python -m app.admin reset-password       # requires TOTP
-./venv/bin/python -m app.admin rotate-totp          # requires password
-./venv/bin/python -m app.admin regen-recovery-codes # requires both
-```
+These bypass the "don't reveal which factor is wrong" rule because at the CLI
+you already have shell access — helpfulness beats ceremony.
 
-All rotation commands re-authenticate first, so a compromised terminal session
-alone can't change credentials.
+| Command | What it does |
+|---|---|
+| `diagnose` | Print server time, current TOTP step, the stored `totp_last_step`, and the 3 codes that would currently be accepted (previous / current / next step). Compare with what your authenticator is showing. |
+| `verify` | Prompt for password + code and print `OK` / `MISMATCH` for each factor independently. Does NOT mutate `totp_last_step`, so you can run it repeatedly. |
+
+### Common scenarios
+
+| Situation | What to do |
+|---|---|
+| I forgot my password | No server-side recovery — wipe the user row and re-init: `sqlite3 ephemera.db "DELETE FROM users; DELETE FROM api_tokens;"` then `python -m app.admin init`. |
+| I lost access to my authenticator | Log in with a recovery code (login form → "Use a recovery code"), then `rotate-totp` to generate a fresh one. If you lost recovery codes too, you're in the "forgot password" case. |
+| My TOTP code keeps being rejected | `diagnose` → compare to authenticator. If the "current step" code doesn't match your authenticator, you have a stale entry; delete it and rescan from the last `init` / `rotate-totp` output — or just `rotate-totp` for a fresh secret. |
+| Account locked (423 at login) | 10 failed attempts trigger a 1-hour lockout. No unlock command by design. In dev: `sqlite3 ephemera.db "UPDATE users SET lockout_until=NULL, failed_attempts=0"`. |
+| I pasted an API token in a commit / log | `revoke-token <name>` immediately, then `create-token <name>` to mint a replacement. |
+| I need a fresh, empty dev setup | `rm -f ephemera.db* && python -m app.admin init` (wipes secrets too). |
 
 ## Run the test suite
 
