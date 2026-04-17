@@ -28,6 +28,7 @@ encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
 | 15| Multi-user data model     | `users` has real PK + unique `username`; every `secrets` and `api_tokens` row carries `user_id` FK with `ON DELETE CASCADE`. All authenticated reads/writes scope by the caller's user_id. Lets A (single-user) -> B (CLI-provisioned small group) -> C (open signup) be incremental, not a rewrite. |
 | 16| Owner vs. user boundary   | The "owner" is whoever has shell access (CLI). Public signup (future) only ever creates regular users. Prevents the "first-signup-becomes-admin" race seen on Gitea et al. |
 | 17| Sender-initiated cancel   | `POST /api/secrets/{id}/cancel` revokes a still-live secret: wipes the ciphertext/key/passphrase like `burn`, tags status `'canceled'` for audit, URL returns 404 thereafter. Two-click-to-confirm in the UI to prevent accidents. |
+| 18| Two-click confirm pattern | All irreversible destructive UI actions (cancel a secret, clear past entries) use the same inline "arm then execute" pattern: first click tints the control red and relabels to "confirm?" for 3 s, second click within the window executes. No modals; consistent across the app. |
 
 ---
 
@@ -552,6 +553,18 @@ Response 201:
 }
 ```
 
+#### `GET /api/me`
+Return a minimal view of the authenticated caller: `{id, username, email}`.
+Used by the sender UI to populate the "signed in as …" header pill without
+needing server-side templating. Authenticates via the same dependency as the
+rest of the sender API.
+
+```
+Response 200:
+{ "id": <int>, "username": "<str>", "email": "<str|null>" }
+Response 401: not authenticated
+```
+
 #### `GET /api/secrets/{id}/status`
 Returns status of a tracked secret.
 
@@ -864,6 +877,13 @@ The most important page. First thing the receiver sees.
 - Image is rendered inline as `<img src="data:{mime};base64,...">`.
 - Card max-width expands to `680px` for images to give them room.
 - Very tall images are capped with `max-height: 80vh` and `object-fit: contain`.
+- **Click-to-zoom**: clicking the image (or activating via Enter/Space when
+  focused) opens a fullscreen overlay at `95vw × 95vh` over an 88%-opacity
+  backdrop. Click anywhere, click the top-right `close` pill, or press Escape
+  to dismiss. The overlay is `role="dialog" aria-modal="true"`, focus moves to
+  the close button on open and back to the thumbnail on close, and body scroll
+  is locked while open. The underlying file is always the full-resolution
+  original; the in-card render is the downscaled thumbnail.
 
 #### Receiver: Gone / Expired
 
