@@ -260,7 +260,8 @@
   async function renderTrackedList() {
     const section = document.getElementById('tracked-section');
     const list = document.getElementById('tracked-list');
-    const toggle = document.getElementById('tracked-toggle');
+    const header = document.getElementById('tracked-header');
+    const countEl = document.getElementById('tracked-count');
 
     const items = await fetchTracked();
     if (items === null) return;          // fetch failed; leave UI + URL cache alone
@@ -268,10 +269,13 @@
 
     if (items.length === 0) {
       section.hidden = true;
+      section.classList.remove('open');
+      if (header) header.setAttribute('aria-expanded', 'false');
       stopTrackedPoll();
       return;
     }
     section.hidden = false;
+    if (countEl) countEl.textContent = String(items.length);
 
     list.innerHTML = '';
     for (const item of items) {
@@ -405,12 +409,17 @@
       list.appendChild(li);
     }
 
-    toggle.textContent = list.hidden ? `show (${items.length})` : 'hide';
-
-    // Reveal the "clear history" action only if there's something to clear.
+    // Reveal the "clear past entries" action only when there's something to clear.
     const clearBtn = document.getElementById('tracked-clear');
+    const clearLbl = document.getElementById('tracked-clear-label');
     const nonPending = items.filter(i => i.status !== 'pending').length;
-    if (clearBtn) clearBtn.hidden = nonPending === 0;
+    if (clearBtn) {
+      clearBtn.hidden = nonPending === 0;
+      if (clearLbl && nonPending > 0) {
+        const word = nonPending === 1 ? 'entry' : 'entries';
+        clearLbl.textContent = `Clear ${nonPending} past ${word}`;
+      }
+    }
 
     if (items.some(i => i.status === 'pending')) startTrackedPoll();
     else stopTrackedPoll();
@@ -478,14 +487,16 @@
     }, 1500);
   }
 
-  document.getElementById('tracked-toggle').addEventListener('click', async () => {
-    const list = document.getElementById('tracked-list');
-    list.hidden = !list.hidden;
-    const items = await fetchTracked();
-    const count = (items || []).length;
-    document.getElementById('tracked-toggle').textContent =
-      list.hidden ? `show (${count})` : 'hide';
-  });
+  // Panel toggle: whole header bar acts as the expand/collapse control.
+  (function wireTrackedToggle() {
+    const section = document.getElementById('tracked-section');
+    const header = document.getElementById('tracked-header');
+    if (!section || !header) return;
+    header.addEventListener('click', () => {
+      const open = section.classList.toggle('open');
+      header.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  })();
 
   document.getElementById('copy-url').addEventListener('click', (e) => {
     const url = document.getElementById('result-url').textContent;

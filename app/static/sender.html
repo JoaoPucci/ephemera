@@ -16,15 +16,22 @@
   <div class="wordmark">ephemera</div>
   <main class="card" id="main-card">
     <section id="tracked-section" hidden>
-      <div class="tracked-header">
-        <h2>Tracked</h2>
-        <div class="tracked-header-actions">
-          <button type="button" id="tracked-clear" class="tracked-clear" hidden
-                  title="Delete every viewed / burned / canceled / expired row">clear history</button>
-          <button type="button" id="tracked-toggle" class="link">show</button>
+      <button type="button" id="tracked-header" class="tracked-panel-header" aria-expanded="false" aria-controls="tracked-body">
+        <span class="tracked-panel-title">Tracked</span>
+        <span id="tracked-count" class="tracked-panel-count">0</span>
+        <span class="tracked-panel-chevron" aria-hidden="true"></span>
+      </button>
+      <div id="tracked-body" class="tracked-panel-body">
+        <div class="tracked-panel-inner">
+          <ul id="tracked-list"></ul>
+          <div class="tracked-panel-footer">
+            <button type="button" id="tracked-clear" class="tracked-clear" hidden
+                    title="Remove every row that is no longer pending — pending secrets are kept">
+              <span id="tracked-clear-label">Clear past entries</span>
+            </button>
+          </div>
         </div>
       </div>
-      <ul id="tracked-list" hidden></ul>
     </section>
 
     <div id="compose">

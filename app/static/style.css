@@ -581,37 +581,110 @@ button.copy-error:hover {
 }
 
 /* ===================================================================
-   Tracked-secrets section
+   Tracked-secrets panel
+   A collapsible panel: the whole header bar is a button; the body
+   animates its max-height on expand; list is capped + internally
+   scrollable so it never pushes the compose form off-screen.
    =================================================================== */
 
-#tracked-section {
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
-}
+#tracked-section { margin-bottom: 1.5rem; }
 
-.tracked-header {
+.tracked-panel-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  margin: 0;
+  min-height: auto;
+  box-shadow: none;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.tracked-panel-header:hover {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  transform: none;
+  box-shadow: none;
+}
+.tracked-panel-header:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-.tracked-header h2 {
+.tracked-panel-title {
   font-size: 0.95rem;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.tracked-panel-count {
+  font-size: 0.72rem;
+  font-weight: 600;
   color: var(--muted);
-  margin: 0;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  padding: 0.1rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  min-width: 1.25rem;
+  text-align: center;
+}
+
+/* Chevron drawn from two borders; rotates 180deg on open */
+.tracked-panel-chevron {
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+#tracked-section.open .tracked-panel-chevron {
+  transform: rotate(-135deg) translate(1.5px, 1.5px);
+}
+
+/* Body: max-height transition. Start at 0, animate up to the cap on open.
+   Internal scroll kicks in for lists longer than the cap. */
+.tracked-panel-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 260ms ease;
+}
+#tracked-section.open .tracked-panel-body {
+  max-height: 22rem;       /* ~280px; room for ~5 rows + footer */
+  overflow-y: auto;
+}
+.tracked-panel-inner {
+  padding: 0.25rem 0.25rem 0;
 }
 
 #tracked-list {
   list-style: none;
   padding: 0;
-  margin: 0.75rem 0 0;
+  margin: 0.6rem 0.25rem 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.tracked-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.25rem 0.6rem;
+  margin-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+}
+.tracked-panel-footer:empty,
+.tracked-panel-footer:has(> [hidden]) {
+  display: none;
 }
 
 .tracked-item {
