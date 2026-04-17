@@ -427,29 +427,36 @@
 
   // Clear-history action: same 2-click arm pattern as per-row cancel. First
   // click arms (danger tint + "confirm?"), second click within 3s executes.
+  // We mutate only the #tracked-clear-label span so the icon (a sibling SVG)
+  // stays put across state transitions.
   (function wireClearHistory() {
     const clearBtn = document.getElementById('tracked-clear');
-    if (!clearBtn) return;
+    const clearLbl = document.getElementById('tracked-clear-label');
+    if (!clearBtn || !clearLbl) return;
     let armTimer = null;
+    // Remember the last "idle" label so we can restore it (it carries the
+    // current count, set by renderTrackedList, and may differ between calls).
+    function idleLabel() { return clearBtn.dataset.idleLabel || 'Clear past entries'; }
     clearBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!clearBtn.classList.contains('armed')) {
+        clearBtn.dataset.idleLabel = clearLbl.textContent;
         clearBtn.classList.add('armed');
-        clearBtn.textContent = 'confirm?';
+        clearLbl.textContent = 'confirm?';
         armTimer = setTimeout(() => {
           clearBtn.classList.remove('armed');
-          clearBtn.textContent = 'clear history';
+          clearLbl.textContent = idleLabel();
         }, 3000);
         return;
       }
       if (armTimer) clearTimeout(armTimer);
       clearBtn.disabled = true;
-      clearBtn.textContent = 'clearing…';
+      clearLbl.textContent = 'clearing…';
       try {
         await fetch('/api/secrets/tracked/clear', { method: 'POST' });
       } catch {}
       clearBtn.classList.remove('armed');
-      clearBtn.textContent = 'clear history';
+      clearLbl.textContent = idleLabel();
       clearBtn.disabled = false;
       renderTrackedList();
     });
