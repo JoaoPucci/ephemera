@@ -216,6 +216,43 @@ def test_cancel_receiver_url_stops_working(provisioned_user):
     assert models.get_by_token(token)["ciphertext"] is None
 
 
+def test_clear_non_pending_tracked_removes_only_non_live(provisioned_user):
+    uid = provisioned_user["id"]
+    live = _mk(uid, track=True)                           # pending, live
+    viewed = _mk(uid, track=True)
+    models.mark_viewed(viewed["id"])
+    burned = _mk(uid, track=True)
+    models.burn(burned["id"])
+    canceled = _mk(uid, track=True)
+    models.cancel(canceled["id"], uid)
+    expired = _mk(uid, track=True, expires_in=-60)
+
+    removed = models.clear_non_pending_tracked(uid)
+    assert removed == 4  # viewed + burned + canceled + expired
+    rows = models.list_tracked_secrets(uid)
+    assert [r["id"] for r in rows] == [live["id"]]
+
+
+def test_clear_non_pending_tracked_scopes_by_user(provisioned_user, make_user):
+    alice_id = provisioned_user["id"]
+    bob = make_user("bob")
+
+    ra = _mk(alice_id, track=True)
+    models.mark_viewed(ra["id"])
+    rb = _mk(bob["id"], track=True)
+    models.mark_viewed(rb["id"])
+
+    models.clear_non_pending_tracked(alice_id)
+    # Alice's row is gone; Bob's is still there.
+    assert models.list_tracked_secrets(alice_id) == []
+    assert len(models.list_tracked_secrets(bob["id"])) == 1
+
+
+def test_clear_non_pending_tracked_returns_zero_when_nothing_to_clear(provisioned_user):
+    _mk(provisioned_user["id"], track=True)  # only a live one
+    assert models.clear_non_pending_tracked(provisioned_user["id"]) == 0
+
+
 def test_list_tracked_reports_canceled_status(provisioned_user):
     r = _mk(provisioned_user["id"], track=True)
     models.cancel(r["id"], provisioned_user["id"])

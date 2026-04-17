@@ -18,7 +18,11 @@
     <section id="tracked-section" hidden>
       <div class="tracked-header">
         <h2>Tracked</h2>
-        <button type="button" id="tracked-toggle" class="link">show</button>
+        <div class="tracked-header-actions">
+          <button type="button" id="tracked-clear" class="tracked-clear" hidden
+                  title="Delete every viewed / burned / canceled / expired row">clear history</button>
+          <button type="button" id="tracked-toggle" class="link">show</button>
+        </div>
       </div>
       <ul id="tracked-list" hidden></ul>
     </section>

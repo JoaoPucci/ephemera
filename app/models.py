@@ -380,6 +380,27 @@ def cancel(sid: str, user_id: int) -> bool:
     return True
 
 
+def clear_non_pending_tracked(user_id: int) -> int:
+    """Delete every tracked row owned by user_id that is no longer live:
+    viewed, burned, canceled, or still-'pending' but past expiry. Returns
+    the number of rows removed. Pending-and-unexpired rows are kept."""
+    now = _iso(_utcnow())
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM secrets
+             WHERE user_id = ?
+               AND track = 1
+               AND (
+                 status IN ('viewed', 'burned', 'canceled')
+                 OR (status = 'pending' AND expires_at <= ?)
+               )
+            """,
+            (user_id, now),
+        )
+    return cur.rowcount or 0
+
+
 def untrack(sid: str, user_id: int) -> bool:
     """Stop showing this secret in the tracked list. Scoped to user_id so one
     user cannot untrack another's secrets."""

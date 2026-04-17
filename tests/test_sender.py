@@ -516,6 +516,96 @@ def test_cancel_requires_auth(client):
     assert r.status_code == 401
 
 
+# ---------------------------------------------------------------------------
+# Clear-history: batch-delete non-pending tracked rows
+# ---------------------------------------------------------------------------
+
+
+def test_clear_history_keeps_pending_and_deletes_the_rest(client, auth_headers):
+    # One pending, one viewed, one canceled
+    live = client.post(
+        "/api/secrets",
+        json={"content": "live", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    ).json()
+
+    viewed = client.post(
+        "/api/secrets",
+        json={"content": "viewed", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    ).json()
+    v_token, v_frag = viewed["url"].split("#", 1)
+    v_token = v_token.rsplit("/", 1)[-1]
+    client.post(f"/s/{v_token}/reveal", json={"key": v_frag}, headers={"Origin": "http://testserver"})
+
+    canceled = client.post(
+        "/api/secrets",
+        json={"content": "canceled", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    ).json()
+    client.post(f"/api/secrets/{canceled['id']}/cancel", headers=auth_headers)
+
+    r = client.post("/api/secrets/tracked/clear", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == {"cleared": 2}
+
+    items = client.get("/api/secrets/tracked", headers=auth_headers).json()["items"]
+    assert [i["id"] for i in items] == [live["id"]]
+
+
+def test_clear_history_scopes_by_user(client, auth_headers, make_user):
+    # Alice creates + views a secret (will become clearable).
+    r = client.post(
+        "/api/secrets",
+        json={"content": "a", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    ).json()
+    t, f = r["url"].split("#", 1)
+    t = t.rsplit("/", 1)[-1]
+    client.post(f"/s/{t}/reveal", json={"key": f}, headers={"Origin": "http://testserver"})
+
+    # Bob also has a viewed tracked secret.
+    from app import auth, models
+    bob = make_user("bob")
+    plaintext, digest = auth.mint_api_token()
+    models.create_token(user_id=bob["id"], name="bob-test", token_hash=digest)
+    bob_hdrs = {"Authorization": f"Bearer {plaintext}", "Origin": "http://testserver"}
+    br = client.post(
+        "/api/secrets",
+        json={"content": "b", "content_type": "text", "expires_in": 300, "track": True},
+        headers=bob_hdrs,
+    ).json()
+    bt, bf = br["url"].split("#", 1)
+    bt = bt.rsplit("/", 1)[-1]
+    client.post(f"/s/{bt}/reveal", json={"key": bf}, headers={"Origin": "http://testserver"})
+
+    # Alice clears her history; Bob's should survive.
+    ar = client.post("/api/secrets/tracked/clear", headers=auth_headers)
+    assert ar.status_code == 200 and ar.json()["cleared"] == 1
+    assert client.get("/api/secrets/tracked", headers=auth_headers).json()["items"] == []
+    bobs = client.get("/api/secrets/tracked", headers=bob_hdrs).json()["items"]
+    assert len(bobs) == 1
+
+
+def test_clear_history_returns_zero_when_nothing_to_clear(client, auth_headers):
+    client.post(
+        "/api/secrets",
+        json={"content": "live", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    r = client.post("/api/secrets/tracked/clear", headers=auth_headers)
+    assert r.status_code == 200 and r.json()["cleared"] == 0
+
+
+def test_clear_history_requires_auth(client):
+    assert client.post("/api/secrets/tracked/clear").status_code == 401
+
+
+def test_clear_history_rejects_cross_origin(client, auth_headers):
+    bad = {"Authorization": auth_headers["Authorization"], "Origin": "https://attacker.example"}
+    assert client.post("/api/secrets/tracked/clear", headers=bad).status_code == 403
+
+
 def test_cancel_rejects_cross_origin(client, auth_headers):
     r = client.post(
         "/api/secrets",

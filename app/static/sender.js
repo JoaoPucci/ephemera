@@ -407,9 +407,44 @@
 
     toggle.textContent = list.hidden ? `show (${items.length})` : 'hide';
 
+    // Reveal the "clear history" action only if there's something to clear.
+    const clearBtn = document.getElementById('tracked-clear');
+    const nonPending = items.filter(i => i.status !== 'pending').length;
+    if (clearBtn) clearBtn.hidden = nonPending === 0;
+
     if (items.some(i => i.status === 'pending')) startTrackedPoll();
     else stopTrackedPoll();
   }
+
+  // Clear-history action: same 2-click arm pattern as per-row cancel. First
+  // click arms (danger tint + "confirm?"), second click within 3s executes.
+  (function wireClearHistory() {
+    const clearBtn = document.getElementById('tracked-clear');
+    if (!clearBtn) return;
+    let armTimer = null;
+    clearBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!clearBtn.classList.contains('armed')) {
+        clearBtn.classList.add('armed');
+        clearBtn.textContent = 'confirm?';
+        armTimer = setTimeout(() => {
+          clearBtn.classList.remove('armed');
+          clearBtn.textContent = 'clear history';
+        }, 3000);
+        return;
+      }
+      if (armTimer) clearTimeout(armTimer);
+      clearBtn.disabled = true;
+      clearBtn.textContent = 'clearing…';
+      try {
+        await fetch('/api/secrets/tracked/clear', { method: 'POST' });
+      } catch {}
+      clearBtn.classList.remove('armed');
+      clearBtn.textContent = 'clear history';
+      clearBtn.disabled = false;
+      renderTrackedList();
+    });
+  })();
 
   async function copyRowUrl(li, timeEl, originalTimeText, url) {
     if (li.dataset.busy === '1') return;

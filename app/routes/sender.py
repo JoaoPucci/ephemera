@@ -233,6 +233,21 @@ def list_tracked(user: dict = Depends(verify_api_token_or_session)):
 
 
 @router.post(
+    "/api/secrets/tracked/clear",
+    dependencies=[Depends(verify_same_origin)],
+)
+def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
+    """Batch-delete every non-pending tracked row for the caller.
+
+    Scope matches what the UI shows as "not pending": viewed, burned,
+    canceled, and still-pending-in-DB-but-past-expiry. Pending live rows
+    are kept -- they're the user's active secrets.
+    """
+    count = models.clear_non_pending_tracked(user["id"])
+    return {"cleared": count}
+
+
+@router.post(
     "/api/secrets/{sid}/cancel",
     dependencies=[Depends(verify_same_origin)],
 )

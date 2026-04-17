@@ -593,6 +593,18 @@ Response 200:
 }
 ```
 
+#### `POST /api/secrets/tracked/clear`
+Batch-delete every non-pending tracked row for the caller -- viewed, burned,
+canceled, and still-pending-but-past-expiry. Pending live rows are kept.
+The UI uses this behind a 2-click-confirm "clear history" action.
+
+```
+Headers: Authorization: Bearer <api-token>  or valid session cookie
+Response 200: { "cleared": <int> }
+Response 401: not authenticated
+Response 403: cross-origin (for browser callers)
+```
+
 #### `POST /api/secrets/{id}/cancel`
 Sender-initiated revocation of a pending secret. The receiver's URL stops
 working immediately. Intended for "I sent that link to the wrong person /

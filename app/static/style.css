@@ -699,7 +699,8 @@ button.copy-error:hover {
 /* Revoke-the-URL action on pending tracked rows. Two states: idle (muted
    text, "cancel") and armed (danger text, "confirm?") -- user clicks once
    to arm, clicks within 3s to confirm. Prevents accidental revocation. */
-.tracked-cancel {
+.tracked-cancel,
+.tracked-clear {
   background: transparent;
   color: var(--muted);
   border: 1px solid transparent;
@@ -715,20 +716,29 @@ button.copy-error:hover {
   border-radius: 999px;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 }
-.tracked-cancel:hover {
+.tracked-cancel:hover,
+.tracked-clear:hover {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 8%, transparent);
   transform: none;
   box-shadow: none;
 }
-.tracked-cancel.armed {
+.tracked-cancel.armed,
+.tracked-clear.armed {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
-.tracked-cancel:focus-visible {
+.tracked-cancel:focus-visible,
+.tracked-clear:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+.tracked-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 /* ===================================================================
