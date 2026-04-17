@@ -302,16 +302,22 @@ button.copy-error:hover {
   box-shadow: var(--shadow-md);
 }
 
+/* Half-filled circle glyph -- the universal "theme" signifier. The filled
+   half flips based on the current theme, hinting at the dual state. */
 .theme-toggle::before {
   content: "";
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+  border: 1.25px solid currentColor;
   border-radius: 50%;
+  background: linear-gradient(to right, currentColor 0 50%, transparent 50% 100%);
   margin-right: 0.5rem;
-  vertical-align: 1px;
-  background: var(--accent);
+  vertical-align: -1px;
   transition: background 150ms ease;
+}
+[data-theme="dark"] .theme-toggle::before {
+  background: linear-gradient(to right, transparent 0 50%, currentColor 50% 100%);
 }
 
 .user-btn {
