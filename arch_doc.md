@@ -27,6 +27,7 @@ encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
 | 14| Theme                     | Light (default) + dark via CSS custom properties on `[data-theme]`; user choice persisted in localStorage; `prefers-color-scheme` on first visit |
 | 15| Multi-user data model     | `users` has real PK + unique `username`; every `secrets` and `api_tokens` row carries `user_id` FK with `ON DELETE CASCADE`. All authenticated reads/writes scope by the caller's user_id. Lets A (single-user) -> B (CLI-provisioned small group) -> C (open signup) be incremental, not a rewrite. |
 | 16| Owner vs. user boundary   | The "owner" is whoever has shell access (CLI). Public signup (future) only ever creates regular users. Prevents the "first-signup-becomes-admin" race seen on Gitea et al. |
+| 17| Sender-initiated cancel   | `POST /api/secrets/{id}/cancel` revokes a still-live secret: wipes the ciphertext/key/passphrase like `burn`, tags status `'canceled'` for audit, URL returns 404 thereafter. Two-click-to-confirm in the UI to prevent accidents. |
 
 ---
 
@@ -312,7 +313,7 @@ CREATE TABLE secrets (
     mime_type     TEXT,                -- 'image/png', etc. NULL for text
     passphrase    TEXT,                -- bcrypt hash, NULL if no passphrase
     track         INTEGER DEFAULT 0,  -- whether to keep metadata after reveal
-    status        TEXT DEFAULT 'pending', -- 'pending', 'viewed', 'burned', 'expired'
+    status        TEXT DEFAULT 'pending', -- 'pending', 'viewed', 'burned', 'canceled', 'expired'
     attempts      INTEGER DEFAULT 0,  -- failed passphrase attempts
     label         TEXT,                -- sender-supplied nickname for the tracked list (NULL if untracked or unset)
     created_at    TEXT NOT NULL,       -- ISO8601 UTC
@@ -590,6 +591,27 @@ Response 200:
     ...
   ]
 }
+```
+
+#### `POST /api/secrets/{id}/cancel`
+Sender-initiated revocation of a pending secret. The receiver's URL stops
+working immediately. Intended for "I sent that link to the wrong person /
+changed my mind about sharing".
+
+- Wipes `ciphertext`, `server_key`, and `passphrase` (same as `burn()`).
+- If the secret was tracked, the row remains with `status='canceled'`,
+  `viewed_at=now`; purged on the normal 30-day retention. This keeps the
+  cancellation visible in the tracked list.
+- If the secret was not tracked, the row is deleted.
+- Returns `404` if the secret doesn't exist, belongs to another user, or
+  was already viewed / burned / canceled / expired.
+
+```
+Headers: Authorization: Bearer <api-token>  or valid session cookie
+Response 204: revoked; the receiver URL now returns 404
+Response 401: not authenticated
+Response 403: cross-origin (for browser callers)
+Response 404: not found or already gone
 ```
 
 #### `DELETE /api/secrets/{id}`

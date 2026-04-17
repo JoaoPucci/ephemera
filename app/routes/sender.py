@@ -232,6 +232,21 @@ def list_tracked(user: dict = Depends(verify_api_token_or_session)):
     return {"items": models.list_tracked_secrets(user["id"])}
 
 
+@router.post(
+    "/api/secrets/{sid}/cancel",
+    dependencies=[Depends(verify_same_origin)],
+)
+def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
+    """Sender revokes a pending secret. Receiver's URL stops working immediately.
+
+    On a currently-live secret: wipes the ciphertext/keys and flags status as
+    'canceled' (kept in the tracked list for audit). On anything else: 404.
+    """
+    if not models.cancel(sid, user["id"]):
+        raise HTTPException(status_code=404, detail="not found or already gone")
+    return Response(status_code=204)
+
+
 @router.delete(
     "/api/secrets/{sid}",
     dependencies=[Depends(verify_same_origin)],

@@ -248,6 +248,15 @@
     } catch {}
   }
 
+  async function cancelOnServer(id) {
+    try {
+      const res = await fetch(`/api/secrets/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+      });
+      return res.ok || res.status === 204;
+    } catch { return false; }
+  }
+
   async function renderTrackedList() {
     const section = document.getElementById('tracked-section');
     const list = document.getElementById('tracked-list');
@@ -286,6 +295,8 @@
         timeText += ' · viewed ' + fmtRelative(item.viewed_at);
       } else if (item.status === 'burned' && item.viewed_at) {
         timeText += ' · burned ' + fmtRelative(item.viewed_at);
+      } else if (item.status === 'canceled' && item.viewed_at) {
+        timeText += ' · canceled ' + fmtRelative(item.viewed_at);
       } else if (item.status === 'expired') {
         timeText += ' · expired ' + fmtRelative(item.expires_at);
       }
@@ -315,6 +326,38 @@
       const right = document.createElement('div');
       right.className = 'tracked-right';
       right.appendChild(pill);
+
+      // Cancel action: only for pending (live) secrets. Two-click confirm
+      // pattern so accidental clicks don't revoke a link.
+      if (item.status === 'pending') {
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'tracked-cancel';
+        cancelBtn.textContent = 'cancel';
+        cancelBtn.title = 'Revoke the URL so the receiver can no longer view this';
+        cancelBtn.setAttribute('aria-label', 'cancel this secret');
+        let armTimer = null;
+        cancelBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!cancelBtn.classList.contains('armed')) {
+            cancelBtn.classList.add('armed');
+            cancelBtn.textContent = 'confirm?';
+            armTimer = setTimeout(() => {
+              cancelBtn.classList.remove('armed');
+              cancelBtn.textContent = 'cancel';
+            }, 3000);
+            return;
+          }
+          if (armTimer) clearTimeout(armTimer);
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = 'canceling…';
+          await cancelOnServer(item.id);
+          forgetUrl(item.id);
+          renderTrackedList();
+        });
+        right.appendChild(cancelBtn);
+      }
+
       right.appendChild(rm);
 
       li.appendChild(meta);
@@ -329,8 +372,8 @@
         li.setAttribute('tabindex', '0');
         li.title = 'Click to copy link';
         const activate = async (e) => {
-          // Ignore clicks that originated on the remove button.
-          if (e.target && e.target.closest('.tracked-remove')) return;
+          // Ignore clicks that originated on row-level action buttons.
+          if (e.target && e.target.closest('.tracked-remove, .tracked-cancel')) return;
           await copyRowUrl(li, timeEl, timeText, cachedUrl);
         };
         li.addEventListener('click', activate);

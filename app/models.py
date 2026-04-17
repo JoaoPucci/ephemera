@@ -318,9 +318,10 @@ def list_tracked_secrets(user_id: int) -> list[dict]:
             """
             SELECT id, content_type, mime_type, label, status, created_at, expires_at, viewed_at,
                    CASE
-                     WHEN status = 'viewed'  THEN 'viewed'
-                     WHEN status = 'burned'  THEN 'burned'
-                     WHEN expires_at <= ?    THEN 'expired'
+                     WHEN status = 'viewed'   THEN 'viewed'
+                     WHEN status = 'burned'   THEN 'burned'
+                     WHEN status = 'canceled' THEN 'canceled'
+                     WHEN expires_at <= ?     THEN 'expired'
                      ELSE 'pending'
                    END AS effective_status
               FROM secrets
@@ -342,6 +343,41 @@ def list_tracked_secrets(user_id: int) -> list[dict]:
         }
         for r in rows
     ]
+
+
+def cancel(sid: str, user_id: int) -> bool:
+    """Sender-initiated revocation of their own still-live secret.
+
+    Wipes payload + key material (same shape as burn()), but tags status as
+    'canceled' so the tracked-list UI can distinguish "sender changed their
+    mind" from "someone smashed the passphrase". Idempotent-ish: returns False
+    if the secret doesn't exist, belongs to another user, or was never live
+    (already viewed/burned/expired/canceled).
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            """SELECT track, ciphertext FROM secrets
+                WHERE id = ? AND user_id = ?""",
+            (sid, user_id),
+        ).fetchone()
+        if row is None or row["ciphertext"] is None:
+            return False
+        if row["track"]:
+            conn.execute(
+                """
+                UPDATE secrets
+                   SET ciphertext = NULL,
+                       server_key = NULL,
+                       passphrase = NULL,
+                       status     = 'canceled',
+                       viewed_at  = ?
+                 WHERE id = ?
+                """,
+                (_iso(_utcnow()), sid),
+            )
+        else:
+            conn.execute("DELETE FROM secrets WHERE id = ?", (sid,))
+    return True
 
 
 def untrack(sid: str, user_id: int) -> bool:

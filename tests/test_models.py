@@ -175,6 +175,56 @@ def test_list_tracked_secrets_scopes_by_user(provisioned_user, make_user):
     assert {r["label"] for r in bob_rows} == {"bob-one"}
 
 
+def test_cancel_tracked_wipes_payload_and_flags_status(provisioned_user):
+    r = _mk(provisioned_user["id"], track=True, passphrase_hash="hash")
+    ok = models.cancel(r["id"], provisioned_user["id"])
+    assert ok is True
+    row = models.get_by_id(r["id"])
+    assert row is not None
+    assert row["status"] == "canceled"
+    assert row["ciphertext"] is None
+    assert row["server_key"] is None
+    assert row["passphrase"] is None
+    assert row["viewed_at"] is not None
+
+
+def test_cancel_untracked_deletes_row(provisioned_user):
+    r = _mk(provisioned_user["id"])
+    assert models.cancel(r["id"], provisioned_user["id"]) is True
+    assert models.get_by_id(r["id"]) is None
+
+
+def test_cancel_on_already_viewed_secret_returns_false(provisioned_user):
+    r = _mk(provisioned_user["id"], track=True)
+    models.mark_viewed(r["id"])
+    assert models.cancel(r["id"], provisioned_user["id"]) is False
+
+
+def test_cancel_cannot_touch_other_users_secret(provisioned_user, make_user):
+    bob = make_user("bob")
+    r = _mk(provisioned_user["id"], track=True)
+    assert models.cancel(r["id"], bob["id"]) is False
+    row = models.get_by_id(r["id"])
+    assert row is not None and row["ciphertext"] is not None  # untouched
+
+
+def test_cancel_receiver_url_stops_working(provisioned_user):
+    r = _mk(provisioned_user["id"], track=True)
+    token = r["token"]
+    assert models.get_by_token(token)["ciphertext"] is not None
+    models.cancel(r["id"], provisioned_user["id"])
+    assert models.get_by_token(token)["ciphertext"] is None
+
+
+def test_list_tracked_reports_canceled_status(provisioned_user):
+    r = _mk(provisioned_user["id"], track=True)
+    models.cancel(r["id"], provisioned_user["id"])
+    items = models.list_tracked_secrets(provisioned_user["id"])
+    assert len(items) == 1
+    assert items[0]["status"] == "canceled"
+    assert items[0]["viewed_at"] is not None
+
+
 def test_untrack_scopes_by_user(provisioned_user, make_user):
     bob = make_user("bob")
     r = _mk(provisioned_user["id"], track=True)

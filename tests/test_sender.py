@@ -436,3 +436,93 @@ def test_delete_is_idempotent(client, auth_headers):
 
 def test_delete_requires_auth(client):
     assert client.delete("/api/secrets/some-id").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Cancel: sender revokes the URL before receiver opens it
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_revokes_url_and_tags_as_canceled(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "regret", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+    url = r.json()["url"]
+    token, frag = url.split("#", 1)
+    token = token.rsplit("/", 1)[-1]
+
+    c = client.post(f"/api/secrets/{sid}/cancel", headers=auth_headers)
+    assert c.status_code == 204
+
+    # Receiver URL now returns 404.
+    rv = client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
+    assert rv.status_code == 404
+
+    # Tracked list shows it as canceled (row retained for audit).
+    items = client.get("/api/secrets/tracked", headers=auth_headers).json()["items"]
+    assert len(items) == 1
+    assert items[0]["status"] == "canceled"
+    assert items[0]["viewed_at"] is not None
+
+
+def test_cancel_on_already_viewed_returns_404(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+    url = r.json()["url"]
+    token, frag = url.split("#", 1)
+    token = token.rsplit("/", 1)[-1]
+    client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
+
+    # Already viewed -> ciphertext gone -> cancel has nothing to do.
+    c = client.post(f"/api/secrets/{sid}/cancel", headers=auth_headers)
+    assert c.status_code == 404
+
+
+def test_cancel_cannot_touch_other_users_secret(client, auth_headers, make_user):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "mine", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+    url = r.json()["url"]
+    token, frag = url.split("#", 1)
+    token = token.rsplit("/", 1)[-1]
+
+    # Bob tries to cancel Alice's secret.
+    from app import auth, models
+    bob = make_user("bob")
+    plaintext, digest = auth.mint_api_token()
+    models.create_token(user_id=bob["id"], name="bob-test", token_hash=digest)
+    bob_hdrs = {"Authorization": f"Bearer {plaintext}", "Origin": "http://testserver"}
+
+    c = client.post(f"/api/secrets/{sid}/cancel", headers=bob_hdrs)
+    assert c.status_code == 404
+
+    # Alice's URL still works.
+    rv = client.post(f"/s/{token}/reveal", json={"key": frag}, headers={"Origin": "http://testserver"})
+    assert rv.status_code == 200
+
+
+def test_cancel_requires_auth(client):
+    r = client.post("/api/secrets/whatever/cancel")
+    assert r.status_code == 401
+
+
+def test_cancel_rejects_cross_origin(client, auth_headers):
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+    bad = {"Authorization": auth_headers["Authorization"], "Origin": "https://attacker.example"}
+    c = client.post(f"/api/secrets/{sid}/cancel", headers=bad)
+    assert c.status_code == 403
