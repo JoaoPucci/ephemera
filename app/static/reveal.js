@@ -82,9 +82,11 @@
     const data = await res.json();
     if (data.content_type === 'image') {
       const img = document.getElementById('revealed-image');
-      img.src = `data:${data.mime_type};base64,${data.content}`;
+      const src = `data:${data.mime_type};base64,${data.content}`;
+      img.src = src;
       show('image');
       document.getElementById('main-card').classList.add('wide');
+      wireZoom(img, src);
     } else {
       document.getElementById('revealed-text').textContent = data.content;
       const btn = document.getElementById('copy-btn');
@@ -94,6 +96,35 @@
       });
       show('text');
     }
+  }
+
+  function wireZoom(thumb, src) {
+    const overlay = document.getElementById('zoom-overlay');
+    const zoomImg = document.getElementById('zoom-image');
+    const closeBtn = document.getElementById('zoom-close');
+
+    function open() {
+      zoomImg.src = src;
+      overlay.hidden = false;
+      document.body.style.overflow = 'hidden';
+      closeBtn.focus();
+    }
+    function close() {
+      overlay.hidden = true;
+      zoomImg.src = '';
+      document.body.style.overflow = '';
+      thumb.focus();
+    }
+
+    thumb.addEventListener('click', open);
+    thumb.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+    overlay.addEventListener('click', close);
+    closeBtn.addEventListener('click', (e) => { e.stopPropagation(); close(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !overlay.hidden) close();
+    });
   }
 
   init();

@@ -32,8 +32,9 @@
     </section>
 
     <section id="state-image" hidden>
-      <img id="revealed-image" alt="">
-      <p class="muted">This secret has been destroyed.</p>
+      <img id="revealed-image" alt="" tabindex="0" role="button"
+           aria-label="Click to view full size">
+      <p class="muted">Click the image for full size · this secret has been destroyed.</p>
     </section>
 
     <section id="state-gone" hidden>
@@ -41,6 +42,12 @@
       <p class="muted">It may have already been viewed or has expired.</p>
     </section>
   </main>
+
+  <div id="zoom-overlay" hidden role="dialog" aria-modal="true" aria-label="Full-size image">
+    <img id="zoom-image" alt="">
+    <button type="button" id="zoom-close" class="zoom-close" aria-label="Close full-size view">close</button>
+  </div>
+
   <script src="/static/copy.js"></script>
   <script src="/static/reveal.js"></script>
 </body>

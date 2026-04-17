@@ -461,6 +461,69 @@ button.copy-error:hover {
   display: block;
   margin: 0 auto 1rem;
   animation: fadein 300ms ease;
+  cursor: zoom-in;
+  transition: box-shadow 150ms ease, transform 150ms ease;
+}
+#revealed-image:hover { box-shadow: var(--shadow-md); }
+#revealed-image:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Fullscreen zoom overlay */
+#zoom-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  cursor: zoom-out;
+  animation: fadein 180ms ease;
+  padding: 1rem;
+}
+#zoom-image {
+  max-width: 95vw;
+  max-height: 95vh;
+  border-radius: 4px;
+  display: block;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  animation: zoomin 200ms ease;
+}
+.zoom-close {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  min-height: auto;
+  margin: 0;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.zoom-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: none;
+  box-shadow: none;
+}
+.zoom-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.4);
+}
+
+@keyframes zoomin {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 @keyframes fadein {
