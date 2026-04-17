@@ -1069,13 +1069,18 @@ implementation, not after.
                  +-------------+
 ```
 
-**Caddyfile** (included in repo):
+**Caddyfile** (`deploy/Caddyfile` in repo; copy to `/etc/caddy/Caddyfile`):
 
 ```
 your-domain.com {
-    reverse_proxy localhost:8000
+    reverse_proxy 127.0.0.1:8000
     request_body {
-        max_size 10MB
+        max_size 11MB         # >10MB image cap to absorb multipart framing overhead
+    }
+    encode gzip zstd
+    log {
+        output file /var/log/caddy/ephemera.log
+        format json
     }
 }
 ```
@@ -1083,6 +1088,12 @@ your-domain.com {
 That's it. Caddy handles TLS certificate provisioning, renewal, HTTPS
 redirects, and HSTS headers automatically. No certbot, no cron, no manual
 cert paths.
+
+**DNS must be set up before Caddy first starts.** Caddy requests its certificate
+from Let's Encrypt via the ACME HTTP-01 challenge on first launch; if the
+hostname doesn't resolve to this host yet, the challenge fails. Let's Encrypt
+rate-limits repeated failures (5 duplicate-cert attempts per week), so getting
+DNS correct first is worth the extra minute.
 
 **Why one Uvicorn worker**: The "2 * CPU + 1" formula is a Gunicorn heuristic
 for CPU-bound synchronous WSGI apps -- it doesn't apply here. Uvicorn is async:
@@ -1093,7 +1104,8 @@ multiple OS processes, which means contention on SQLite's process-level write
 lock. One worker avoids that entirely. On a 1 vCPU droplet with low-volume
 personal use, one worker is the correct choice.
 
-**systemd unit** (`ephemera.service`, included in repo):
+**systemd unit** (`deploy/ephemera.service` in repo; copy to
+`/etc/systemd/system/ephemera.service`):
 
 ```ini
 [Unit]
@@ -1106,21 +1118,95 @@ User=ephemera
 Group=ephemera
 WorkingDirectory=/opt/ephemera
 EnvironmentFile=/etc/ephemera/env
-ExecStart=/opt/ephemera/venv/bin/uvicorn app:create_app --host 127.0.0.1 --port 8000
+ExecStart=/opt/ephemera/venv/bin/uvicorn app:create_app \
+  --factory \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --proxy-headers \
+  --forwarded-allow-ips 127.0.0.1
 Restart=on-failure
 RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/ephemera
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-**File locations**:
-- App code: `/opt/ephemera/`
-- Virtual env: `/opt/ephemera/venv/`
-- Database: `/var/lib/ephemera/ephemera.db`
-- Env file: `/etc/ephemera/env`
-- systemd unit: `/etc/systemd/system/ephemera.service`
-- Caddyfile: `/etc/caddy/Caddyfile`
+Three flags in `ExecStart` are load-bearing and easy to miss:
+
+- `--factory` -- `create_app()` is a factory function, not a module-level ASGI
+  app instance. Without this flag Uvicorn tries to call `create_app.__call__`
+  and fails.
+- `--proxy-headers` -- tells Uvicorn to read `X-Forwarded-For` and
+  `X-Forwarded-Proto` from the upstream reverse proxy and populate
+  `request.client.host` / scheme accordingly.
+- `--forwarded-allow-ips 127.0.0.1` -- Uvicorn only honours proxy headers from
+  trusted IPs; the loopback address is correct here because Caddy runs on the
+  same host. **Without both of these flags the in-memory rate limiter sees
+  every request as coming from 127.0.0.1 (Caddy) and throttles all users as
+  one bucket.**
+
+The hardening stanza is optional but cheap. Relevant pieces:
+- `ProtectSystem=strict` + `ReadWritePaths=/var/lib/ephemera` makes the whole
+  filesystem read-only to the service except for its DB directory.
+- `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectKernel*`: standard
+  reductions to what a compromised service could reach.
+
+**File locations** (all created at install time):
+
+| Path | Owner / mode | Purpose |
+|---|---|---|
+| `/opt/ephemera/` | `ephemera:ephemera` | app code + `venv/` |
+| `/var/lib/ephemera/` | `ephemera:ephemera` 0750 | SQLite DB + WAL/SHM sidecars |
+| `/etc/ephemera/env` | `root:ephemera` **0640** | secrets (`EPHEMERA_SECRET_KEY`, etc.). Locked-down perms so only root or the service group can read it. |
+| `/etc/systemd/system/ephemera.service` | `root:root` 0644 | systemd unit |
+| `/etc/caddy/Caddyfile` | `root:root` 0644 | reverse proxy config |
+| `/var/log/caddy/` | `caddy:caddy` | Caddy access + error logs |
+
+### Operations
+
+**Deploy a new version:**
+
+```bash
+cd /opt/ephemera
+sudo -u ephemera git pull
+sudo -u ephemera ./venv/bin/pip install -r requirements.txt
+sudo systemctl restart ephemera
+```
+
+In-memory rate-limiter counters reset on restart -- acceptable for this scale.
+
+**Logs:**
+
+```bash
+sudo journalctl -u ephemera -f     # app
+sudo journalctl -u caddy -f        # TLS + HTTP pipeline
+sudo tail -f /var/log/caddy/ephemera.log   # access log (JSON)
+```
+
+**Backup:** SQLite in WAL mode is safe to back up live via the atomic `.backup`
+command -- don't just `cp` the db file, the WAL can make the copy inconsistent.
+
+```bash
+sudo -u ephemera /usr/bin/sqlite3 /var/lib/ephemera/ephemera.db \
+  ".backup '/var/lib/ephemera/backup-$(date +%F).db'"
+```
+
+Also back up `/etc/ephemera/env`. If the `SECRET_KEY` is lost, all existing
+session cookies and recovery-code hashes stay valid, but the server won't be
+able to verify sessions signed with the old key -- users will just re-login.
 
 Claude sessions used:
 - claude --resume ec39eb3e-606b-4091-bdd6-74ef8b74c3bd
