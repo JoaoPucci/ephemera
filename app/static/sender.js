@@ -425,9 +425,10 @@
     setTab('text');
   });
 
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', async () => {
+  const userBtn = document.getElementById('user-btn');
+  const userNameEl = document.getElementById('user-name');
+  if (userBtn) {
+    userBtn.addEventListener('click', async () => {
       try {
         await fetch('/send/logout', { method: 'POST' });
       } catch {}
@@ -436,6 +437,17 @@
       window.location.reload();
     });
   }
+
+  (async function loadMe() {
+    try {
+      const res = await fetch('/api/me');
+      if (res.status === 401) { window.location.reload(); return; }
+      if (!res.ok) return;
+      const me = await res.json();
+      if (userNameEl && me.username) userNameEl.textContent = me.username;
+      if (userBtn) userBtn.setAttribute('aria-label', `Signed in as ${me.username}. Click to sign out.`);
+    } catch {}
+  })();
 
   const trackCheckbox = document.getElementById('track');
   const labelWrap = document.getElementById('label-wrap');

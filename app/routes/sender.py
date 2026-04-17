@@ -208,6 +208,16 @@ async def create_secret(
     }
 
 
+@router.get("/api/me")
+def api_me(user: dict = Depends(verify_api_token_or_session)):
+    """Return a minimal view of the authenticated user (for header UI etc.)."""
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "email": user.get("email"),
+    }
+
+
 @router.get("/api/secrets/{sid}/status")
 def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
     status_row = models.get_status(sid, user["id"])

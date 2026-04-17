@@ -107,6 +107,25 @@ def test_login_rate_limit_kicks_in(client):
 # ---------------------------------------------------------------------------
 
 
+def test_api_me_returns_current_user(authed_client, provisioned_user):
+    r = authed_client.get("/api/me")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == provisioned_user["id"]
+    assert body["username"] == provisioned_user["username"]
+    assert "email" in body  # may be None, but the key exists
+
+
+def test_api_me_requires_auth(client):
+    assert client.get("/api/me").status_code == 401
+
+
+def test_api_me_works_with_api_token(client, auth_headers, provisioned_user):
+    r = client.get("/api/me", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["username"] == provisioned_user["username"]
+
+
 def test_logout_clears_session(authed_client):
     from app.config import get_settings
     r = authed_client.post("/send/logout", headers={"Origin": "http://testserver"})
