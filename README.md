@@ -5,7 +5,7 @@ One-time secret sharing, built from scratch.
 I wanted to send OTS without handing plaintexts to someone else's server —
 so I wrote ephemera and host my own. You can read the code and run your
 own too. Later I'll also open my instance as a hosted service — and once
-the [end-to-end encryption proposal](PROPOSAL-end-to-end-encryption.md)
+the [end-to-end encryption proposal](docs/proposals/end-to-end-encryption.md)
 lands, you won't have to trust me to use it either.
 
 Not a public service yet — there's no self-signup today, so my instance
@@ -23,8 +23,8 @@ Start with whichever matches your question:
 
 > **Directions in progress — feedback welcome.**
 > Two proposals are drafted for early feedback, before any code lands:
-> - [`PROPOSAL-end-to-end-encryption.md`](PROPOSAL-end-to-end-encryption.md) — move encryption into the browser so the operator cannot read plaintexts.
-> - [`PROPOSAL-admin-panel.md`](PROPOSAL-admin-panel.md) — explicit admin role + `/admin` page + audited destructive actions, instead of today's "shell-only admin" model.
+> - [`docs/proposals/end-to-end-encryption.md`](docs/proposals/end-to-end-encryption.md) — move encryption into the browser so the operator cannot read plaintexts.
+> - [`docs/proposals/admin-panel.md`](docs/proposals/admin-panel.md) — explicit admin role + `/admin` page + audited destructive actions, instead of today's "shell-only admin" model.
 > Open a GitHub issue on either before Phase 0 decisions are locked in.
 
 ## Security & quality
@@ -80,7 +80,7 @@ tagged; rollback is one command.
 **Honest caveat.** The operator still serves the JavaScript that the browser
 executes, so an active malicious operator could in principle swap in code
 that exfiltrates plaintext before encryption. Closing that gap is the point
-of the [end-to-end encryption proposal](PROPOSAL-end-to-end-encryption.md) —
+of the [end-to-end encryption proposal](docs/proposals/end-to-end-encryption.md) —
 feedback welcome.
 
 ## Setup (once)

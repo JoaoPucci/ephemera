@@ -1,7 +1,7 @@
 # Proposal: admin role and panel
 
 **Status**: draft — seeking feedback
-**Current system**: see [`ARCHITECTURE.md`](ARCHITECTURE.md)
+**Current system**: see [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
 **Discussion**: open a GitHub issue or discussion thread. This is a
 direction, not a commitment.
 
@@ -33,14 +33,14 @@ The existing "shell = admin" model has been intentional since day one
   There's no "admin mode" for an attacker to slip into.
 - **No "first signup becomes god" race** (the Gitea pattern).
 - **The UI stays quiet.** The design philosophy in
-  [`docs/requirements.md`](docs/requirements.md) pushes against dashboard
+  [`docs/requirements.md`](../requirements.md) pushes against dashboard
   energy.
 
 What it costs you in practice:
 
 1. **Destructive ops on other users require SSH.** Every "remove this user,"
    "reset their password," "revoke their tokens" action means a terminal.
-   The [`remove-user --force`](README.md#admin-cli-reference) escape hatch
+   The [`remove-user --force`](../../README.md#admin-cli-reference) escape hatch
    shipped as a small mitigation, but it's still CLI-only.
 2. **No visibility into the instance.** You can't glance at "who's using this,
    how many secrets each person has, when did each person last log in" —

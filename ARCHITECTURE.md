@@ -14,7 +14,8 @@ Open the doc that matches your question:
 | [`docs/backend.md`](docs/backend.md) | Server architecture: tech stack, core-flow sequence diagrams, security design (key splitting, passphrase, auth), DB schema, API surface. |
 | [`docs/frontend.md`](docs/frontend.md) | Browser architecture: client-side state, theme system, UI design catalogue, page-by-page layouts, responsive behavior. |
 | [`docs/deployment.md`](docs/deployment.md) | Public deployment recipe: Caddyfile, systemd unit, file locations, operations, rollback. |
-| [`PROPOSAL-end-to-end-encryption.md`](PROPOSAL-end-to-end-encryption.md) | Where ephemera is heading: a proposal to move encryption into the browser. Feedback wanted on GitHub. |
+| [`docs/proposals/end-to-end-encryption.md`](docs/proposals/end-to-end-encryption.md) | Where ephemera is heading: a proposal to move encryption into the browser. Feedback wanted on GitHub. |
+| [`docs/proposals/admin-panel.md`](docs/proposals/admin-panel.md) | Another direction: explicit admin role + `/admin` page + audited destructive actions. |
 
 ---
 

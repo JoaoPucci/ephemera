@@ -13,7 +13,7 @@ architecture is in [`backend.md`](backend.md); product-level intent is in
 | Markup           | Plain HTML (static files)     | No build step, no framework, cached cheaply    |
 | Styling          | CSS custom properties + `color-mix()` | One sheet, two themes via `[data-theme]` |
 | Scripting        | Vanilla JS (ES2022+)          | No bundler, no npm runtime deps, readable as-is |
-| Crypto (browser) | Native WebCrypto (receive-side image rendering only; keys live in URL fragment today) | Zero added bytes; see the [E2E proposal](../PROPOSAL-end-to-end-encryption.md) for where this grows |
+| Crypto (browser) | Native WebCrypto (receive-side image rendering only; keys live in URL fragment today) | Zero added bytes; see the [E2E proposal](proposals/end-to-end-encryption.md) for where this grows |
 | Testing (unit)   | Vitest + jsdom                | IIFE scripts evaluated in a DOM fixture per test |
 | Testing (E2E)    | Playwright (Chromium)         | Real browser, real crypto, one golden-path test |
 

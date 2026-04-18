@@ -1,7 +1,7 @@
 # Proposal: end-to-end encryption
 
 **Status**: draft — seeking feedback
-**Current system**: see [`ARCHITECTURE.md`](ARCHITECTURE.md)
+**Current system**: see [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
 **Discussion**: please open a GitHub issue or discussion thread with your thoughts. This is a direction, not a commitment — the shape may change based on what people raise.
 
 ---
