@@ -129,14 +129,59 @@ you already have shell access — helpfulness beats ceremony.
 
 ## Run the test suite
 
+Three layers, each tests a different concern:
+
+| Layer | Tool | Count | Runtime |
+|---|---|---|---|
+| Backend unit + integration | pytest | 150 | ~4 min |
+| Frontend handlers | Vitest + jsdom | 14 | ~0.5 s |
+| End-to-end golden path | Playwright (Chromium) | 1 | ~5 s |
+
+### Backend (pytest)
+
 ```bash
 ./venv/bin/pytest -q
 ```
 
-All tests isolate their own SQLite DB and reset in-memory rate limiters between
-runs. Expect 128 passing (includes multi-user isolation + migration coverage).
-Runtime is ~4 minutes because bcrypt cost 12 is intentionally slow — tests
-exercise the real security configuration.
+Every test isolates its own SQLite DB and resets in-memory rate limiters between
+runs. Runtime is dominated by bcrypt cost 12 — tests exercise the real security
+configuration, not a fake one.
+
+### Frontend unit tests (Vitest + jsdom)
+
+```bash
+npm install                  # once
+npm run test:unit
+npm run test:unit:watch      # re-runs on save
+```
+
+Tests load each static JS file into a jsdom DOM fixture and drive the handlers
+directly. No production code refactor was needed — the IIFEs are invoked via
+`new Function(...)()` against a fresh DOM per test. Coverage focuses on the
+in-flight guards (double-tap blocking, label swap, error-path restore) because
+those are the bugs unit tests catch best.
+
+### End-to-end smoke test (Playwright)
+
+```bash
+npm install                        # once
+npx playwright install chromium    # once, ~112 MB browser download
+npm run test:e2e
+npm run test:e2e:headed            # watch it run in a visible browser
+```
+
+Playwright boots a throwaway uvicorn instance on port 8765 with a scoped DB
+(`tests-e2e/start.sh` wipes and re-seeds every run; `tests-e2e/seed.py`
+provisions a fixed user with a known TOTP secret so the test can compute valid
+codes on the fly via `otplib`). The single test walks the golden path:
+login → create text secret → open the URL in a second browser context →
+reveal → assert content → assert a second visit shows "gone".
+
+### Run everything
+
+```bash
+./venv/bin/pytest && npm test
+```
 
 ## Things to try
 
