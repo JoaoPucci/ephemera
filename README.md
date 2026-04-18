@@ -1,6 +1,16 @@
 # ephemera — dev quick start
 
-One-time secret sharing. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design.
+One-time secret sharing.
+
+## Docs
+
+Start with whichever matches your question:
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — index: overview, cross-cutting decisions log, links to the rest.
+- [`docs/requirements.md`](docs/requirements.md) — what ephemera *does*: features, user flow, explicit non-features.
+- [`docs/backend.md`](docs/backend.md) — server side: tech stack, crypto, DB schema, API surface.
+- [`docs/frontend.md`](docs/frontend.md) — browser side: state, UI design, responsive behavior.
+- [`docs/deployment.md`](docs/deployment.md) — how to host it: Caddy + systemd recipe, operations, rollback.
 
 > **Heads up — direction in progress.** A proposal to move encryption into the
 > browser (end-to-end, server cannot read plaintexts) is drafted at

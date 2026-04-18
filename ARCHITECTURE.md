@@ -1,13 +1,28 @@
-# Ephemera - One-Time Secret System
+# Architecture
 
-## Overview
+A self-hosted one-time secret (OTS) sharing system. Secrets (text or images)
+are encrypted at rest, viewable exactly once, and destroyed after viewing or
+expiry.
 
-A self-hosted one-time secret (OTS) sharing system. Secrets (text or images) are
-encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
+This file is the **index** -- one paragraph of overview, the cross-cutting
+decisions log, and links to the focused sub-docs under [`docs/`](docs/).
+Open the doc that matches your question:
+
+| Doc | What it covers |
+|---|---|
+| [`docs/requirements.md`](docs/requirements.md) | What ephemera does. Features, user flow, expiry presets, design philosophy, explicit non-features. |
+| [`docs/backend.md`](docs/backend.md) | Server architecture: tech stack, core-flow sequence diagrams, security design (key splitting, passphrase, auth), DB schema, API surface. |
+| [`docs/frontend.md`](docs/frontend.md) | Browser architecture: client-side state, theme system, UI design catalogue, page-by-page layouts, responsive behavior. |
+| [`docs/deployment.md`](docs/deployment.md) | Public deployment recipe: Caddyfile, systemd unit, file locations, operations, rollback. |
+| [`PROPOSAL-end-to-end-encryption.md`](PROPOSAL-end-to-end-encryption.md) | Where ephemera is heading: a proposal to move encryption into the browser. Feedback wanted on GitHub. |
 
 ---
 
-## Decisions Log
+## Decisions log
+
+Cross-cutting decisions that shape multiple docs. Kept here because a
+reader hunting for "why did we do X again" usually knows the choice
+number or the rough chronology, not which sub-doc to look in.
 
 | # | Question                  | Decision                                                    |
 |---|---------------------------|-------------------------------------------------------------|
@@ -34,16 +49,21 @@ encrypted at rest, viewable exactly once, and destroyed after viewing or expiry.
 
 ## Roles
 
-- **Sender**: Single user. Creates secrets via web form at `/send`.
-- **Receiver**: Anyone with the link. Sees an explanation page, clicks to reveal,
-  secret is destroyed immediately after.
+- **Sender**: authenticated user of the web form at `/send`. Creates
+  secrets, tracks them, cancels them. Users are provisioned via the admin
+  CLI; there is no public signup.
+- **Receiver**: anyone with the link. Unauthenticated -- the URL itself is
+  the authorization. Sees an explanation page, a passphrase prompt if one
+  was set, and the one-shot content after clicking reveal.
+
+See [`docs/requirements.md`](docs/requirements.md) for the full user flow.
 
 ---
 
-## Implementation Order
+## Implementation order (historical)
 
-Each step includes its corresponding tests. Tests are written alongside the
-implementation, not after.
+The phased build plan followed during initial development. Kept as a record
+of how the system came together, not a current to-do list.
 
 ### Phase 1: Foundation
 1. **Project setup**: `requirements.txt`, `run.py`, `.env.example`, app factory
@@ -76,4 +96,3 @@ implementation, not after.
     expired secret purge, tracked metadata cleanup
 11. **`Caddyfile`**: Reverse proxy config with automatic TLS
 12. **`ephemera.service`**: systemd unit file for Uvicorn
-
