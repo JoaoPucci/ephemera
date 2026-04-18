@@ -1,5 +1,7 @@
 # ephemera
 
+[![CI](https://github.com/JoaoPucci/ephemera/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPucci/ephemera/actions/workflows/ci.yml)
+
 One-time secret sharing, built from scratch.
 
 I wanted to send OTS without handing plaintexts to someone else's server —
