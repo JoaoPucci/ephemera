@@ -114,6 +114,15 @@ p { margin: 0 0 1rem; }
 .error { color: var(--danger); font-size: 0.9rem; margin-top: 0.75rem; }
 .success { color: var(--success); }
 
+/* Informational hint text within a form -- muted, left-aligned,
+   subordinate to the surrounding label/input rhythm. */
+.form-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 1.25rem 0 0;
+}
+
 /* ===================================================================
    Form controls
    =================================================================== */
