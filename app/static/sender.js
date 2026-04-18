@@ -305,6 +305,12 @@
       const labelEl = document.createElement('span');
       labelEl.className = 'label';
       labelEl.textContent = labelText;
+      // Long labels truncate with ellipsis (see CSS); carry the full text
+      // in the tooltip so hovering still reveals everything. Skip the
+      // tooltip for fallback labels -- they're short and non-informative.
+      if (item.label && item.label.trim()) {
+        labelEl.title = labelText;
+      }
 
       const timeEl = document.createElement('span');
       timeEl.className = 'time';

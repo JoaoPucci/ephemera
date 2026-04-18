@@ -734,7 +734,17 @@ button.copy-error:hover {
 }
 
 .tracked-meta { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
-.tracked-meta .label { color: var(--text); font-weight: 500; }
+/* Labels are capped at 60 chars on the input side, but even 40 chars can
+   overflow a narrow card and push everything sideways. Truncate visually
+   with ellipsis; the full text lives in the `title` attribute for hover. */
+.tracked-meta .label {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
 /* Single line + ellipsis keeps the row height predictable. The full text
    is always in the `title` attribute, so hovering reveals everything. */
 .tracked-meta .time {
