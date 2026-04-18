@@ -7,7 +7,10 @@ Commands:
     init <username>                  First-time setup: create the initial user.
     add-user <username>              Provision another user (requires re-auth).
     list-users                       Show all users.
-    remove-user <username>           Delete a user (and all their data).
+    remove-user <username> [--force] Delete a user (and all their data).
+                                     Default: re-auth as <username>.
+                                     --force: re-auth as any OTHER user
+                                     (for when the target's creds are lost).
     reset-password [--user <name>]   Change password for a user (default: yourself).
     rotate-totp [--user <name>]      Generate a new TOTP secret.
     regen-recovery-codes [--user <name>]  Print 10 fresh recovery codes.
@@ -203,7 +206,7 @@ def cmd_list_users() -> None:
         print(f"  {u['id']:>3}  {u['username']:<20}  created {u['created_at']}")
 
 
-def cmd_remove_user(username: str) -> None:
+def cmd_remove_user(username: str, force: bool = False) -> None:
     target = models.get_user_by_username(username)
     if target is None:
         print(f"no user named '{username}'.", file=sys.stderr)
@@ -211,12 +214,41 @@ def cmd_remove_user(username: str) -> None:
     if models.user_count() == 1:
         print("refusing to remove the only remaining user.", file=sys.stderr)
         sys.exit(1)
-    # Require re-auth as the target (so anyone removing an account has to have
-    # its credentials, same bar as a password rotation).
-    print(f"Re-authenticate as '{username}' to confirm removal.")
-    _reauth(target)
+
+    if force:
+        # Shell + another account's creds are the bar. Lets you remove a user
+        # whose password/TOTP/recovery codes you no longer have, without
+        # dropping to raw SQL.
+        _reauth_for_force_removal(target)
+    else:
+        # Normal mode: target authenticates their own removal (same bar as a
+        # password rotation -- they must have their own creds).
+        print(f"Re-authenticate as '{username}' to confirm removal.")
+        _reauth(target)
+
     models.delete_user(target["id"])
     print(f"User '{username}' and all their data deleted.")
+
+
+def _reauth_for_force_removal(target: dict) -> None:
+    """Re-auth as any user OTHER than the one being removed."""
+    print(f"Force mode. Re-authenticate as a user OTHER than '{target['username']}':")
+    auth_username = input("Your username: ").strip()
+    if not auth_username:
+        print("empty username — aborting.", file=sys.stderr)
+        sys.exit(1)
+    if auth_username == target["username"]:
+        print(
+            f"Force mode needs a different user. "
+            f"To remove '{target['username']}' as themselves, drop --force.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    authenticator = models.get_user_by_username(auth_username)
+    if authenticator is None:
+        print(f"no user named '{auth_username}'.", file=sys.stderr)
+        sys.exit(1)
+    _reauth(authenticator)
 
 
 def cmd_reset_password(username: Optional[str]) -> None:
@@ -372,15 +404,21 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(0 if not argv else 2)
     fn, arity, takes_user = COMMANDS[argv[0]]
     rest = argv[1:]
+    # remove-user takes an optional --force flag (re-auth as a different user).
+    # Strip it here so the arity check below sees only positional args.
+    extra_kwargs: dict = {}
+    if argv[0] == "remove-user" and "--force" in rest:
+        rest = [a for a in rest if a != "--force"]
+        extra_kwargs["force"] = True
     user_flag, rest = (_parse_user_flag(rest) if takes_user else (None, rest))
     if len(rest) != arity:
         print(f"`{argv[0]}` expects {arity} positional arg(s).", file=sys.stderr)
         sys.exit(2)
     models.init_db()
     if takes_user:
-        fn(*rest, user_flag)
+        fn(*rest, user_flag, **extra_kwargs)
     else:
-        fn(*rest)
+        fn(*rest, **extra_kwargs)
 
 
 if __name__ == "__main__":

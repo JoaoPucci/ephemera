@@ -142,7 +142,7 @@ When exactly one user exists, `--user` is optional — the CLI picks them automa
 | `init <username>` | — | First-time setup. Creates the initial user with that username, a password, TOTP secret (QR + manual fallback), and 10 one-time recovery codes. Refuses to run if any user already exists. |
 | `add-user <username>` | yes (as any existing user) | Provision another user. Same prompts as `init`. The re-auth requirement means shell access alone isn't enough to silently mint accounts. |
 | `list-users` | — | Show id, username, and created_at for every user. |
-| `remove-user <username>` | yes (as that user) | Delete a user and cascade-drop all their secrets and API tokens. Refuses if it would leave the server empty. |
+| `remove-user <username> [--force]` | yes — as `<username>` (normal) or as any other user (with `--force`) | Delete a user and cascade-drop all their secrets and API tokens. Refuses if it would leave the server empty. `--force` is the escape hatch for deleting someone whose credentials you no longer have — you re-auth as any other user instead. Requires at least two users. |
 
 ### Credential rotation
 
@@ -192,7 +192,8 @@ you already have shell access — helpfulness beats ceremony.
 | Situation | What to do |
 |---|---|
 | I want to add someone to my instance | `add-user <their-username>` — re-authenticates you first, then prompts them (or you) for a password and shows a QR + recovery codes. They log in at `/send` with their own username. |
-| I want to remove a user | `remove-user <username>` — requires password + TOTP of **that user** to confirm. Cascade-drops their secrets and tokens. Refuses if they're the last user. |
+| I want to remove a user (I have their creds) | `remove-user <username>` — requires password + TOTP of **that user** to confirm. Cascade-drops their secrets and tokens. Refuses if they're the last user. |
+| I want to remove a user but I've lost their creds | `remove-user <username> --force` — re-auths as any other user with a valid account. Same cascade and "refuses if last user" rules. |
 | I forgot my password but have my TOTP / recovery code | No path for this — `reset-password` requires the current password. Wipe just that user: `sqlite3 ephemera.db "DELETE FROM users WHERE username='<name>';"` then `add-user <name>` (or `init <name>` if they were the only user). Foreign-key cascades drop their secrets + tokens. |
 | I lost my authenticator | Log in with a recovery code (login page → "Use a recovery code"). Once in, `rotate-totp` for a fresh QR and `regen-recovery-codes` to top up codes. |
 | I lost everything (password, TOTP, and recovery codes) | Same as "forgot password" — nuclear option. Wipe that user and re-provision, or `rm -f ephemera.db* && python -m app.admin init <username>` for a completely fresh server. |
