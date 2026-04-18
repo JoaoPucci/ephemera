@@ -12,10 +12,11 @@ Start with whichever matches your question:
 - [`docs/frontend.md`](docs/frontend.md) — browser side: state, UI design, responsive behavior.
 - [`docs/deployment.md`](docs/deployment.md) — how to host it: Caddy + systemd recipe, operations, rollback.
 
-> **Heads up — direction in progress.** A proposal to move encryption into the
-> browser (end-to-end, server cannot read plaintexts) is drafted at
-> [`PROPOSAL-end-to-end-encryption.md`](PROPOSAL-end-to-end-encryption.md).
-> Feedback welcome via GitHub issues before implementation starts.
+> **Directions in progress — feedback welcome.**
+> Two proposals are drafted for early feedback, before any code lands:
+> - [`PROPOSAL-end-to-end-encryption.md`](PROPOSAL-end-to-end-encryption.md) — move encryption into the browser so the operator cannot read plaintexts.
+> - [`PROPOSAL-admin-panel.md`](PROPOSAL-admin-panel.md) — explicit admin role + `/admin` page + audited destructive actions, instead of today's "shell-only admin" model.
+> Open a GitHub issue on either before Phase 0 decisions are locked in.
 
 ## Security & quality
 
