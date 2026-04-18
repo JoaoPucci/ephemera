@@ -8,6 +8,9 @@ SEC_HEADERS = {
     "x-frame-options",
     "referrer-policy",
     "strict-transport-security",
+    "cross-origin-opener-policy",
+    "cross-origin-resource-policy",
+    "permissions-policy",
 }
 
 
@@ -41,6 +44,41 @@ def test_hsts_has_a_max_age(client):
     r = client.get("/send")
     hsts = r.headers.get("Strict-Transport-Security", "")
     assert "max-age=" in hsts
+
+
+def test_csp_contains_expected_directives(client):
+    """Pin the CSP shape so a future refactor can't silently drop directives.
+    If you intentionally change CSP, update this list alongside the policy."""
+    r = client.get("/send")
+    csp = r.headers.get("Content-Security-Policy", "")
+    expected = [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "font-src 'self'",
+        "manifest-src 'self'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+    ]
+    for directive in expected:
+        assert directive in csp, f"missing CSP directive: {directive!r} in {csp!r}"
+
+
+def test_cross_origin_isolation_headers_present(client):
+    r = client.get("/send")
+    assert r.headers.get("Cross-Origin-Opener-Policy") == "same-origin"
+    assert r.headers.get("Cross-Origin-Resource-Policy") == "same-origin"
+
+
+def test_permissions_policy_denies_sensitive_features(client):
+    r = client.get("/send")
+    pp = r.headers.get("Permissions-Policy", "")
+    for feature in ("camera", "microphone", "geolocation", "payment", "usb"):
+        assert f"{feature}=()" in pp, f"permissions-policy does not deny {feature}: {pp!r}"
 
 
 def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_client):

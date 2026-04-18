@@ -146,10 +146,26 @@ Uploaded images are validated:
   the client half of the key is required in the body (only available to JS running
   on the page), this acts as a natural CSRF barrier.
 - Security headers on all responses (via FastAPI middleware):
-  - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:`
+  - `Content-Security-Policy:` deny-by-default with explicit allow-list for
+    what ephemera actually loads. Shape:
+    `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
+    connect-src 'self'; font-src 'self'; manifest-src 'self'; frame-ancestors 'none';
+    form-action 'self'; base-uri 'self'; object-src 'none'`.
+    `data:` stays allowed on `img-src` because reveal.js renders images as
+    `data:<mime>;base64,...` and the chevron SVG in `style.css` is also
+    inlined as a `data:image/svg+xml` URL. Anything not on this list is
+    rejected by the browser rather than by the server.
   - `X-Content-Type-Options: nosniff`
   - `X-Frame-Options: DENY`
   - `Referrer-Policy: no-referrer`
+  - `Cross-Origin-Opener-Policy: same-origin` — isolates the browsing context
+    from any cross-origin opener (e.g., a malicious `window.open`er).
+  - `Cross-Origin-Resource-Policy: same-origin` — stops other sites from
+    embedding ephemera's responses (images, JSON).
+  - `Permissions-Policy` — empty allow-list for every sensor/hardware API
+    (camera, microphone, geolocation, payment, USB, accelerometer, gyroscope,
+    magnetometer, interest-cohort). None are used; denying pre-empts a
+    future regression that quietly adds one.
   - `Strict-Transport-Security: max-age=86400` (conservative first-rollout value;
     HSTS is sticky, so start small, then bump to `max-age=31536000; includeSubDomains; preload`
     once the cert has survived at least one Let's Encrypt renewal. Caddy does *not* add
