@@ -1,4 +1,4 @@
-# ephemera — dev quick start
+# ephemera
 
 One-time secret sharing.
 
