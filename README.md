@@ -88,7 +88,8 @@ feedback welcome.
 ```bash
 cd /path/to/ephemera
 python3 -m venv venv
-./venv/bin/pip install -r requirements.txt
+./venv/bin/pip install -r requirements-dev.txt   # runtime + test deps
+# or `-r requirements.txt` for a runtime-only install (what the server uses)
 cp .env.example .env
 # Edit .env and set EPHEMERA_SECRET_KEY to a real random value:
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"

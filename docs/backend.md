@@ -553,7 +553,8 @@ ephemera/
     test_receiver.py       # Landing page, reveal flow, passphrase flow, burn-on-fail
     test_cleanup.py        # Expired purge, tracked metadata purge
     test_security.py       # Headers, rate limiting, origin validation
-  requirements.txt
+  requirements.txt         # runtime deps only (installed on the server)
+  requirements-dev.txt     # runtime + pytest / pytest-cov / httpx (local)
   run.py                   # Dev entrypoint: uvicorn app:create_app --reload
   .env.example             # Template for required env vars
 ```
