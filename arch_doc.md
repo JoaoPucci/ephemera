@@ -1092,7 +1092,7 @@ implementation, not after.
                  +-------------+
 ```
 
-**Caddyfile** (`deploy/Caddyfile` in repo; copy to `/etc/caddy/Caddyfile`):
+**Caddyfile** at `/etc/caddy/Caddyfile`:
 
 ```
 your-domain.com {
@@ -1133,8 +1133,7 @@ multiple OS processes, which means contention on SQLite's process-level write
 lock. One worker avoids that entirely. On a 1 vCPU droplet with low-volume
 personal use, one worker is the correct choice.
 
-**systemd unit** (`deploy/ephemera.service` in repo; copy to
-`/etc/systemd/system/ephemera.service`):
+**systemd unit** at `/etc/systemd/system/ephemera.service`:
 
 ```ini
 [Unit]
