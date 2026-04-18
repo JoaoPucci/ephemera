@@ -14,13 +14,48 @@ from .routes import receiver, sender
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# CSP: deny-by-default then explicitly enumerate what ephemera actually uses.
+# Nothing is fetched cross-origin (no CDN, no web fonts, no analytics). The
+# two non-'self' sources are (1) `data:` images for the reveal payload and
+# the inline SVG chevrons in style.css, and (2) base-uri/form-action pinned
+# to 'self' to blunt <base href> and form-repoint attacks.
+CSP = "; ".join([
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "font-src 'self'",
+    "manifest-src 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+])
+
+# Camera/mic/geo/payment/USB/sensors aren't used anywhere. An empty allow-list
+# is the cheapest defence-in-depth against a future regression that quietly
+# adds such an API.
+PERMISSIONS_POLICY = ", ".join([
+    "camera=()",
+    "microphone=()",
+    "geolocation=()",
+    "payment=()",
+    "usb=()",
+    "accelerometer=()",
+    "gyroscope=()",
+    "magnetometer=()",
+    "interest-cohort=()",
+])
+
 SECURITY_HEADERS = {
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:"
-    ),
+    "Content-Security-Policy": CSP,
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Permissions-Policy": PERMISSIONS_POLICY,
     # Start conservative -- HSTS is sticky, so if the cert ever breaks, browsers
     # that saw a long max-age will refuse HTTP for that long. Once the deployment
     # has been stable through at least one Let's Encrypt renewal, bump this to
