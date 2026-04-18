@@ -1,0 +1,59 @@
+# Dependabot configuration.
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Two ecosystems:
+#   - pip:  reads requirements.txt AND requirements-dev.txt (Dependabot
+#           automatically discovers both when they're in the same directory)
+#   - npm:  reads package.json + package-lock.json
+#
+# Runs weekly (Mondays) rather than daily so a PR queue doesn't accumulate
+# overnight. Security advisories always trigger immediately regardless of
+# the regular schedule. Cap at 5 open PRs per ecosystem so a dormant audit
+# backlog can't drown the repo.
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps(pip)"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+    commit-message:
+      prefix: "deps(npm)"
+
+  # GitHub Actions — not yet used (there's no .github/workflows/), but
+  # including the ecosystem now means the first workflow file added gets
+  # auto-tracked without a follow-up Dependabot edit.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "deps(actions)"
