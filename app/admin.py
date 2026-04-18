@@ -34,6 +34,7 @@ import pyotp
 import qrcode
 
 from . import auth, models
+from .config import get_settings
 
 
 def _ascii_qr(data: str) -> str:
@@ -118,7 +119,9 @@ def _reauth(user: dict) -> dict:
 
 
 def _print_totp_setup(secret: str, username: str) -> None:
-    uri = auth.provisioning_uri(secret, account_name=username)
+    uri = auth.provisioning_uri(
+        secret, account_name=username, issuer=get_settings().totp_issuer
+    )
     print()
     print("Scan this QR in your authenticator app (1Password, Google Authenticator, Aegis, ...):")
     print()

@@ -204,3 +204,21 @@ def test_token_name_unique_per_user_not_global(provisioned_user, make_user):
     models.create_token(user_id=bob["id"], name="cli", token_hash=d2)
     assert len(models.list_tokens(provisioned_user["id"])) == 1
     assert len(models.list_tokens(bob["id"])) == 1
+
+
+def test_provisioning_uri_respects_custom_issuer():
+    """Different instances (dev / prod) need distinct issuer strings so
+    their entries don't visually collide in a shared authenticator app."""
+    secret = auth.generate_totp_secret()
+    uri = auth.provisioning_uri(secret, account_name="admin", issuer="ephemera-dev")
+    # The issuer appears twice: as the path prefix and as a query param.
+    assert "ephemera-dev" in uri
+    assert "issuer=ephemera-dev" in uri
+
+
+def test_provisioning_uri_default_issuer_unchanged():
+    """Keep backward compatibility: callers that don't pass issuer still
+    get 'ephemera', so existing QRs remain reproducible."""
+    secret = auth.generate_totp_secret()
+    uri = auth.provisioning_uri(secret, account_name="admin")
+    assert "issuer=ephemera" in uri

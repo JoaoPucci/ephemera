@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     max_passphrase_attempts: int = Field(default=5)
     cleanup_interval_seconds: int = Field(default=60)
     tracked_retention_seconds: int = Field(default=30 * 24 * 60 * 60)
+    # Label shown next to the account in authenticator apps (1Password, Aegis,
+    # Google Authenticator, ...). Set a distinct value per environment
+    # ("ephemera-dev", "ephemera-prod") if you run more than one instance
+    # against the same authenticator so the entries don't collide.
+    totp_issuer: str = Field(default="ephemera")
 
     @property
     def origins(self) -> List[str]:
