@@ -256,7 +256,9 @@ def cmd_reset_password(username: Optional[str]) -> None:
     _reauth(user)
     new_pw = _prompt_new_password()
     models.update_user(user["id"], password_hash=auth.hash_password(new_pw))
+    models.bump_session_generation(user["id"])
     print(f"password updated for '{user['username']}'.")
+    print("  live sessions for this user have been invalidated; they must log in again.")
 
 
 def cmd_rotate_totp(username: Optional[str]) -> None:
@@ -264,8 +266,10 @@ def cmd_rotate_totp(username: Optional[str]) -> None:
     _reauth(user)
     secret = auth.generate_totp_secret()
     models.update_user(user["id"], totp_secret=secret, totp_last_step=0)
+    models.bump_session_generation(user["id"])
     _print_totp_setup(secret, user["username"])
     print("new TOTP active. The old authenticator entry will stop working after you re-scan.")
+    print("  live sessions for this user have been invalidated; they must log in again.")
 
 
 def cmd_regen_recovery_codes(username: Optional[str]) -> None:
@@ -273,7 +277,9 @@ def cmd_regen_recovery_codes(username: Optional[str]) -> None:
     _reauth(user)
     codes, codes_json = auth.generate_recovery_codes()
     models.update_user(user["id"], recovery_code_hashes=codes_json)
+    models.bump_session_generation(user["id"])
     _print_recovery_codes(codes)
+    print("  live sessions for this user have been invalidated; they must log in again.")
 
 
 def cmd_list_tokens(username: Optional[str]) -> None:

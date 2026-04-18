@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     recovery_code_hashes  TEXT NOT NULL DEFAULT '[]',
     failed_attempts       INTEGER NOT NULL DEFAULT 0,
     lockout_until         TEXT,
+    session_generation    INTEGER NOT NULL DEFAULT 0,    -- bumped to invalidate live sessions
     created_at            TEXT NOT NULL,
     updated_at            TEXT NOT NULL
 );
@@ -132,6 +133,10 @@ def init_db() -> None:
                 conn.execute("UPDATE users SET username = 'admin' WHERE username IS NULL")
             if "email" not in user_cols:
                 conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            if "session_generation" not in user_cols:
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN session_generation INTEGER NOT NULL DEFAULT 0"
+                )
 
         # secrets.user_id: backfill existing rows to user #1 (the legacy owner).
         if "user_id" not in _cols(conn, "secrets"):

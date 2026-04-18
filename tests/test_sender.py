@@ -111,6 +111,47 @@ def test_login_rotates_session_value_on_relogin(client, provisioned_user):
     assert c1 and c2 and c1 != c2
 
 
+def test_session_invalidated_after_session_generation_bump(authed_client, provisioned_user):
+    """F-06: bumping the user's session_generation invalidates every live
+    cookie signed over the prior generation. The existing session stops
+    working without waiting for session_max_age."""
+    from app import models
+
+    assert authed_client.get("/api/me").status_code == 200
+    models.bump_session_generation(provisioned_user["id"])
+    assert authed_client.get("/api/me").status_code == 401
+
+
+def test_new_login_after_bump_works(client, provisioned_user):
+    """Bumping invalidates old cookies but not the ability to log in again;
+    the next login picks up the new generation and the cookie authenticates."""
+    from app import models
+
+    models.bump_session_generation(provisioned_user["id"])
+    r = _login(
+        client,
+        provisioned_user["username"],
+        provisioned_user["password"],
+        provisioned_user["totp"].now(),
+    )
+    assert r.status_code == 200
+    assert client.get("/api/me").status_code == 200
+
+
+def test_session_cookie_from_stale_generation_is_rejected(client, provisioned_user):
+    """Defence-in-depth: an attacker who captured a cookie from generation N
+    gains nothing once the user rotates to N+1, even before the timestamp
+    expires. This is the property F-06 buys us."""
+    from app import models
+    from app.dependencies import make_session_cookie
+    from app.config import get_settings
+
+    stale = make_session_cookie(provisioned_user["id"], session_generation=0)
+    models.bump_session_generation(provisioned_user["id"])  # -> generation 1
+    client.cookies.set(get_settings().session_cookie_name, stale)
+    assert client.get("/api/me").status_code == 401
+
+
 def test_login_rejects_cross_origin(client, provisioned_user):
     r = client.post(
         "/send/login",

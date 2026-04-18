@@ -42,6 +42,7 @@ from .secrets import (
     untrack,
 )
 from .users import (
+    bump_session_generation,
     create_user,
     delete_user,
     get_user_by_id,
@@ -74,6 +75,7 @@ __all__ = [
     "purge_tracked_metadata",
     "untrack",
     # users
+    "bump_session_generation",
     "create_user",
     "delete_user",
     "get_user_by_id",

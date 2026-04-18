@@ -24,37 +24,51 @@ def _signer() -> TimestampSigner:
     return TimestampSigner(get_settings().secret_key, salt="ephemera-session")
 
 
-def make_session_cookie(user_id: int) -> str:
-    """Issue a signed+timestamped cookie carrying the user id. Re-signing with a
-    fresh timestamp produces a new cookie value on every login -> rotation."""
-    return _signer().sign(str(user_id).encode()).decode("ascii")
+def make_session_cookie(user_id: int, session_generation: int) -> str:
+    """Issue a signed+timestamped cookie binding the cookie to the user's
+    current session generation. Re-signing with a fresh timestamp produces a
+    new cookie value on every login -> rotation. Bumping the user's
+    session_generation invalidates every outstanding cookie (F-06)."""
+    payload = f"{user_id}:{session_generation}".encode()
+    return _signer().sign(payload).decode("ascii")
 
 
-def read_session_cookie(raw: str) -> Optional[int]:
+def read_session_cookie(raw: str) -> Optional[tuple[int, int]]:
+    """Parse a session cookie to (user_id, generation). Returns None on any
+    failure (bad signature, expired, malformed payload)."""
     try:
         max_age = get_settings().session_max_age
         val = _signer().unsign(raw, max_age=max_age).decode("ascii")
-        return int(val)
+        uid_str, gen_str = val.split(":", 1)
+        return int(uid_str), int(gen_str)
     except (BadSignature, SignatureExpired, ValueError):
         return None
 
 
 def current_user_id(request: Request) -> Optional[int]:
-    """Return the user id associated with the session cookie, if any."""
+    """Return the user id associated with the session cookie, if any. The
+    cookie's generation must match the stored `users.session_generation`;
+    a mismatch means the session was revoked and the cookie is treated as
+    invalid."""
     raw = request.cookies.get(get_settings().session_cookie_name)
-    return read_session_cookie(raw) if raw else None
+    if not raw:
+        return None
+    parsed = read_session_cookie(raw)
+    if parsed is None:
+        return None
+    uid, gen = parsed
+    user = models.get_user_by_id(uid)
+    if user is None:
+        return None
+    if int(user["session_generation"]) != gen:
+        return None
+    return uid
 
 
 def is_logged_in(request: Request) -> bool:
-    """True if the session cookie identifies a real user.
-
-    Checks that the user row still exists, so a deleted user's stale cookie
-    doesn't keep working.
-    """
-    uid = current_user_id(request)
-    if uid is None:
-        return False
-    return models.get_user_by_id(uid) is not None
+    """True if the session cookie identifies a real user and the session has
+    not been revoked."""
+    return current_user_id(request) is not None
 
 
 # ---------------------------------------------------------------------------

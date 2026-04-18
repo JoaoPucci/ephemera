@@ -63,3 +63,20 @@ def delete_user(user_id: int) -> None:
     """Delete a user and (via ON DELETE CASCADE) all their secrets and tokens."""
     with _connect() as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+def bump_session_generation(user_id: int) -> int:
+    """Invalidate every outstanding session cookie for this user by advancing
+    the generation counter the cookie is signed over. Call this after any
+    credential rotation (password reset, TOTP rotation, recovery-code regen)
+    or when an operator explicitly wants to sign the user out of all devices.
+
+    Returns the new generation value.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "UPDATE users SET session_generation = session_generation + 1, "
+            "updated_at = ? WHERE id = ? RETURNING session_generation",
+            (_iso(_utcnow()), user_id),
+        ).fetchone()
+    return int(row["session_generation"]) if row else 0
