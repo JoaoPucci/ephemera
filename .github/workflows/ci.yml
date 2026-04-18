@@ -95,3 +95,40 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  audit:
+    name: Dependency audit (pip-audit + npm audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python deps (requirements-dev transitively includes runtime)
+        # pip-audit follows `-r` directives, so one call covers both files.
+        # Exits non-zero on any known vulnerability.
+        run: pip-audit -r requirements-dev.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Audit npm deps
+        # --audit-level=high: fail only on HIGH or CRITICAL advisories.
+        # Low/moderate findings still appear in the job log (npm audit's
+        # stderr is always informational) but don't block merges -- those
+        # are typically toolchain-adjacent and handled via Dependabot PRs
+        # at their own pace.
+        run: npm audit --audit-level=high
