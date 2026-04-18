@@ -653,6 +653,27 @@ button.copy-error:hover {
   max-height: 22rem;       /* ~280px; room for ~5 rows + footer */
   overflow-y: auto;
 }
+/* Themed scrollbar -- the OS default clashes with the dark surface.
+   Firefox / recent Safari / Chromium use the standard properties;
+   Webkit pseudo-elements cover the rest. Both paths pull from the
+   same theme tokens, so dark mode just works. */
+.tracked-panel-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.tracked-panel-body::-webkit-scrollbar {
+  width: 8px;
+}
+.tracked-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tracked-panel-body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+.tracked-panel-body::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
 .tracked-panel-inner {
   padding: 0.25rem 0.25rem 0;
 }
