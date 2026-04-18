@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { authenticator } from 'otplib';
+// otplib v13 removed the v12 `authenticator` singleton; `generateSync` is
+// the idiomatic v13 entry for producing a TOTP code synchronously.
+import { generateSync } from 'otplib';
 
 // Matches tests-e2e/seed.py. Keep in lockstep.
 const USERNAME = 'e2e';
 const PASSWORD = 'e2e-password-123';
-const TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
+const TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 
 test('golden path: sign in, create a text secret, receiver reveals it exactly once', async ({ browser }) => {
   // --- sender context ---
@@ -14,7 +16,7 @@ test('golden path: sign in, create a text secret, receiver reveals it exactly on
   await senderPage.goto('/send');
   await senderPage.fill('#username', USERNAME);
   await senderPage.fill('#password', PASSWORD);
-  await senderPage.fill('#code', authenticator.generate(TOTP_SECRET));
+  await senderPage.fill('#code', generateSync({ secret: TOTP_SECRET, strategy: 'totp' }));
   await senderPage.click('#login-form button[type="submit"]');
 
   // Page reloads into the sender form.

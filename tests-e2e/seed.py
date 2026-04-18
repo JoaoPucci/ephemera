@@ -30,7 +30,11 @@ from app.models import create_user, init_db  # noqa: E402
 
 USERNAME = "e2e"
 PASSWORD = "e2e-password-123"
-TOTP_SECRET = "JBSWY3DPEHPK3PXP"
+# 32 base32 chars = 20 bytes = 160 bits, which is the RFC 6238 SHA-1
+# recommended size and also clears otplib v13's MIN_SECRET_BYTES=16
+# guardrail. Still a synthetic fixed value -- only ever used against the
+# throwaway tests-e2e DB on :8765, never a real account's secret.
+TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 
 init_db()
 _, recovery_json = generate_recovery_codes()
