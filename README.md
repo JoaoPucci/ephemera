@@ -24,7 +24,8 @@ about security and rigor. This isn't marketing — it's a concrete list of the
 controls that shipped, each backed by code you can read and tests you can run
 yourself.
 
-**Concerns a secret-sharing tool has to address, and what's in place:**
+<details>
+<summary><b>Concerns a secret-sharing tool has to address, and what's in place</b> — 12 items</summary>
 
 | Concern | What's in place |
 |---|---|
@@ -41,7 +42,10 @@ yourself.
 | Stale / orphan data | Background cleanup purges expired rows every 60 s; tracked metadata auto-expires at 30 days; secrets hard-deleted on reveal. |
 | Service compromise | systemd sandbox: `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectKernel*`, `NoNewPrivileges`. Unprivileged service user with no shell; env file at `0640 root:ephemera`. |
 
-**Test coverage:**
+</details>
+
+<details>
+<summary><b>Test coverage</b> — 150 backend + 14 frontend + 1 end-to-end</summary>
 
 | Layer | Tool | Count |
 |---|---|---|
@@ -53,6 +57,8 @@ Tests run against the real bcrypt cost (12) — no mocked faster config — whic
 is why the suite takes ~4 minutes. The E2E test drives a real browser through
 login → create → reveal across two separate browser contexts, exercising the
 full pipeline including the browser's fragment handling.
+
+</details>
 
 **Verify for yourself.** Every control above has a counterpart in
 [`tests/`](tests/) or [`tests-js/`](tests-js/). Security design details live
@@ -113,6 +119,9 @@ The app starts at **http://127.0.0.1:8000** with `--reload` enabled.
 For images: switch to the **Image** tab, drop a PNG/JPEG/GIF/WebP (10 MB max).
 
 ## Admin CLI reference
+
+<details>
+<summary>All CLI commands grouped by purpose — user management, credential rotation, API tokens, troubleshooting, common scenarios</summary>
 
 All commands are subcommands of `python -m app.admin`. They operate on the
 SQLite DB pointed to by `EPHEMERA_DB_PATH`. The server does not need to be
@@ -191,7 +200,12 @@ you already have shell access — helpfulness beats ceremony.
 | I pasted an API token in a commit / log | `revoke-token <name>` immediately, then `create-token <name>` to mint a replacement. |
 | I need a fresh, empty dev setup | `rm -f ephemera.db* && python -m app.admin init admin` (wipes all users, secrets, tokens). |
 
+</details>
+
 ## Run the test suite
+
+<details>
+<summary>Three layers — pytest (backend), Vitest + jsdom (frontend), Playwright (E2E). Commands and what each covers.</summary>
 
 Three layers, each tests a different concern:
 
@@ -247,7 +261,12 @@ reveal → assert content → assert a second visit shows "gone".
 ./venv/bin/pytest && npm test
 ```
 
+</details>
+
 ## Things to try
+
+<details>
+<summary>Nine scenarios exercising passphrase, tracking, expiry, lockout, rate limits, uploads, theming</summary>
 
 | Scenario | How |
 |---|---|
@@ -261,7 +280,12 @@ reveal → assert content → assert a second visit shows "gone".
 | Image upload | Switch to Image tab, drop a PNG/JPEG/GIF/WebP; SVG is rejected |
 | Theme switch | Top-right pill button; persists per browser |
 
+</details>
+
 ## Files of interest
+
+<details>
+<summary>Key source files, one-liner each</summary>
 
 - `app/crypto.py` — Fernet + key splitting
 - `app/validation.py` — MIME + magic-byte check
@@ -274,3 +298,5 @@ reveal → assert content → assert a second visit shows "gone".
 - `app/limiter.py` — in-memory sliding-window rate limiters (login, create, reveal)
 - `app/cleanup.py` — background task purging expired + old tracked rows
 - `app/static/` — plain HTML/CSS/JS frontend with light/dark theme
+
+</details>
