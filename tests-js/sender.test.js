@@ -164,6 +164,35 @@ describe('sender.js — create-secret in-flight guard', () => {
     expect(document.getElementById('result-url').textContent).toBe('https://example/s/tok#key');
   });
 
+  it('restores the submit button after "Create another", so the recycled form is usable', async () => {
+    // Regression guard: the in-flight guard used to leave the button stuck
+    // on "Creating…" after a successful create; clicking "Create another"
+    // then surfaced a disabled button with the wrong label.
+    const fetchMock = stubSenderFetch(() =>
+      Promise.resolve(
+        jsonResponse({
+          url: 'https://example/s/tok#key',
+          id: 'deadbeef',
+          expires_at: '2099-01-01T00:00:00Z',
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    evalScript(SENDER_JS);
+    await flushAsync();
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    document.getElementById('create-another').click();
+
+    expect(document.getElementById('compose').hidden).toBe(false);
+    expect(document.getElementById('result').hidden).toBe(true);
+    expect(submitBtn().disabled).toBe(false);
+    expect(submitBtn().textContent).toBe('Create Secret');
+  });
+
   it('does not fire a fetch when the textarea is empty', async () => {
     document.getElementById('content').value = '';
     const fetchMock = stubSenderFetch(() => new Promise(() => {}));

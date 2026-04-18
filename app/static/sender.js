@@ -122,11 +122,13 @@
       const data = await res.json();
       if (track && data.url && data.id) cacheUrl(data.id, data.url);
       showResult(data);
-      // showResult hides the compose form, so the button doesn't need
-      // restoring -- leaving it disabled is also a belt on the suspender.
     } catch (err) {
       errBox.textContent = err.message || 'Something went wrong.';
       errBox.hidden = false;
+    } finally {
+      // Restore the button whether we succeeded or threw: on success the
+      // compose form is hidden so the user won't notice, but "Create another"
+      // brings the form back and it has to be usable again.
       submitBtn.disabled = false;
       submitBtn.textContent = submitLabel;
     }
