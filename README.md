@@ -5,7 +5,7 @@ One-time secret sharing. See `arch_doc.md` for the full design.
 ## Setup (once)
 
 ```bash
-cd /media/shiroyasha/linux-data/git/ephemera
+cd /path/to/ephemera
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 cp .env.example .env

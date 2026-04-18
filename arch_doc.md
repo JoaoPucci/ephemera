@@ -1227,6 +1227,3 @@ sudo -u ephemera /usr/bin/sqlite3 /var/lib/ephemera/ephemera.db \
 Also back up `/etc/ephemera/env`. If the `SECRET_KEY` is lost, all existing
 session cookies and recovery-code hashes stay valid, but the server won't be
 able to verify sessions signed with the old key -- users will just re-login.
-
-Claude sessions used:
-- claude --resume ec39eb3e-606b-4091-bdd6-74ef8b74c3bd
