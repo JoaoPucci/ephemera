@@ -126,15 +126,81 @@ label {
   letter-spacing: 0.01em;
 }
 
-label.checkbox {
+/* Toggle switch. The native <input type="checkbox"> is kept as the
+   source of truth (form value, focus target, keyboard handling,
+   existing JS listener for the label-visibility sync) but visually
+   hidden. The pill + thumb are drawn from the theme tokens, so dark
+   mode rides along automatically via --border / --surface / --accent. */
+.toggle {
+  /* Block-level flex so the toggle always consumes its own line.
+     inline-flex lets the next inline-level element (the submit button)
+     float up next to it when #label-wrap is hidden. */
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  cursor: pointer;
   color: var(--text);
   font-size: 0.95rem;
 }
 
-label.checkbox input { margin: 0; accent-color: var(--accent); }
+.toggle input[type="checkbox"] {
+  /* Stay in layout so focus lands on it, but collapse out of sight. */
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.toggle-slider {
+  position: relative;
+  display: inline-block;
+  width: 2.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+  background: var(--border);
+  border-radius: 999px;
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.2rem - 4px);
+  height: calc(1.2rem - 4px);
+  background: var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 150ms ease;
+}
+
+.toggle input[type="checkbox"]:checked + .toggle-slider {
+  background: var(--accent);
+}
+
+.toggle input[type="checkbox"]:checked + .toggle-slider::before {
+  transform: translateX(1rem);
+}
+
+.toggle input[type="checkbox"]:focus-visible + .toggle-slider {
+  box-shadow: var(--focus-ring);
+}
+
+/* When the toggle is on, the label field appears beneath it. Nest it
+   visually so it reads as "child of the toggle" rather than a separate
+   form row. Indent + a thin left rail does the work. */
+#label-wrap {
+  margin-left: 1.6rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--border);
+  margin-top: 0.5rem;
+}
+#label-wrap label {
+  margin-top: 0.3rem;  /* tighter than the default 1rem so it sits close to the toggle */
+}
 
 input[type="text"],
 input[type="password"],
