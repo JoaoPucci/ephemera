@@ -10,8 +10,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from fastapi.responses import FileResponse
 
 from .. import auth as auth_mod
 from .. import crypto, models, validation
@@ -23,29 +22,22 @@ from ..dependencies import (
     verify_same_origin,
 )
 from ..limiter import create_rate_limit, login_rate_limit
+from ..schemas import (
+    ApiMeResponse,
+    ClearTrackedResponse,
+    CreateSecretResponse,
+    CreateTextSecret,
+    EXPIRY_PRESETS,
+    LoginResponse,
+    LogoutResponse,
+    SecretStatusResponse,
+    TrackedListResponse,
+)
 
 
 router = APIRouter()
 
-EXPIRY_PRESETS = {300, 1800, 3600, 14400, 43200, 86400, 259200, 604800}
-
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-
-
-class CreateTextSecret(BaseModel):
-    content: str = Field(min_length=1, max_length=1_000_000)
-    content_type: str = Field(pattern="^text$")
-    expires_in: int
-    passphrase: Optional[str] = Field(default=None, max_length=200)
-    track: bool = False
-    label: Optional[str] = Field(default=None, max_length=60)
-
-    @field_validator("expires_in")
-    @classmethod
-    def _valid_preset(cls, v: int) -> int:
-        if v not in EXPIRY_PRESETS:
-            raise ValueError("expires_in must be one of the presets")
-        return v
 
 
 def _clean_label(raw) -> Optional[str]:
@@ -81,10 +73,11 @@ def send_page(request: Request):
 
 @router.post(
     "/send/login",
+    response_model=LoginResponse,
     dependencies=[Depends(login_rate_limit), Depends(verify_same_origin)],
 )
 def send_login(
-    request: Request,
+    response: Response,
     username: str = Form(...),
     password: str = Form(...),
     code: str = Form(...),
@@ -101,24 +94,25 @@ def send_login(
         raise HTTPException(status_code=401, detail="invalid credentials")
 
     # Session rotation: re-signing with a fresh timestamp gives a new cookie value.
-    cookie_value = make_session_cookie(user["id"])
-    response = JSONResponse({"ok": True, "username": user["username"]})
     response.set_cookie(
         key=settings.session_cookie_name,
-        value=cookie_value,
+        value=make_session_cookie(user["id"]),
         max_age=settings.session_max_age,
         httponly=True,
         samesite="strict",
         secure=False,  # enabled in prod via reverse-proxy-on-HTTPS env
     )
-    return response
+    return LoginResponse(username=user["username"])
 
 
-@router.post("/send/logout", dependencies=[Depends(verify_same_origin)])
-def send_logout(settings: Settings = Depends(get_settings)):
-    response = JSONResponse({"ok": True})
+@router.post(
+    "/send/logout",
+    response_model=LogoutResponse,
+    dependencies=[Depends(verify_same_origin)],
+)
+def send_logout(response: Response, settings: Settings = Depends(get_settings)):
     response.delete_cookie(settings.session_cookie_name, samesite="strict")
-    return response
+    return LogoutResponse()
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +123,7 @@ def send_logout(settings: Settings = Depends(get_settings)):
 @router.post(
     "/api/secrets",
     status_code=201,
+    response_model=CreateSecretResponse,
     dependencies=[
         Depends(create_rate_limit),
         Depends(verify_same_origin),
@@ -201,24 +196,24 @@ async def create_secret(
         label=label if track else None,  # labels are meaningless without tracking
     )
 
-    return {
-        "url": _build_url(row["token"], client_half),
-        "id": row["id"],
-        "expires_at": row["expires_at"],
-    }
+    return CreateSecretResponse(
+        url=_build_url(row["token"], client_half),
+        id=row["id"],
+        expires_at=row["expires_at"],
+    )
 
 
-@router.get("/api/me")
+@router.get("/api/me", response_model=ApiMeResponse)
 def api_me(user: dict = Depends(verify_api_token_or_session)):
     """Return a minimal view of the authenticated user (for header UI etc.)."""
-    return {
-        "id": user["id"],
-        "username": user["username"],
-        "email": user.get("email"),
-    }
+    return ApiMeResponse(
+        id=user["id"],
+        username=user["username"],
+        email=user.get("email"),
+    )
 
 
-@router.get("/api/secrets/{sid}/status")
+@router.get("/api/secrets/{sid}/status", response_model=SecretStatusResponse)
 def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
     status_row = models.get_status(sid, user["id"])
     if status_row is None:
@@ -226,14 +221,15 @@ def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
     return status_row
 
 
-@router.get("/api/secrets/tracked")
+@router.get("/api/secrets/tracked", response_model=TrackedListResponse)
 def list_tracked(user: dict = Depends(verify_api_token_or_session)):
     """List all tracked secrets owned by the authenticated user."""
-    return {"items": models.list_tracked_secrets(user["id"])}
+    return TrackedListResponse(items=models.list_tracked_secrets(user["id"]))
 
 
 @router.post(
     "/api/secrets/tracked/clear",
+    response_model=ClearTrackedResponse,
     dependencies=[Depends(verify_same_origin)],
 )
 def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
@@ -243,8 +239,7 @@ def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
     canceled, and still-pending-in-DB-but-past-expiry. Pending live rows
     are kept -- they're the user's active secrets.
     """
-    count = models.clear_non_pending_tracked(user["id"])
-    return {"cleared": count}
+    return ClearTrackedResponse(cleared=models.clear_non_pending_tracked(user["id"]))
 
 
 @router.post(
