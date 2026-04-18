@@ -1,7 +1,7 @@
 # Proposal: end-to-end encryption
 
 **Status**: draft — seeking feedback
-**Current system**: see `arch_doc.md`
+**Current system**: see [`ARCHITECTURE.md`](ARCHITECTURE.md)
 **Discussion**: please open a GitHub issue or discussion thread with your thoughts. This is a direction, not a commitment — the shape may change based on what people raise.
 
 ---
@@ -282,7 +282,7 @@ Phased, with tests green at each phase boundary. Order matters because some phas
 ### Phase 5 — migration, docs, deploy
 
 - Add the "wipe all secrets" step to the startup migration.
-- Update `arch_doc.md` top to bottom.
+- Update `ARCHITECTURE.md` top to bottom.
 - Update `README.md` passphrase section.
 - Update `DEPLOYMENT.md` with a migration callout.
 - Tag the release, deploy with the hard-cutover announcement.

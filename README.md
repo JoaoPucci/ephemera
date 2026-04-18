@@ -1,6 +1,6 @@
 # ephemera — dev quick start
 
-One-time secret sharing. See `arch_doc.md` for the full design.
+One-time secret sharing. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design.
 
 > **Heads up — direction in progress.** A proposal to move encryption into the
 > browser (end-to-end, server cannot read plaintexts) is drafted at
