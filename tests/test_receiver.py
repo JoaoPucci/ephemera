@@ -84,6 +84,34 @@ def test_reveal_with_wrong_key_returns_error(client, auth_headers):
     assert r.status_code == 400
 
 
+def test_reveal_with_malformed_base64_fragment_returns_400(client, auth_headers):
+    """A fragment that isn't valid base64url at all -- decode_half raises,
+    we return 400 'malformed key' rather than letting the exception bubble."""
+    secret = _create_text_secret(client, auth_headers)
+    token, _ = _token_and_client_half(secret["url"])
+    r = client.post(
+        f"/s/{token}/reveal",
+        json={"key": "!!!not-base64@@@"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 400
+
+
+def test_reveal_with_wrong_length_fragment_returns_400(client, auth_headers):
+    """Valid base64url but the decoded bytes aren't 16 bytes long -- we
+    reject before reaching Fernet so the error message is specific."""
+    secret = _create_text_secret(client, auth_headers)
+    token, _ = _token_and_client_half(secret["url"])
+    import base64
+    wrong_size = base64.urlsafe_b64encode(b"\x00" * 8).rstrip(b"=").decode()
+    r = client.post(
+        f"/s/{token}/reveal",
+        json={"key": wrong_size},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 400
+
+
 def test_reveal_without_passphrase_when_required_rejected(client, auth_headers):
     secret = _create_text_secret(client, auth_headers, passphrase="pw")
     token, client_half = _token_and_client_half(secret["url"])

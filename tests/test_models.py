@@ -326,6 +326,25 @@ def test_username_is_unique(tmp_db_path):
 # ---------------------------------------------------------------------------
 
 
+def test_list_users_returns_every_row(provisioned_user, make_user):
+    """Sanity check on list_users -- covered indirectly by the admin CLI
+    list-users command but not exercised at the model layer."""
+    make_user("bob")
+    make_user("carol")
+    rows = models.list_users()
+    usernames = {r["username"] for r in rows}
+    assert usernames == {provisioned_user["username"], "bob", "carol"}
+
+
+def test_update_user_with_no_fields_is_a_noop(provisioned_user):
+    """Edge case: an empty kwargs dict shouldn't produce an empty UPDATE
+    statement (SQLite would error); the function should return early."""
+    before = models.get_user_by_id(provisioned_user["id"])
+    models.update_user(provisioned_user["id"])  # no fields at all
+    after = models.get_user_by_id(provisioned_user["id"])
+    assert before["updated_at"] == after["updated_at"]  # no-op means no timestamp bump
+
+
 def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
     """A DB written by the pre-multi-user schema should gain username on users
     and user_id on secrets/api_tokens when init_db() runs over it."""

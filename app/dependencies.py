@@ -57,16 +57,6 @@ def is_logged_in(request: Request) -> bool:
     return models.get_user_by_id(uid) is not None
 
 
-def current_user(request: Request) -> dict:
-    """Load the logged-in user row or raise 401."""
-    uid = current_user_id(request)
-    if uid is not None:
-        user = models.get_user_by_id(uid)
-        if user is not None:
-            return user
-    raise HTTPException(status_code=401, detail="no valid session")
-
-
 # ---------------------------------------------------------------------------
 # API token auth (DB-backed; replaces the old static env API key)
 # ---------------------------------------------------------------------------

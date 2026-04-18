@@ -18,6 +18,13 @@ def test_bcrypt_hash_has_standard_prefix():
     assert h.startswith("$2")
 
 
+def test_verify_password_returns_false_for_malformed_hash():
+    """bcrypt.checkpw raises ValueError on non-bcrypt strings (e.g. a legacy
+    plaintext column, a truncated hash). Should return False, not crash."""
+    assert auth.verify_password("anything", "not-a-bcrypt-hash") is False
+    assert auth.verify_password("anything", "") is False
+
+
 def test_totp_accepts_current_step(provisioned_user):
     secret = provisioned_user["totp_secret"]
     code = provisioned_user["totp"].now()
@@ -82,6 +89,25 @@ def test_consume_backup_code_is_single_use(tmp_db_path):
     after_first = auth.consume_backup_code(codes[0], blob)
     assert after_first is not None
     assert auth.consume_backup_code(codes[0], after_first) is None
+
+
+def test_consume_backup_code_rejects_malformed_json(tmp_db_path):
+    """A JSON blob that doesn't parse returns None (no crash)."""
+    assert auth.consume_backup_code("XXXXX-YYYYY", "not-json") is None
+
+
+def test_consume_backup_code_skips_malformed_bcrypt_entries(tmp_db_path):
+    """If one entry has a corrupted hash, we should skip it and try the rest
+    rather than abort. Mirrors the same bcrypt-raises-ValueError defensive
+    path verify_password uses."""
+    codes, blob = auth.generate_recovery_codes()
+    entries = json.loads(blob)
+    # Corrupt the first entry's hash while keeping the second valid.
+    entries[0]["hash"] = "not-a-bcrypt-hash"
+    tampered = json.dumps(entries)
+    # The second code should still be consumable despite the malformed first.
+    updated = auth.consume_backup_code(codes[1], tampered)
+    assert updated is not None
 
 
 def test_consume_backup_code_rejects_unknown_code(tmp_db_path):
@@ -222,3 +248,23 @@ def test_provisioning_uri_default_issuer_unchanged():
     secret = auth.generate_totp_secret()
     uri = auth.provisioning_uri(secret, account_name="admin")
     assert "issuer=ephemera" in uri
+
+
+def test_check_not_locked_passes_when_lockout_already_expired():
+    """A lockout_until timestamp in the past (e.g., a stale lockout that
+    wasn't cleared after its window elapsed) shouldn't block auth — the
+    gate should silently pass through."""
+    from datetime import datetime, timedelta, timezone
+    from app.auth.lockout import check_not_locked
+
+    past = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    user = {"lockout_until": past}
+    check_not_locked(user)  # must not raise
+
+
+def test_check_not_locked_passes_when_no_lockout_set():
+    """Happy path: no lockout_until at all -> pass through."""
+    from app.auth.lockout import check_not_locked
+
+    check_not_locked({"lockout_until": None})
+    check_not_locked({})  # missing key entirely also fine

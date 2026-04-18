@@ -30,6 +30,11 @@ DEPLOYMENT.md
 # Logs
 *.log
 
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
 # Node (Vitest + Playwright)
 node_modules/
 package-lock.json

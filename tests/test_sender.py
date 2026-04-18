@@ -221,6 +221,58 @@ def test_post_api_secrets_rejects_oversize_image(client, auth_headers):
     assert r.status_code in (400, 413)
 
 
+def test_post_multipart_without_file_returns_422(client, auth_headers):
+    """Multipart body with expires_in but no 'file' field (decoy-named so
+    the request is still multipart/form-data) -- the handler refuses
+    cleanly instead of crashing on a None lookup."""
+    r = client.post(
+        "/api/secrets",
+        files={"decoy": ("decoy.bin", b"not-the-file-field", "application/octet-stream")},
+        data={"expires_in": "3600"},
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
+def test_post_multipart_with_non_integer_expires_in_returns_422(
+    client, auth_headers, sample_png_bytes
+):
+    """expires_in comes in as a form string; a non-numeric value is
+    caught by the int() conversion and rejected."""
+    r = client.post(
+        "/api/secrets",
+        files={"file": ("pic.png", sample_png_bytes, "image/png")},
+        data={"expires_in": "not-a-number"},
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
+def test_post_multipart_with_non_preset_expires_in_returns_422(
+    client, auth_headers, sample_png_bytes
+):
+    """Any integer that isn't in EXPIRY_PRESETS is rejected -- stops
+    callers from passing arbitrary TTLs through the multipart path."""
+    r = client.post(
+        "/api/secrets",
+        files={"file": ("pic.png", sample_png_bytes, "image/png")},
+        data={"expires_in": "9999"},  # not in the preset set
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
+def test_post_api_secrets_unsupported_content_type_returns_415(client, auth_headers):
+    """Anything that isn't application/json or multipart/form-data is
+    refused before hitting the crypto layer."""
+    r = client.post(
+        "/api/secrets",
+        content=b"raw bytes",
+        headers={**auth_headers, "Content-Type": "text/plain"},
+    )
+    assert r.status_code == 415
+
+
 def test_post_api_secrets_with_passphrase_stored_as_bcrypt_hash(client, auth_headers):
     r = client.post(
         "/api/secrets",

@@ -61,6 +61,27 @@ def test_reveal_rejects_cross_origin_post(client, auth_headers):
     assert bad.status_code == 403
 
 
+def test_rate_limiter_recovers_after_window_expires(monkeypatch):
+    """Once the window elapses, old hits get popped from the queue and the
+    same key can take a fresh round of hits. Deterministic via patching
+    time.monotonic -- no wall-clock sleeping in the test."""
+    from fastapi import HTTPException
+    from app import limiter
+
+    fake_time = [100.0]
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+
+    rl = limiter.RateLimiter(max_hits=2, window_seconds=60)
+    rl.check("k")
+    rl.check("k")
+    with pytest.raises(HTTPException):
+        rl.check("k")
+
+    # Advance past the window; the old hits should fall out on the next call.
+    fake_time[0] = 200.0
+    rl.check("k")  # must not raise
+
+
 def test_reveal_rate_limit_kicks_in(client, auth_headers):
     # Hammer the reveal endpoint with bogus tokens. After the limit, responses are 429.
     statuses = []

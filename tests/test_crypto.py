@@ -78,3 +78,26 @@ def test_decrypt_with_wrong_client_half_raises():
 def test_two_generated_keys_differ():
     keys = {crypto.generate_key() for _ in range(50)}
     assert len(keys) == 50
+
+
+def test_split_key_rejects_wrong_size():
+    """split_key demands exactly KEY_SIZE bytes -- catches callers that pass
+    an already-halved key or some other blob."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        crypto.split_key(b"\x00" * 16)   # too short
+    with pytest.raises(ValueError):
+        crypto.split_key(b"\x00" * 64)   # too long
+
+
+def test_reconstruct_key_rejects_wrong_half_sizes():
+    """reconstruct_key demands exactly HALF_SIZE bytes on each side so a
+    silent "oops I concatenated something else" produces a key we actively
+    reject rather than a 32-byte thing that just decrypts to garbage."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        crypto.reconstruct_key(b"\x00" * 8, b"\x00" * 16)
+    with pytest.raises(ValueError):
+        crypto.reconstruct_key(b"\x00" * 16, b"\x00" * 8)
