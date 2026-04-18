@@ -213,6 +213,7 @@ button {
   border-radius: 6px;
   cursor: pointer;
   letter-spacing: 0.01em;
+  touch-action: manipulation;  /* kill the 300ms tap delay on mobile browsers */
   transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
 
@@ -383,16 +384,6 @@ button.copy-error:hover {
 .user-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-}
-
-@media (max-width: 480px) {
-  .user-btn {
-    top: 0.5rem;
-    left: 0.5rem;
-    padding: 0.28rem 0.7rem;
-    font-size: 0.75rem;
-  }
-  #user-name { max-width: 6rem; }
 }
 
 /* ===================================================================
@@ -900,20 +891,64 @@ button.copy-error:hover {
 
 /* ===================================================================
    Responsive
+
+   Strategy: the page is a single centered card above a generous top
+   padding that keeps the wordmark clear of the two fixed corner pills
+   (theme toggle + user pill). On narrow screens we full-bleed the card
+   (no side border, no radius) to buy horizontal room for form fields,
+   compact the pills, and let the tracked-row internals wrap onto a
+   second line instead of squishing.
    =================================================================== */
 
 @media (max-width: 480px) {
-  body { padding: 1rem 0; }
+  body { padding: 3.5rem 0 1.5rem; }
+
   .card {
     border-radius: 0;
     border-left: none;
     border-right: none;
     padding: 1.5rem 1rem;
   }
+
+  .wordmark { font-size: 0.85rem; margin-bottom: 1rem; }
+
   .theme-toggle {
     top: 0.5rem;
     right: 0.5rem;
     padding: 0.3rem 0.7rem;
     font-size: 0.75rem;
   }
+
+  .user-btn {
+    top: 0.5rem;
+    left: 0.5rem;
+    padding: 0.28rem 0.7rem;
+    font-size: 0.75rem;
+  }
+  #user-name { max-width: 6rem; }
+
+  /* Stack the tracked row: label + time take the full width, then the
+     status pill + cancel + remove buttons sit on their own line. */
+  .tracked-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .tracked-right { justify-content: flex-end; }
+
+  #tracked-section.open .tracked-panel-body { max-height: 28rem; }
+
+  button.copy-btn { width: 100%; }
+
+  /* The fullscreen zoom overlay's close pill needs to clear the notch /
+     dynamic island on phones with viewport-fit=cover. */
+  .zoom-close { top: max(1rem, env(safe-area-inset-top)); }
+}
+
+@media (max-width: 360px) {
+  /* Three items share the top strip -- user pill, wordmark, theme
+     toggle. Tighten the username cap further so the wordmark still
+     has clearance. */
+  #user-name { max-width: 4rem; }
+  .wordmark { font-size: 0.8rem; }
 }
