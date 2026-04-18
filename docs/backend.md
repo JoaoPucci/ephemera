@@ -218,6 +218,14 @@ Per-session rate limit (applies to authenticated callers):
 Session cookies are `HttpOnly`, `SameSite=Strict`, `Secure` in production. A
 logout endpoint (`POST /send/logout`) clears the cookie.
 
+Each cookie is signed over `(user_id, session_generation)`. The user row
+carries a `session_generation` counter that is bumped on every credential
+rotation (`reset-password`, `rotate-totp`, `regen-recovery-codes`). A cookie
+signed over the prior generation stops authenticating the moment the
+counter advances, so a rotated-away password or a freshly-regenerated TOTP
+also sign the user out of every live session without waiting for
+`session_max_age` to elapse.
+
 `Secure` is driven by `EPHEMERA_SESSION_COOKIE_SECURE` (default `true`). In
 dev on `127.0.0.1`/`localhost` the cookie still works because modern browsers
 treat loopback as a secure context.

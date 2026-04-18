@@ -96,9 +96,11 @@ def send_login(
         raise HTTPException(status_code=401, detail="invalid credentials")
 
     # Session rotation: re-signing with a fresh timestamp gives a new cookie value.
+    # The cookie also binds to the user's current session_generation so that
+    # rotating credentials (which bumps the counter) invalidates live sessions.
     response.set_cookie(
         key=settings.session_cookie_name,
-        value=make_session_cookie(user["id"]),
+        value=make_session_cookie(user["id"], int(user["session_generation"])),
         max_age=settings.session_max_age,
         httponly=True,
         samesite="strict",
