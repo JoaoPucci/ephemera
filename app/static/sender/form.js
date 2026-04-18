@@ -21,6 +21,25 @@ const clearFile = document.getElementById('clear-file');
 
 // ---------- tabs ----------
 
+// Passphrase visibility toggle (same pattern as login.js). The passphrase is
+// sender-entered and communicated out-of-band, so masking protects against
+// shoulder-surfing during composition; a show button is available for when
+// the sender genuinely needs to read back what they typed.
+const ppInput = document.getElementById('passphrase');
+const ppToggle = document.getElementById('toggle-passphrase');
+if (ppInput && ppToggle) {
+  ppToggle.addEventListener('click', () => {
+    const showing = ppInput.getAttribute('type') === 'text';
+    ppInput.setAttribute('type', showing ? 'password' : 'text');
+    ppToggle.textContent = showing ? 'show' : 'hide';
+    ppToggle.setAttribute('aria-pressed', String(!showing));
+    ppToggle.setAttribute(
+      'aria-label',
+      showing ? 'show passphrase' : 'hide passphrase',
+    );
+  });
+}
+
 let activeTab = 'text';
 
 function setTab(name) {

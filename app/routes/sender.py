@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Optional
 
+import bcrypt
 from fastapi import (
     APIRouter,
     Depends,
@@ -14,6 +15,7 @@ from fastapi.responses import FileResponse
 
 from .. import auth as auth_mod
 from .. import crypto, models, validation
+from ..auth import BCRYPT_ROUNDS
 from ..config import Settings, get_settings
 from ..dependencies import (
     is_logged_in,
@@ -100,7 +102,7 @@ def send_login(
         max_age=settings.session_max_age,
         httponly=True,
         samesite="strict",
-        secure=False,  # enabled in prod via reverse-proxy-on-HTTPS env
+        secure=settings.session_cookie_secure,
     )
     return LoginResponse(username=user["username"])
 
@@ -111,7 +113,11 @@ def send_login(
     dependencies=[Depends(verify_same_origin)],
 )
 def send_logout(response: Response, settings: Settings = Depends(get_settings)):
-    response.delete_cookie(settings.session_cookie_name, samesite="strict")
+    response.delete_cookie(
+        settings.session_cookie_name,
+        samesite="strict",
+        secure=settings.session_cookie_secure,
+    )
     return LogoutResponse()
 
 
@@ -181,8 +187,13 @@ async def create_secret(
     key = crypto.generate_key()
     server_half, client_half = crypto.split_key(key)
     ciphertext = crypto.encrypt(plaintext, key)
-    import bcrypt as _bcrypt
-    passphrase_hash = _bcrypt.hashpw(passphrase.encode(), _bcrypt.gensalt()).decode() if passphrase else None
+    # Use the project-wide bcrypt cost so a future bump to BCRYPT_ROUNDS
+    # applies here too (was silently pinned to the library default before).
+    passphrase_hash = (
+        bcrypt.hashpw(passphrase.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
+        if passphrase
+        else None
+    )
 
     row = models.create_secret(
         user_id=user["id"],

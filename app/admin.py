@@ -340,6 +340,8 @@ def cmd_diagnose(username: Optional[str]) -> None:
     print(f"  current  step ({step}):      {totp.at(now_ts)}   <-- this is what it should show now")
     print(f"  next     step ({step + 1}):  {totp.at(now_ts + auth.TOTP_INTERVAL)}")
     print()
+    print("  !! DO NOT paste, screenshot, or share the line below.")
+    print("  !! It is equivalent to a password + 2FA combined.")
     print(f"Stored TOTP secret:  {secret}")
     print()
     print("If your authenticator shows a different code for the 'current step':")

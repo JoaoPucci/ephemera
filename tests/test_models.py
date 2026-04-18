@@ -78,7 +78,7 @@ def test_delete_secret_removes_row(provisioned_user):
 def test_mark_viewed_on_tracked_nulls_payload_keeps_metadata(provisioned_user):
     r = _mk(provisioned_user["id"], track=True, passphrase_hash="hash")
     models.mark_viewed(r["id"])
-    row = models.get_by_id(r["id"])
+    row = models.get_by_id(r["id"], provisioned_user["id"])
     assert row is not None
     assert row["status"] == "viewed"
     assert row["ciphertext"] is None
@@ -90,7 +90,7 @@ def test_mark_viewed_on_tracked_nulls_payload_keeps_metadata(provisioned_user):
 def test_mark_viewed_on_untracked_deletes_row(provisioned_user):
     r = _mk(provisioned_user["id"])
     models.mark_viewed(r["id"])
-    assert models.get_by_id(r["id"]) is None
+    assert models.get_by_id(r["id"], provisioned_user["id"]) is None
 
 
 def test_get_status_returns_pending_before_view(provisioned_user):
@@ -179,7 +179,7 @@ def test_cancel_tracked_wipes_payload_and_flags_status(provisioned_user):
     r = _mk(provisioned_user["id"], track=True, passphrase_hash="hash")
     ok = models.cancel(r["id"], provisioned_user["id"])
     assert ok is True
-    row = models.get_by_id(r["id"])
+    row = models.get_by_id(r["id"], provisioned_user["id"])
     assert row is not None
     assert row["status"] == "canceled"
     assert row["ciphertext"] is None
@@ -191,7 +191,7 @@ def test_cancel_tracked_wipes_payload_and_flags_status(provisioned_user):
 def test_cancel_untracked_deletes_row(provisioned_user):
     r = _mk(provisioned_user["id"])
     assert models.cancel(r["id"], provisioned_user["id"]) is True
-    assert models.get_by_id(r["id"]) is None
+    assert models.get_by_id(r["id"], provisioned_user["id"]) is None
 
 
 def test_cancel_on_already_viewed_secret_returns_false(provisioned_user):
@@ -204,7 +204,7 @@ def test_cancel_cannot_touch_other_users_secret(provisioned_user, make_user):
     bob = make_user("bob")
     r = _mk(provisioned_user["id"], track=True)
     assert models.cancel(r["id"], bob["id"]) is False
-    row = models.get_by_id(r["id"])
+    row = models.get_by_id(r["id"], provisioned_user["id"])
     assert row is not None and row["ciphertext"] is not None  # untouched
 
 
@@ -267,7 +267,7 @@ def test_untrack_scopes_by_user(provisioned_user, make_user):
     r = _mk(provisioned_user["id"], track=True)
     # Bob cannot untrack Alice's secret.
     assert models.untrack(r["id"], bob["id"]) is False
-    row = models.get_by_id(r["id"])
+    row = models.get_by_id(r["id"], provisioned_user["id"])
     assert row is not None and row["track"] == 1
     # Alice can.
     assert models.untrack(r["id"], provisioned_user["id"]) is True
@@ -280,7 +280,7 @@ def test_cascade_on_delete_user_drops_their_secrets_and_tokens(provisioned_user)
     models.create_token(user_id=provisioned_user["id"], name="t1", token_hash=digest)
 
     models.delete_user(provisioned_user["id"])
-    assert models.get_by_id(r["id"]) is None
+    assert models.get_by_id(r["id"], provisioned_user["id"]) is None
     assert models.list_tokens(provisioned_user["id"]) == []
 
 
@@ -391,7 +391,7 @@ def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
     # username set to 'admin'.
     u = models.get_user_by_username("admin")
     assert u is not None and u["id"] == 1
-    sec = models.get_by_id("legacy-sid")
+    sec = models.get_by_id("legacy-sid", 1)
     assert sec is not None and sec["user_id"] == 1
     toks = models.list_tokens(1)
     assert len(toks) == 1 and toks[0]["name"] == "legacy-tok-name"

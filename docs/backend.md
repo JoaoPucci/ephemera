@@ -218,6 +218,18 @@ Per-session rate limit (applies to authenticated callers):
 Session cookies are `HttpOnly`, `SameSite=Strict`, `Secure` in production. A
 logout endpoint (`POST /send/logout`) clears the cookie.
 
+`Secure` is driven by `EPHEMERA_SESSION_COOKIE_SECURE` (default `true`). In
+dev on `127.0.0.1`/`localhost` the cookie still works because modern browsers
+treat loopback as a secure context.
+
+The `SameSite=Strict` choice has a UX consequence: a click on `/send` from
+outside the app (email, Slack, search engine result) lands logged-out in
+that tab even if the user has a valid session, because Strict suppresses the
+cookie on cross-origin top-level navigations. For an admin-only tool this
+is the right trade — the protection against cross-origin state change is
+unconditional. If ephemera ever opens to wider use, revisit whether
+`SameSite=Lax` + an explicit CSRF token better fits the UX.
+
 #### API tokens
 
 External callers send `Authorization: Bearer <token>` where `<token>` was

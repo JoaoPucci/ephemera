@@ -83,7 +83,11 @@
       </select>
 
       <label for="passphrase">Passphrase (optional)</label>
-      <input type="text" id="passphrase" name="passphrase">
+      <div class="input-with-action">
+        <input type="password" id="passphrase" name="passphrase" autocomplete="new-password">
+        <button type="button" id="toggle-passphrase" class="input-action"
+                aria-label="show passphrase" aria-pressed="false">show</button>
+      </div>
 
       <label class="toggle">
         <input type="checkbox" id="track" name="track">

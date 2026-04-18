@@ -20,6 +20,9 @@ def tmp_db_path(tmp_path, monkeypatch):
     monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
     monkeypatch.setenv("EPHEMERA_BASE_URL", "http://testserver")
     monkeypatch.setenv("EPHEMERA_ALLOWED_ORIGINS", "http://testserver")
+    # TestClient requests are http://; the Secure flag would prevent the
+    # session cookie from round-tripping. Production default is True.
+    monkeypatch.setenv("EPHEMERA_SESSION_COOKIE_SECURE", "false")
 
     from app import config
 

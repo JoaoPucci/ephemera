@@ -48,15 +48,18 @@ def get_by_token(token: str) -> Optional[dict]:
     return _row_to_dict(row) if row else None
 
 
-def get_by_id(sid: str, user_id: Optional[int] = None) -> Optional[dict]:
-    """Lookup by server UUID. Pass user_id to prevent cross-user peeking."""
+def get_by_id(sid: str, user_id: int) -> Optional[dict]:
+    """Lookup by server UUID, scoped to one user.
+
+    user_id is required (was Optional with a None-bypass before; a future
+    caller could silently omit it and peek across users). For genuinely
+    cross-user admin-only lookups, reach for sqlite3 directly -- the intent
+    should be loud at the call site.
+    """
     with _connect() as conn:
-        if user_id is None:
-            row = conn.execute("SELECT * FROM secrets WHERE id = ?", (sid,)).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT * FROM secrets WHERE id = ? AND user_id = ?", (sid, user_id)
-            ).fetchone()
+        row = conn.execute(
+            "SELECT * FROM secrets WHERE id = ? AND user_id = ?", (sid, user_id)
+        ).fetchone()
     return _row_to_dict(row) if row else None
 
 
@@ -113,9 +116,14 @@ def burn(sid: str) -> None:
 
 
 def increment_attempts(sid: str) -> int:
+    """UPDATE ... RETURNING in a single statement so the counter we read back
+    is the one we just wrote (previously two statements under WAL could let a
+    concurrent attempt briefly undercount by one)."""
     with _connect() as conn:
-        conn.execute("UPDATE secrets SET attempts = attempts + 1 WHERE id = ?", (sid,))
-        row = conn.execute("SELECT attempts FROM secrets WHERE id = ?", (sid,)).fetchone()
+        row = conn.execute(
+            "UPDATE secrets SET attempts = attempts + 1 WHERE id = ? RETURNING attempts",
+            (sid,),
+        ).fetchone()
     return int(row["attempts"]) if row else 0
 
 

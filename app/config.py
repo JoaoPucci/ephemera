@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     allowed_origins: str = Field(default="http://localhost:8000")
     session_cookie_name: str = Field(default="ephemera_session")
     session_max_age: int = Field(default=60 * 60 * 8)
+    # Default True: in production (HTTPS behind Caddy) the cookie must have
+    # the Secure flag set. Browsers treat loopback (127.0.0.1, localhost) as a
+    # secure context, so dev on `./venv/bin/python run.py` works with True
+    # too. Override to False only if you have a legitimate reason (an old
+    # browser, a tunnel that terminates TLS upstream in a way we don't control).
+    session_cookie_secure: bool = Field(default=True)
     max_passphrase_attempts: int = Field(default=5)
     cleanup_interval_seconds: int = Field(default=60)
     tracked_retention_seconds: int = Field(default=30 * 24 * 60 * 60)

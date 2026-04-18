@@ -190,6 +190,21 @@ sudo journalctl -u caddy -f        # TLS + HTTP pipeline
 sudo tail -f /var/log/caddy/ephemera.log   # access log (JSON)
 ```
 
+**Things to never log.** Any custom middleware, debug proxy, or log-shipping
+pipeline configured later MUST NOT capture the following:
+
+- Request bodies on `POST /s/{token}/reveal` — contains the URL's client-half
+  key and (if set) the receiver passphrase.
+- Request bodies on `POST /api/secrets` — contains the plaintext before
+  encryption.
+- The `Authorization` header on any endpoint — bearer API tokens.
+- The `Cookie` / `Set-Cookie` headers — signed session values.
+- The `totp_secret` column from the DB, or any output of `app.admin diagnose`.
+
+Uvicorn's default access log format omits bodies and headers, and the Caddy
+JSON format shipped in the Caddyfile above is safe as-is. Changes to either
+side should be reviewed against this list.
+
 **Backup:** SQLite in WAL mode is safe to back up live via the atomic
 `.backup` command -- don't just `cp` the DB file, the WAL can make the copy
 inconsistent.

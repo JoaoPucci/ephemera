@@ -27,6 +27,10 @@ Thumbs.db
 # Private runbook (local only)
 DEPLOYMENT.md
 
+# Security audit report (kept local while findings are open; published
+# as release notes / changelog entries as fixes land, not in raw form).
+security_report.md
+
 # Logs
 *.log
 

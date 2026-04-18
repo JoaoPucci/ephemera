@@ -59,6 +59,35 @@ def test_login_correct_credentials_sets_session(client, provisioned_user):
     assert get_settings().session_cookie_name in r.cookies
 
 
+def test_login_sets_secure_flag_on_session_cookie(
+    tmp_db_path, provisioned_user, monkeypatch
+):
+    """The Secure attribute is critical so the session cookie never flows over
+    plain HTTP. Pinned here so a future refactor can't silently flip it off.
+
+    The default test env turns Secure off (TestClient uses http://, and a
+    Secure cookie wouldn't round-trip). Flip it back on just for this test,
+    rebuild a fresh client, and assert the flag is present in Set-Cookie.
+    """
+    from fastapi.testclient import TestClient
+    from app import config, create_app
+    from app.limiter import create_limiter, login_limiter, reveal_limiter
+
+    monkeypatch.setenv("EPHEMERA_SESSION_COOKIE_SECURE", "true")
+    config.get_settings.cache_clear()
+    for lim in (reveal_limiter, login_limiter, create_limiter):
+        lim.reset()
+
+    with TestClient(create_app()) as c:
+        code = provisioned_user["totp"].now()
+        r = _login(c, provisioned_user["username"], provisioned_user["password"], code)
+
+    set_cookie = r.headers.get("set-cookie", "").lower()
+    assert "secure" in set_cookie
+    assert "httponly" in set_cookie
+    assert "samesite=strict" in set_cookie
+
+
 def test_login_same_error_for_wrong_user_vs_password_vs_totp(client, provisioned_user):
     """Enumeration resistance: every failure mode looks the same."""
     code = provisioned_user["totp"].now()
@@ -281,7 +310,7 @@ def test_post_api_secrets_with_passphrase_stored_as_bcrypt_hash(client, auth_hea
     )
     assert r.status_code == 201
     from app import models
-    row = models.get_by_id(r.json()["id"])
+    row = models.get_by_id(r.json()["id"], 1)
     assert row["passphrase"] is not None and row["passphrase"].startswith("$2")
 
 
@@ -292,7 +321,7 @@ def test_post_api_secrets_with_track_sets_flag(client, auth_headers):
         headers=auth_headers,
     )
     from app import models
-    assert models.get_by_id(r.json()["id"])["track"] in (1, True)
+    assert models.get_by_id(r.json()["id"], 1)["track"] in (1, True)
 
 
 def test_post_api_secrets_invalid_expiry_rejected(client, auth_headers):
@@ -321,7 +350,7 @@ def test_post_api_secrets_assigns_to_authenticated_user(client, auth_headers, pr
         headers=auth_headers,
     )
     from app import models
-    row = models.get_by_id(r.json()["id"])
+    row = models.get_by_id(r.json()["id"], 1)
     assert row["user_id"] == provisioned_user["id"]
 
 
@@ -352,7 +381,7 @@ def test_label_stored_when_tracking_enabled(client, auth_headers):
         headers=auth_headers,
     )
     from app import models
-    row = models.get_by_id(r.json()["id"])
+    row = models.get_by_id(r.json()["id"], 1)
     assert row["label"] == "API key for Acme"
 
 
@@ -364,7 +393,7 @@ def test_label_ignored_without_tracking(client, auth_headers):
         headers=auth_headers,
     )
     from app import models
-    assert models.get_by_id(r.json()["id"])["label"] is None
+    assert models.get_by_id(r.json()["id"], 1)["label"] is None
 
 
 def test_list_tracked_returns_only_current_users_secrets(client, auth_headers, provisioned_user, make_user):
