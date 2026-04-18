@@ -105,23 +105,6 @@ after 30 days.
 
 ---
 
-## Expiry Presets
-
-| Label       | Duration |
-|-------------|----------|
-| 5 minutes   | 300s     |
-| 30 minutes  | 1800s    |
-| 1 hour      | 3600s    |
-| 4 hours     | 14400s   |
-| 12 hours    | 43200s   |
-| 24 hours    | 86400s   |
-| 3 days      | 259200s  |
-| 7 days      | 604800s  |
-
-Default: 24 hours.
-
----
-
 ## Tech Stack
 
 | Component        | Choice                      | Rationale                                      |
@@ -706,13 +689,6 @@ creates an `<img>` tag with a `data:` URI for images.
 
 ## UI Design
 
-### Design Philosophy
-
-The name "ephemera" refers to things that are transient and fleeting -- old
-tickets, handwritten notes, letters meant to be read once. The UI leans into
-this: quiet, paper-like, unhurried. No flashy gradients or corporate SaaS
-energy. It should feel like unsealing an envelope, not logging into a dashboard.
-
 ### Visual Language
 
 **Palette**
@@ -1016,15 +992,6 @@ Replaces the form card content after creation (no page navigation):
 - Touch targets: all buttons and inputs are at least 44px tall (iOS/Android
   accessibility minimum).
 - No horizontal scroll at any viewport size.
-
-### What the UI Does NOT Have
-
-- No animations beyond the reveal fade-in, status pulse, and button hover transitions.
-- No JavaScript frameworks. Vanilla JS only, under 100 lines total.
-- No external resources (fonts, CDNs, analytics, icons). Fully self-contained.
-- No footer, no "powered by", no version number. The page is just the card.
-
----
 
 ## Implementation Order
 
