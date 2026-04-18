@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel an in-progress run if a newer push lands on the same ref. A branch
+# that gets pushed three times in a minute runs CI once for the latest, not
+# three times in a queue.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Python tests (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install deps
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        # bcrypt cost 12 is intentional -- ~5 minutes is expected.
+        run: pytest -q
+
+  frontend-unit:
+    name: Frontend unit tests (Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run vitest
+        run: npm run test:unit
+
+  e2e:
+    name: End-to-end smoke (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Create Python venv
+        # tests-e2e/start.sh hard-codes ./venv/bin/python -- match locally.
+        run: |
+          python -m venv venv
+          ./venv/bin/pip install -r requirements-dev.txt
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Install Playwright browser + system deps
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
