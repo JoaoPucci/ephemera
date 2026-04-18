@@ -1,0 +1,14 @@
+{
+  "name": "ephemera-frontend-tests",
+  "private": true,
+  "type": "module",
+  "description": "Frontend (Vitest + jsdom) and E2E (Playwright) tests for ephemera. The Python backend is tested by pytest under tests/.",
+  "scripts": {
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0",
+    "vitest": "^2.1.0"
+  }
+}

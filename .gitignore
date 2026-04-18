@@ -26,3 +26,11 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Node (Vitest + Playwright)
+node_modules/
+package-lock.json
+coverage/
+playwright-report/
+test-results/
+/playwright/.cache/
