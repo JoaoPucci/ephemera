@@ -45,18 +45,19 @@ yourself.
 </details>
 
 <details>
-<summary><b>Test coverage</b> — 150 backend + 14 frontend + 1 end-to-end</summary>
+<summary><b>Test coverage</b> — backend, frontend, and end-to-end layers</summary>
 
-| Layer | Tool | Count |
-|---|---|---|
-| Backend unit + integration | pytest | 150 |
-| Frontend handlers (in-flight guards, error paths) | Vitest + jsdom | 14 |
-| End-to-end golden path in a real browser | Playwright (Chromium) | 1 |
+| Layer | Tool |
+|---|---|
+| Backend unit + integration | pytest |
+| Frontend handlers (in-flight guards, error paths) | Vitest + jsdom |
+| End-to-end golden path in a real browser | Playwright (Chromium) |
 
 Tests run against the real bcrypt cost (12) — no mocked faster config — which
-is why the suite takes ~4 minutes. The E2E test drives a real browser through
-login → create → reveal across two separate browser contexts, exercising the
-full pipeline including the browser's fragment handling.
+is why the suite takes a few minutes. The E2E test drives a real browser
+through login → create → reveal across two separate browser contexts,
+exercising the full pipeline including the browser's fragment handling. For
+exact counts and runtimes, run the suites (see below).
 
 </details>
 
@@ -209,11 +210,11 @@ you already have shell access — helpfulness beats ceremony.
 
 Three layers, each tests a different concern:
 
-| Layer | Tool | Count | Runtime |
-|---|---|---|---|
-| Backend unit + integration | pytest | 150 | ~4 min |
-| Frontend handlers | Vitest + jsdom | 14 | ~0.5 s |
-| End-to-end golden path | Playwright (Chromium) | 1 | ~5 s |
+| Layer | Tool | Rough runtime |
+|---|---|---|
+| Backend unit + integration | pytest | minutes (dominated by bcrypt cost 12) |
+| Frontend handlers | Vitest + jsdom | under a second |
+| End-to-end golden path | Playwright (Chromium) | a few seconds + server boot |
 
 ### Backend (pytest)
 
