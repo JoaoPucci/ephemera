@@ -202,11 +202,14 @@ Uploaded images are validated:
   the client half of the key is required in the body (only available to JS running
   on the page), this acts as a natural CSRF barrier.
 - Security headers on all responses (via FastAPI middleware):
-  - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'`
+  - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:`
   - `X-Content-Type-Options: nosniff`
   - `X-Frame-Options: DENY`
   - `Referrer-Policy: no-referrer`
-  - `Strict-Transport-Security: max-age=31536000` (Caddy handles this automatically)
+  - `Strict-Transport-Security: max-age=86400` (conservative first-rollout value;
+    HSTS is sticky, so start small, then bump to `max-age=31536000; includeSubDomains; preload`
+    once the cert has survived at least one Let's Encrypt renewal. Caddy does *not* add
+    HSTS automatically -- only the app middleware sets it.)
 - No secret content in logs: Uvicorn access log format configured to exclude
   request bodies. FastAPI exception handlers scrub sensitive data.
 - Secrets hard-deleted (not soft-deleted) on reveal. If tracking is enabled, only
@@ -1099,15 +1102,21 @@ your-domain.com {
     }
     encode gzip zstd
     log {
-        output file /var/log/caddy/ephemera.log
+        output file /var/log/caddy/ephemera.log {
+            roll_size 10mb    # rotate at 10MB
+            roll_keep 10      # keep the last 10 rotated files
+            roll_keep_for 720h # ~30 days
+        }
         format json
     }
 }
 ```
 
-That's it. Caddy handles TLS certificate provisioning, renewal, HTTPS
-redirects, and HSTS headers automatically. No certbot, no cron, no manual
-cert paths.
+That's it. Caddy handles TLS certificate provisioning, renewal, and the
+HTTP->HTTPS redirect automatically. No certbot, no cron, no manual cert
+paths. Note that Caddy does *not* add the `Strict-Transport-Security`
+header on its own -- HSTS is set by the app's security-header middleware
+in `app/__init__.py`.
 
 **DNS must be set up before Caddy first starts.** Caddy requests its certificate
 from Let's Encrypt via the ACME HTTP-01 challenge on first launch; if the

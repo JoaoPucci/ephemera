@@ -7,6 +7,7 @@ SEC_HEADERS = {
     "x-content-type-options",
     "x-frame-options",
     "referrer-policy",
+    "strict-transport-security",
 }
 
 
@@ -34,6 +35,12 @@ def test_x_content_type_options_is_nosniff(client):
 def test_x_frame_options_is_deny(client):
     r = client.get("/send")
     assert r.headers.get("X-Frame-Options") == "DENY"
+
+
+def test_hsts_has_a_max_age(client):
+    r = client.get("/send")
+    hsts = r.headers.get("Strict-Transport-Security", "")
+    assert "max-age=" in hsts
 
 
 def test_reveal_rejects_cross_origin_post(client, auth_headers):

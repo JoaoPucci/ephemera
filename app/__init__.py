@@ -21,6 +21,11 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
+    # Start conservative -- HSTS is sticky, so if the cert ever breaks, browsers
+    # that saw a long max-age will refuse HTTP for that long. Once the deployment
+    # has been stable through at least one Let's Encrypt renewal, bump this to
+    # `max-age=31536000; includeSubDomains; preload` and consider HSTS preload.
+    "Strict-Transport-Security": "max-age=86400",
 }
 
 
