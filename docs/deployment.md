@@ -214,6 +214,25 @@ sudo journalctl -u caddy -f        # TLS + HTTP pipeline
 sudo tail -f /var/log/caddy/ephemera.log   # access log (JSON)
 ```
 
+**Structured security events.** `app/security_log.py` emits one JSON line per
+security-relevant mutation (login success/failure, lockout, reveal, burn,
+cancel, tracked-clear, api-token create/revoke, user add/remove, credential
+rotations). These land interleaved with regular stdout. Common triage
+filters:
+
+```bash
+# All security events from the last hour:
+sudo journalctl -u ephemera --since '1 hour ago' -o cat | grep '"event":' | jq .
+
+# Failed logins grouped by username:
+sudo journalctl -u ephemera --since today -o cat \
+  | grep '"event":"login.failure"' | jq -r .username | sort | uniq -c
+
+# Who was in the service this week:
+sudo journalctl -u ephemera --since '7 days ago' -o cat \
+  | grep '"event":"login.success"' | jq -r '[.ts,.username,.client_ip]|@tsv'
+```
+
 **Things to never log.** Any custom middleware, debug proxy, or log-shipping
 pipeline configured later MUST NOT capture the following:
 

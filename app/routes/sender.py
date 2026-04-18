@@ -14,7 +14,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 
 from .. import auth as auth_mod
-from .. import crypto, models, validation
+from .. import crypto, models, security_log, validation
 from ..auth import BCRYPT_ROUNDS
 from ..config import Settings, get_settings
 from ..dependencies import (
@@ -79,6 +79,7 @@ def send_page(request: Request):
     dependencies=[Depends(login_rate_limit), Depends(verify_same_origin)],
 )
 def send_login(
+    request: Request,
     response: Response,
     username: str = Form(...),
     password: str = Form(...),
@@ -86,7 +87,10 @@ def send_login(
     settings: Settings = Depends(get_settings),
 ):
     try:
-        user = auth_mod.authenticate(username, password, code)
+        user = auth_mod.authenticate(
+            username, password, code,
+            client_ip=security_log.client_ip(request),
+        )
     except auth_mod.LockoutError as e:
         raise HTTPException(
             status_code=423,
@@ -252,7 +256,12 @@ def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
     canceled, and still-pending-in-DB-but-past-expiry. Pending live rows
     are kept -- they're the user's active secrets.
     """
-    return ClearTrackedResponse(cleared=models.clear_non_pending_tracked(user["id"]))
+    count = models.clear_non_pending_tracked(user["id"])
+    security_log.emit(
+        "secret.cleared",
+        user_id=user["id"], username=user["username"], count=count,
+    )
+    return ClearTrackedResponse(cleared=count)
 
 
 @router.post(
@@ -267,6 +276,10 @@ def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
     """
     if not models.cancel(sid, user["id"]):
         raise HTTPException(status_code=404, detail="not found or already gone")
+    security_log.emit(
+        "secret.canceled",
+        user_id=user["id"], username=user["username"], secret_id=sid,
+    )
     return Response(status_code=204)
 
 

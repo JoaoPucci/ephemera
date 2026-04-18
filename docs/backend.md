@@ -172,6 +172,17 @@ Uploaded images are validated:
     HSTS automatically -- only the app middleware sets it.)
 - No secret content in logs: Uvicorn access log format configured to exclude
   request bodies. FastAPI exception handlers scrub sensitive data.
+- **Structured security audit log** via the `ephemera.security` logger. Every
+  security-relevant mutation emits one JSON line: `login.success`,
+  `login.failure` (with reason), `login.lockout`, `reveal.success`,
+  `reveal.wrong_passphrase`, `reveal.burned`, `secret.canceled`,
+  `secret.cleared`, `apitoken.created`, `apitoken.revoked`, `user.added`,
+  `user.removed`, `password.reset`, `totp.rotated`, `recovery.regenerated`.
+  See `app/security_log.py` for field schemas. The emit-site filters
+  sensitive material; never pass plaintext/passphrase/client_half/password/
+  totp_code/server_key/ciphertext into a field. Under systemd the events
+  land in `journalctl -u ephemera`; `-o cat | grep '"event":"login.failure"' | jq`
+  is the usual triage filter.
 - Secrets hard-deleted (not soft-deleted) on reveal. If tracking is enabled, only
   the status flag and timestamps survive.
 - Expired secrets purged by background cleanup (runs every 60 seconds via FastAPI

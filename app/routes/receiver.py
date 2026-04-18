@@ -2,10 +2,10 @@
 import base64
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from .. import crypto, models
+from .. import crypto, models, security_log
 from ..config import Settings, get_settings
 from ..dependencies import verify_same_origin
 from ..limiter import reveal_rate_limit
@@ -57,10 +57,12 @@ def landing_meta(token: str):
     dependencies=[Depends(reveal_rate_limit), Depends(verify_same_origin)],
 )
 def reveal(
+    request: Request,
     token: str,
     body: RevealBody,
     settings: Settings = Depends(get_settings),
 ):
+    ip = security_log.client_ip(request)
     row = _load_live_row(token)
     if row is None:
         raise _gone()
@@ -72,8 +74,16 @@ def reveal(
 
         if not bcrypt.checkpw(body.passphrase.encode(), row["passphrase"].encode()):
             attempts = models.increment_attempts(row["id"])
+            security_log.emit(
+                "reveal.wrong_passphrase",
+                secret_id=row["id"], client_ip=ip, attempts=attempts,
+            )
             if attempts >= settings.max_passphrase_attempts:
                 models.burn(row["id"])
+                security_log.emit(
+                    "reveal.burned",
+                    secret_id=row["id"], client_ip=ip,
+                )
                 raise HTTPException(status_code=410, detail="too many attempts, secret burned")
             raise HTTPException(status_code=401, detail="wrong passphrase")
 
@@ -95,6 +105,8 @@ def reveal(
     # discard the plaintext we decrypted. See models.consume_for_reveal.
     if not models.consume_for_reveal(row["id"], track=bool(row["track"])):
         raise _gone()
+
+    security_log.emit("reveal.success", secret_id=row["id"], client_ip=ip)
 
     if row["content_type"] == "image":
         return RevealImageResponse(

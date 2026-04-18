@@ -28,6 +28,7 @@ User-selection rules:
 import getpass
 import io
 import json
+import logging
 import sys
 import time
 from datetime import datetime, timezone
@@ -38,6 +39,7 @@ import qrcode
 
 from . import auth, models
 from .config import get_settings
+from .security_log import emit as audit
 
 
 def _ascii_qr(data: str) -> str:
@@ -160,6 +162,7 @@ def _provision_user(username: str) -> tuple[int, str, list[str]]:
         totp_secret=secret,
         recovery_code_hashes=codes_json,
     )
+    audit("user.added", user_id=uid, username=username)
     return uid, secret, codes
 
 
@@ -227,6 +230,7 @@ def cmd_remove_user(username: str, force: bool = False) -> None:
         _reauth(target)
 
     models.delete_user(target["id"])
+    audit("user.removed", user_id=target["id"], username=username, forced=force)
     print(f"User '{username}' and all their data deleted.")
 
 
@@ -257,6 +261,7 @@ def cmd_reset_password(username: Optional[str]) -> None:
     new_pw = _prompt_new_password()
     models.update_user(user["id"], password_hash=auth.hash_password(new_pw))
     models.bump_session_generation(user["id"])
+    audit("password.reset", user_id=user["id"], username=user["username"])
     print(f"password updated for '{user['username']}'.")
     print("  live sessions for this user have been invalidated; they must log in again.")
 
@@ -267,6 +272,7 @@ def cmd_rotate_totp(username: Optional[str]) -> None:
     secret = auth.generate_totp_secret()
     models.update_user(user["id"], totp_secret=secret, totp_last_step=0)
     models.bump_session_generation(user["id"])
+    audit("totp.rotated", user_id=user["id"], username=user["username"])
     _print_totp_setup(secret, user["username"])
     print("new TOTP active. The old authenticator entry will stop working after you re-scan.")
     print("  live sessions for this user have been invalidated; they must log in again.")
@@ -278,6 +284,7 @@ def cmd_regen_recovery_codes(username: Optional[str]) -> None:
     codes, codes_json = auth.generate_recovery_codes()
     models.update_user(user["id"], recovery_code_hashes=codes_json)
     models.bump_session_generation(user["id"])
+    audit("recovery.regenerated", user_id=user["id"], username=user["username"])
     _print_recovery_codes(codes)
     print("  live sessions for this user have been invalidated; they must log in again.")
 
@@ -305,6 +312,7 @@ def cmd_create_token(name: str, username: Optional[str]) -> None:
             print(f"token name '{name}' already exists for user '{user['username']}'.", file=sys.stderr)
             sys.exit(1)
         raise
+    audit("apitoken.created", user_id=user["id"], username=user["username"], token_name=name)
     print()
     print(f"API token '{name}' created for user '{user['username']}'. Save this now — it will NOT be shown again:")
     print()
@@ -317,6 +325,7 @@ def cmd_revoke_token(name: str, username: Optional[str]) -> None:
     user = _resolve_user(username)
     _reauth(user)
     if models.revoke_token(user["id"], name):
+        audit("apitoken.revoked", user_id=user["id"], username=user["username"], token_name=name)
         print(f"token '{name}' revoked.")
     else:
         print(f"no active token named '{name}' for user '{user['username']}'.", file=sys.stderr)
@@ -406,6 +415,11 @@ COMMANDS = {
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Make structured security events visible at the CLI; emit() writes INFO
+    # via logging, and Python's default handlers silently drop INFO.
+    # basicConfig is a no-op if the root logger already has handlers (e.g.
+    # when pytest-caplog attached one first), so it's safe for tests too.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in COMMANDS:
         print(__doc__)
