@@ -131,9 +131,10 @@ For images: switch to the **Image** tab, drop a PNG/JPEG/GIF/WebP (10 MB max).
 
 ## Support
 
-If ephemera is useful to you, you're welcome to chip in. Time, hosting,
-and domains aren't free — appreciated but never expected, and the project
-keeps going either way.
+If ephemera is useful to you, you're welcome to chip in. It's less about
+this project's hosting bill than about the freedom to keep building things
+like it — new projects, same spirit, on my own time and on my own terms.
+Appreciated but never expected; the project keeps going either way.
 
 ETH: `0x097cD53Dc5Dda28c4f6A4431EA014916891beC02`
 
