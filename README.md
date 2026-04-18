@@ -4,9 +4,9 @@ One-time secret sharing, built from scratch.
 
 I wanted to send OTS without handing plaintexts to someone else's server —
 so I wrote ephemera and host my own. You can read the code and run your
-own too. Later I'll also open my instance as a hosted service, and once
+own too. Later I'll also open my instance as a hosted service — and once
 the [end-to-end encryption proposal](PROPOSAL-end-to-end-encryption.md)
-lands you won't have to trust me even then.
+lands, you won't have to trust me to use it either.
 
 Not a public service yet — there's no self-signup today, so my instance
 stays personal. That opens up once self-signup is built.
