@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { evalScript, flushAsync, jsonResponse, readStatic } from './helpers.js';
-
-const SENDER_JS = readStatic('sender.js');
+import { flushAsync, jsonResponse, loadModule } from './helpers.js';
 
 // Minimal sender.html fixture -- just the parts sender.js touches on load and
 // during create-secret. We don't need the tracked-list header chrome because
@@ -98,7 +96,7 @@ describe('sender.js — create-secret in-flight guard', () => {
     // Hang the create call so we can observe the guard at work.
     const fetchMock = stubSenderFetch(() => new Promise(() => {}));
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(SENDER_JS);
+    await loadModule('sender');
     await flushAsync();
 
     submitForm();
@@ -112,7 +110,7 @@ describe('sender.js — create-secret in-flight guard', () => {
   it('disables the submit button and swaps the label while in flight', async () => {
     const fetchMock = stubSenderFetch(() => new Promise(() => {}));
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(SENDER_JS);
+    await loadModule('sender');
     await flushAsync();
 
     submitForm();
@@ -127,7 +125,7 @@ describe('sender.js — create-secret in-flight guard', () => {
       Promise.resolve(jsonResponse({ detail: 'too big' }, 413))
     );
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(SENDER_JS);
+    await loadModule('sender');
     await flushAsync();
 
     submitForm();
@@ -152,7 +150,7 @@ describe('sender.js — create-secret in-flight guard', () => {
       )
     );
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(SENDER_JS);
+    await loadModule('sender');
     await flushAsync();
 
     submitForm();
@@ -178,7 +176,7 @@ describe('sender.js — create-secret in-flight guard', () => {
       )
     );
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(SENDER_JS);
+    await loadModule('sender');
     await flushAsync();
 
     submitForm();
@@ -197,7 +195,7 @@ describe('sender.js — create-secret in-flight guard', () => {
     document.getElementById('content').value = '';
     const fetchMock = stubSenderFetch(() => new Promise(() => {}));
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(SENDER_JS);
+    await loadModule('sender');
     await flushAsync();
 
     submitForm();

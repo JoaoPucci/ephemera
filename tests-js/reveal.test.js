@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { evalScript, flushAsync, jsonResponse, readStatic } from './helpers.js';
-
-const REVEAL_JS = readStatic('reveal.js');
+import { flushAsync, jsonResponse, loadModule } from './helpers.js';
 
 // reveal.js reads window.location.pathname and window.location.hash on every
 // call. jsdom's `window.location` is not directly assignable, so we override
@@ -62,7 +60,7 @@ describe('reveal.js — in-flight guard on the reveal button', () => {
       return new Promise(() => {});
     });
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(REVEAL_JS);
+    await loadModule('reveal');
 
     // Wait for init() to finish /meta call and show state-ready
     await flushAsync();
@@ -85,7 +83,7 @@ describe('reveal.js — in-flight guard on the reveal button', () => {
       return new Promise(() => {});
     });
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(REVEAL_JS);
+    await loadModule('reveal');
 
     await flushAsync();
     await flushAsync();
@@ -105,7 +103,7 @@ describe('reveal.js — in-flight guard on the reveal button', () => {
       return Promise.resolve(jsonResponse({ detail: 'wrong' }, 401));
     });
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(REVEAL_JS);
+    await loadModule('reveal');
 
     await flushAsync();
     await flushAsync();
@@ -128,7 +126,7 @@ describe('reveal.js — in-flight guard on the reveal button', () => {
       return Promise.resolve(new Response(null, { status: 410 }));
     });
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(REVEAL_JS);
+    await loadModule('reveal');
 
     await flushAsync();
     await flushAsync();
@@ -151,7 +149,7 @@ describe('reveal.js — in-flight guard on the reveal button', () => {
       return new Promise(() => {});
     });
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(REVEAL_JS);
+    await loadModule('reveal');
 
     await flushAsync();
     await flushAsync();

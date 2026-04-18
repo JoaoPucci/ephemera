@@ -1,107 +1,108 @@
-(() => {
-  const form = document.getElementById('login-form');
-  const err = document.getElementById('login-error');
-  const codeInput = document.getElementById('code');
-  const codeLabel = document.getElementById('code-label');
-  const toggle = document.getElementById('toggle-code-mode');
+// ES module. Top-level code runs once on import, against the DOM present
+// at the time the html file loads this via <script type="module">.
 
-  // Browsers often restore form values on reload. A TOTP code is one-shot
-  // by definition, so wipe it on page load. Also wipe if the page is
-  // restored from the bfcache (back button).
-  const clearOneShotFields = () => { codeInput.value = ''; };
-  clearOneShotFields();
-  window.addEventListener('pageshow', clearOneShotFields);
+const form = document.getElementById('login-form');
+const err = document.getElementById('login-error');
+const codeInput = document.getElementById('code');
+const codeLabel = document.getElementById('code-label');
+const toggle = document.getElementById('toggle-code-mode');
 
-  let backupMode = false;
+// Browsers often restore form values on reload. A TOTP code is one-shot
+// by definition, so wipe it on page load. Also wipe if the page is
+// restored from the bfcache (back button).
+const clearOneShotFields = () => { codeInput.value = ''; };
+clearOneShotFields();
+window.addEventListener('pageshow', clearOneShotFields);
 
-  // Password visibility toggle
-  const pwInput = document.getElementById('password');
-  const pwToggle = document.getElementById('toggle-password');
-  pwToggle.addEventListener('click', () => {
-    const showing = pwInput.getAttribute('type') === 'text';
-    pwInput.setAttribute('type', showing ? 'password' : 'text');
-    pwToggle.textContent = showing ? 'show' : 'hide';
-    pwToggle.setAttribute('aria-pressed', String(!showing));
-    pwToggle.setAttribute('aria-label', showing ? 'show password' : 'hide password');
-  });
+let backupMode = false;
 
-  function setMode(backup) {
-    backupMode = backup;
-    if (backup) {
-      codeLabel.textContent = 'Recovery code';
-      codeInput.setAttribute('autocomplete', 'off');
-      codeInput.setAttribute('inputmode', 'text');
-      codeInput.setAttribute('pattern', '[0-9A-Za-z\\-]*');
-      codeInput.placeholder = 'XXXXX-XXXXX';
-      toggle.textContent = 'Use 6-digit code';
-    } else {
-      codeLabel.textContent = '6-digit code';
-      codeInput.setAttribute('autocomplete', 'one-time-code');
-      codeInput.setAttribute('inputmode', 'numeric');
-      codeInput.placeholder = '';
-      toggle.textContent = 'Use a recovery code';
-    }
-    codeInput.value = '';
-    codeInput.focus();
+// Password visibility toggle
+const pwInput = document.getElementById('password');
+const pwToggle = document.getElementById('toggle-password');
+pwToggle.addEventListener('click', () => {
+  const showing = pwInput.getAttribute('type') === 'text';
+  pwInput.setAttribute('type', showing ? 'password' : 'text');
+  pwToggle.textContent = showing ? 'show' : 'hide';
+  pwToggle.setAttribute('aria-pressed', String(!showing));
+  pwToggle.setAttribute('aria-label', showing ? 'show password' : 'hide password');
+});
+
+function setMode(backup) {
+  backupMode = backup;
+  if (backup) {
+    codeLabel.textContent = 'Recovery code';
+    codeInput.setAttribute('autocomplete', 'off');
+    codeInput.setAttribute('inputmode', 'text');
+    codeInput.setAttribute('pattern', '[0-9A-Za-z\\-]*');
+    codeInput.placeholder = 'XXXXX-XXXXX';
+    toggle.textContent = 'Use 6-digit code';
+  } else {
+    codeLabel.textContent = '6-digit code';
+    codeInput.setAttribute('autocomplete', 'one-time-code');
+    codeInput.setAttribute('inputmode', 'numeric');
+    codeInput.placeholder = '';
+    toggle.textContent = 'Use a recovery code';
   }
+  codeInput.value = '';
+  codeInput.focus();
+}
 
-  toggle.addEventListener('click', () => setMode(!backupMode));
+toggle.addEventListener('click', () => setMode(!backupMode));
 
-  const submitBtn = form.querySelector('button[type="submit"]');
-  const submitLabel = submitBtn.textContent;
+const submitBtn = form.querySelector('button[type="submit"]');
+const submitLabel = submitBtn.textContent;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    // In-flight guard: stops a rapid double-tap from firing two logins.
-    // TOTP anti-replay would reject the second request anyway and overwrite
-    // the success state with an "invalid credentials" flash.
-    if (submitBtn.disabled) return;
-    err.hidden = true;
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Signing in…';
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  // In-flight guard: stops a rapid double-tap from firing two logins.
+  // TOTP anti-replay would reject the second request anyway and overwrite
+  // the success state with an "invalid credentials" flash.
+  if (submitBtn.disabled) return;
+  err.hidden = true;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Signing in…';
 
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    const code = codeInput.value;
-    const body = new URLSearchParams({ username, password, code });
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const code = codeInput.value;
+  const body = new URLSearchParams({ username, password, code });
 
-    let res;
-    try {
-      res = await fetch('/send/login', {
-        method: 'POST',
-        body,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      });
-    } catch {
-      submitBtn.disabled = false;
-      submitBtn.textContent = submitLabel;
-      err.textContent = 'Network error. Please try again.';
-      err.hidden = false;
-      return;
-    }
-
-    if (res.ok) {
-      // Leave the button disabled — the page is about to reload.
-      window.location.reload();
-      return;
-    }
-    if (res.status === 423) {
-      const data = await res.json().catch(() => ({}));
-      const until = data.detail && data.detail.until;
-      err.textContent = until
-        ? `Too many failed attempts. Locked until ${new Date(until).toLocaleString()}.`
-        : 'Too many failed attempts. Account locked.';
-    } else if (res.status === 429) {
-      err.textContent = 'Too many attempts. Please wait a moment.';
-    } else if (res.status === 422) {
-      err.textContent = 'Form fields out of date — hard-refresh the page (Ctrl+Shift+R) and try again.';
-    } else if (res.status === 401) {
-      err.textContent = 'Invalid credentials.';
-    } else {
-      err.textContent = `Unexpected error (HTTP ${res.status}). Check server logs.`;
-    }
-    err.hidden = false;
+  let res;
+  try {
+    res = await fetch('/send/login', {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+  } catch {
     submitBtn.disabled = false;
     submitBtn.textContent = submitLabel;
-  });
-})();
+    err.textContent = 'Network error. Please try again.';
+    err.hidden = false;
+    return;
+  }
+
+  if (res.ok) {
+    // Leave the button disabled — the page is about to reload.
+    window.location.reload();
+    return;
+  }
+  if (res.status === 423) {
+    const data = await res.json().catch(() => ({}));
+    const until = data.detail && data.detail.until;
+    err.textContent = until
+      ? `Too many failed attempts. Locked until ${new Date(until).toLocaleString()}.`
+      : 'Too many failed attempts. Account locked.';
+  } else if (res.status === 429) {
+    err.textContent = 'Too many attempts. Please wait a moment.';
+  } else if (res.status === 422) {
+    err.textContent = 'Form fields out of date — hard-refresh the page (Ctrl+Shift+R) and try again.';
+  } else if (res.status === 401) {
+    err.textContent = 'Invalid credentials.';
+  } else {
+    err.textContent = `Unexpected error (HTTP ${res.status}). Check server logs.`;
+  }
+  err.hidden = false;
+  submitBtn.disabled = false;
+  submitBtn.textContent = submitLabel;
+});

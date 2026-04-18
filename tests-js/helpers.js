@@ -1,28 +1,16 @@
 // Shared helpers for jsdom-based unit tests.
 //
-// The frontend JS files are IIFEs that attach listeners on load -- they're
-// not ES modules and aren't exported. To test them we read the source, build
-// a DOM fixture, then evaluate the source with `new Function(...)()` which
-// runs the IIFE against our fixture.
+// The frontend JS files are now ES modules. Each test:
+//   1. sets up a DOM fixture in `beforeEach`
+//   2. calls `vi.resetModules()` to clear the module cache
+//   3. `await import('../app/static/<entry>.js')` re-evaluates the module
+//      top-level code (its listener wiring) against the fresh fixture
 //
-// Each test uses a fresh DOM + fresh IIFE invocation (beforeEach), so
-// listeners from a previous test don't bleed into the next one.
+// `vi.resetModules()` is required because Vitest caches modules between
+// tests by default; without it, the second test would see the wiring from
+// the first test's DOM (long since discarded).
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STATIC_DIR = path.join(__dirname, '..', 'app', 'static');
-
-export function readStatic(name) {
-  return readFileSync(path.join(STATIC_DIR, name), 'utf-8');
-}
-
-export function evalScript(source) {
-  // eslint-disable-next-line no-new-func
-  new Function(source)();
-}
+import { vi } from 'vitest';
 
 // Wait for all currently queued microtasks + a macrotask tick. Sufficient to
 // drain "await fetch(...)" + a JSON parse + DOM writes in the handlers we test.
@@ -44,4 +32,14 @@ export function jsonResponse(body, status = 200) {
 // stuck in its in-flight state.
 export function neverResolveFetch() {
   return () => new Promise(() => {});
+}
+
+// Load a static-dir ES module fresh (clears Vitest's cache first, so each
+// test gets the module's top-level wiring re-run against the current DOM).
+// Usage: `await loadModule('login')` — pass the bare name, no extension.
+// The .js extension lives inside the template's static prefix so Vite's
+// dynamic-import analyzer can narrow the candidate set to *.js files.
+export async function loadModule(name) {
+  vi.resetModules();
+  return await import(`../app/static/${name}.js`);
 }

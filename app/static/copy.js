@@ -1,6 +1,6 @@
-// Tiny shared helper: copy text to clipboard with visible button feedback.
+// Shared helper: copy text to clipboard with visible button feedback.
 // Label swap to "Copied" (or "Copy failed"), subtle color shift, reverts after ~1.8s.
-window.copyWithFeedback = async function copyWithFeedback(button, text) {
+export async function copyWithFeedback(button, text) {
   if (button.dataset.busy === '1') return;
   button.dataset.busy = '1';
   const original = button.textContent;
@@ -32,4 +32,4 @@ window.copyWithFeedback = async function copyWithFeedback(button, text) {
     button.classList.remove('copied', 'copy-error');
     delete button.dataset.busy;
   }, 1800);
-};
+}

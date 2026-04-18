@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { evalScript, flushAsync, jsonResponse, neverResolveFetch, readStatic } from './helpers.js';
-
-const LOGIN_JS = readStatic('login.js');
+import { flushAsync, jsonResponse, loadModule, neverResolveFetch } from './helpers.js';
 
 function mountLoginForm() {
   document.body.innerHTML = `
@@ -48,7 +46,7 @@ describe('login.js — submit in-flight guard', () => {
   it('fires exactly one fetch when submit is dispatched twice in succession', async () => {
     const fetchMock = vi.fn(neverResolveFetch());
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(LOGIN_JS);
+    await loadModule('login');
 
     submitForm();
     submitForm();
@@ -59,7 +57,7 @@ describe('login.js — submit in-flight guard', () => {
 
   it('disables the submit button and swaps its label while the request is in flight', async () => {
     vi.stubGlobal('fetch', vi.fn(neverResolveFetch()));
-    evalScript(LOGIN_JS);
+    await loadModule('login');
 
     submitForm();
     await flushAsync();
@@ -72,7 +70,7 @@ describe('login.js — submit in-flight guard', () => {
   it('restores the button and surfaces an error on a 401', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ detail: 'nope' }, 401));
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(LOGIN_JS);
+    await loadModule('login');
 
     submitForm();
     await flushAsync();
@@ -89,7 +87,7 @@ describe('login.js — submit in-flight guard', () => {
   it('restores the button on a network error', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'));
     vi.stubGlobal('fetch', fetchMock);
-    evalScript(LOGIN_JS);
+    await loadModule('login');
 
     submitForm();
     await flushAsync();
