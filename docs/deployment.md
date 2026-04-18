@@ -164,9 +164,33 @@ All created at install time:
 ```bash
 sudo -u ephemera git -C /opt/ephemera fetch --tags
 sudo -u ephemera git -C /opt/ephemera checkout vX.Y.Z
-sudo -u ephemera /opt/ephemera/venv/bin/pip install -r /opt/ephemera/requirements.txt
+sudo -u ephemera /opt/ephemera/venv/bin/pip install \
+  --require-hashes -r /opt/ephemera/requirements.txt
 sudo systemctl restart ephemera
 ```
+
+`--require-hashes` makes pip verify every wheel against the SHA-256 hashes
+committed in `requirements.txt` (generated via `pip-compile --generate-hashes`).
+A tampered mirror, a typo-squatted package name, or an accidentally-added
+unhashed dep all fail the install rather than silently proceeding.
+
+Note that `pip install` is additive, not declarative: if a previous install
+left extra packages in the venv that are no longer in `requirements.txt`
+(e.g., when a dev-only package was ever installed directly), those stay.
+The way to resync a venv to exactly what the file specifies is to rebuild
+it from scratch:
+
+```bash
+sudo systemctl stop ephemera
+sudo -u ephemera rm -rf /opt/ephemera/venv
+sudo -u ephemera python3 -m venv /opt/ephemera/venv
+sudo -u ephemera /opt/ephemera/venv/bin/pip install \
+  --require-hashes -r /opt/ephemera/requirements.txt
+sudo systemctl start ephemera
+```
+
+Do this on the next deploy after any change that removes or adds packages
+to `requirements.in`.
 
 Rollback is identical, just a different tag:
 

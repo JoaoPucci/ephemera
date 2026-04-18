@@ -28,7 +28,10 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install deps
-        run: pip install -r requirements-dev.txt
+        # --require-hashes makes pip verify every package against the hashes
+        # in requirements-dev.txt. Any tampered wheel or unexpected transitive
+        # aborts the install rather than silently proceeding.
+        run: pip install --require-hashes -r requirements-dev.txt
 
       - name: Run pytest
         # bcrypt cost 12 is intentional -- ~5 minutes is expected.
@@ -77,7 +80,7 @@ jobs:
         # tests-e2e/start.sh hard-codes ./venv/bin/python -- match locally.
         run: |
           python -m venv venv
-          ./venv/bin/pip install -r requirements-dev.txt
+          ./venv/bin/pip install --require-hashes -r requirements-dev.txt
 
       - name: Install npm deps
         run: npm ci
@@ -112,9 +115,12 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit Python deps (requirements-dev transitively includes runtime)
-        # pip-audit follows `-r` directives, so one call covers both files.
-        # Exits non-zero on any known vulnerability.
-        run: pip-audit -r requirements-dev.txt
+        # Disable hash checking for the audit pass: pip-audit itself pulls in
+        # transitive deps that aren't in our locked set. The install that
+        # actually runs in the backend / e2e jobs uses --require-hashes and
+        # is the real integrity gate; pip-audit just needs to resolve the
+        # graph to check advisories against it.
+        run: pip-audit --disable-pip -r requirements-dev.txt
 
       - name: Set up Node
         uses: actions/setup-node@v4

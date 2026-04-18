@@ -90,8 +90,11 @@ feedback welcome.
 ```bash
 cd /path/to/ephemera
 python3 -m venv venv
-./venv/bin/pip install -r requirements-dev.txt   # runtime + test deps
+./venv/bin/pip install --require-hashes -r requirements-dev.txt   # runtime + test deps
 # or `-r requirements.txt` for a runtime-only install (what the server uses)
+# To add / bump a dep: edit requirements.in or requirements-dev.in, then run
+#   ./venv/bin/pip-compile --generate-hashes --resolver=backtracking requirements.in
+#   ./venv/bin/pip-compile --generate-hashes --resolver=backtracking --allow-unsafe requirements-dev.in
 cp .env.example .env
 # Edit .env and set EPHEMERA_SECRET_KEY to a real random value:
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"

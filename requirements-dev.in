@@ -1,0 +1,14 @@
+# Source of truth for dev-time dependencies (contributor machines + CI).
+# Edit this file, NOT requirements-dev.txt.
+#
+# `-r requirements.in` pulls in every runtime dep so one install covers both.
+#
+# Regenerate the hashed requirements-dev.txt after editing:
+#     ./venv/bin/pip-compile --generate-hashes --resolver=backtracking requirements-dev.in
+
+-r requirements.in
+
+pytest>=8.0
+pytest-cov>=6.0
+httpx>=0.27
+pip-tools>=7.4
