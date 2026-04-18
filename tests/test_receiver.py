@@ -75,6 +75,37 @@ def test_reveal_twice_second_returns_404(client, auth_headers):
     assert r.status_code == 404
 
 
+def test_concurrent_reveals_exactly_one_gets_plaintext(client, auth_headers):
+    """Two threaded reveals racing: one 200 with plaintext, the other 404.
+    Regression gate for F-01 — if the route loses its atomic gate, both
+    would return the plaintext."""
+    import threading
+
+    secret = _create_text_secret(client, auth_headers, content="race-winner")
+    token, client_half = _token_and_client_half(secret["url"])
+    headers = {"Origin": "http://testserver"}
+    barrier = threading.Barrier(2)
+    statuses: list[int] = []
+    bodies: list[str] = []
+    lock = threading.Lock()
+
+    def fire():
+        barrier.wait()
+        r = client.post(f"/s/{token}/reveal", json={"key": client_half}, headers=headers)
+        with lock:
+            statuses.append(r.status_code)
+            if r.status_code == 200:
+                bodies.append(r.json()["content"])
+
+    t1 = threading.Thread(target=fire)
+    t2 = threading.Thread(target=fire)
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    assert sorted(statuses) == [200, 404]
+    assert bodies == ["race-winner"]
+
+
 def test_reveal_with_wrong_key_returns_error(client, auth_headers):
     secret = _create_text_secret(client, auth_headers)
     token, _ = _token_and_client_half(secret["url"])

@@ -93,6 +93,51 @@ def test_mark_viewed_on_untracked_deletes_row(provisioned_user):
     assert models.get_by_id(r["id"], provisioned_user["id"]) is None
 
 
+def test_consume_for_reveal_first_call_wins_second_loses_untracked(provisioned_user):
+    r = _mk(provisioned_user["id"])
+    assert models.consume_for_reveal(r["id"], track=False) is True
+    assert models.consume_for_reveal(r["id"], track=False) is False
+    assert models.get_by_id(r["id"], provisioned_user["id"]) is None
+
+
+def test_consume_for_reveal_first_call_wins_second_loses_tracked(provisioned_user):
+    r = _mk(provisioned_user["id"], track=True)
+    assert models.consume_for_reveal(r["id"], track=True) is True
+    assert models.consume_for_reveal(r["id"], track=True) is False
+    row = models.get_by_id(r["id"], provisioned_user["id"])
+    assert row is not None
+    assert row["status"] == "viewed"
+    assert row["ciphertext"] is None
+    assert row["server_key"] is None
+    assert row["passphrase"] is None
+    assert row["viewed_at"] is not None
+
+
+def test_consume_for_reveal_under_concurrency_exactly_one_winner(provisioned_user):
+    """Two threads racing through consume_for_reveal: exactly one True."""
+    import threading
+
+    r = _mk(provisioned_user["id"])
+    barrier = threading.Barrier(2)
+    results: list[bool] = []
+    lock = threading.Lock()
+
+    def attempt():
+        barrier.wait()
+        won = models.consume_for_reveal(r["id"], track=False)
+        with lock:
+            results.append(won)
+
+    t1 = threading.Thread(target=attempt)
+    t2 = threading.Thread(target=attempt)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert sorted(results) == [False, True]
+
+
 def test_get_status_returns_pending_before_view(provisioned_user):
     r = _mk(provisioned_user["id"], track=True)
     status = models.get_status(r["id"], provisioned_user["id"])

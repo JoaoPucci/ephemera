@@ -68,8 +68,51 @@ def delete_secret(sid: str) -> None:
         conn.execute("DELETE FROM secrets WHERE id = ?", (sid,))
 
 
+def consume_for_reveal(sid: str, track: bool) -> bool:
+    """Atomically claim a live secret for one reveal.
+
+    Returns True if this call won the race (caller should proceed to return
+    the already-decrypted plaintext). Returns False if another concurrent
+    reveal already consumed the row (caller returns 404 and discards its
+    in-memory plaintext copy).
+
+    Tracked rows become status='viewed' with payload NULL'd; untracked rows
+    are deleted. Same end state as mark_viewed(), but the race between the
+    prior SELECT and the write is closed by the `ciphertext IS NOT NULL`
+    predicate -- only the first concurrent caller's UPDATE/DELETE matches,
+    the second affects zero rows and returns False.
+
+    This is the F-01 fix. Rowcount is the gate; no RETURNING needed because
+    the caller already has the pre-SELECTed payload to decrypt with.
+    """
+    with _connect() as conn:
+        if track:
+            cur = conn.execute(
+                """
+                UPDATE secrets
+                   SET ciphertext = NULL,
+                       server_key = NULL,
+                       passphrase = NULL,
+                       status     = 'viewed',
+                       viewed_at  = ?
+                 WHERE id = ? AND ciphertext IS NOT NULL
+                """,
+                (_iso(_utcnow()), sid),
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM secrets WHERE id = ? AND ciphertext IS NOT NULL",
+                (sid,),
+            )
+    return (cur.rowcount or 0) > 0
+
+
 def mark_viewed(sid: str) -> None:
-    """Reveal the secret: delete if untracked, null-out payload if tracked."""
+    """Reveal the secret: delete if untracked, null-out payload if tracked.
+
+    Kept for uses outside the reveal hot path (e.g. admin/manual operations).
+    The reveal handler itself uses `consume_for_reveal` for race-safety.
+    """
     now = _iso(_utcnow())
     with _connect() as conn:
         row = conn.execute("SELECT track FROM secrets WHERE id = ?", (sid,)).fetchone()
