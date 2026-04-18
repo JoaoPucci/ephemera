@@ -91,7 +91,10 @@ def reveal(
     except (crypto.DecryptionError, ValueError):
         raise HTTPException(status_code=400, detail="decryption failed")
 
-    models.mark_viewed(row["id"])
+    # Atomically claim the row; if a concurrent reveal already won, 404 and
+    # discard the plaintext we decrypted. See models.consume_for_reveal.
+    if not models.consume_for_reveal(row["id"], track=bool(row["track"])):
+        raise _gone()
 
     if row["content_type"] == "image":
         return RevealImageResponse(
