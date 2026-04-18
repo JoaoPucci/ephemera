@@ -129,6 +129,14 @@ The app starts at **http://127.0.0.1:8000** with `--reload` enabled.
 
 For images: switch to the **Image** tab, drop a PNG/JPEG/GIF/WebP (10 MB max).
 
+## Support
+
+If ephemera is useful to you, you're welcome to chip in. Time, hosting,
+and domains aren't free — appreciated but never expected, and the project
+keeps going either way.
+
+ETH: `0x097cD53Dc5Dda28c4f6A4431EA014916891beC02`
+
 ## Admin CLI reference
 
 <details>
