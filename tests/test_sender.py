@@ -516,7 +516,12 @@ def test_delete_is_idempotent(client, auth_headers):
 
 
 def test_delete_requires_auth(client):
-    assert client.delete("/api/secrets/some-id").status_code == 401
+    assert (
+        client.delete(
+            "/api/secrets/some-id", headers={"Origin": "http://testserver"}
+        ).status_code
+        == 401
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +598,9 @@ def test_cancel_cannot_touch_other_users_secret(client, auth_headers, make_user)
 
 
 def test_cancel_requires_auth(client):
-    r = client.post("/api/secrets/whatever/cancel")
+    r = client.post(
+        "/api/secrets/whatever/cancel", headers={"Origin": "http://testserver"}
+    )
     assert r.status_code == 401
 
 
@@ -679,7 +686,12 @@ def test_clear_history_returns_zero_when_nothing_to_clear(client, auth_headers):
 
 
 def test_clear_history_requires_auth(client):
-    assert client.post("/api/secrets/tracked/clear").status_code == 401
+    assert (
+        client.post(
+            "/api/secrets/tracked/clear", headers={"Origin": "http://testserver"}
+        ).status_code
+        == 401
+    )
 
 
 def test_clear_history_rejects_cross_origin(client, auth_headers):
