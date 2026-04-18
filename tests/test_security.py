@@ -43,6 +43,35 @@ def test_hsts_has_a_max_age(client):
     assert "max-age=" in hsts
 
 
+def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_client):
+    """F-03 regression: browser clients must send Origin on state-changing
+    requests. A session-cookie-authenticated POST with no Origin header is
+    the CSRF-gap shape we refuse."""
+    r = authed_client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+    )
+    assert r.status_code == 403
+
+
+def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client, api_token):
+    """Bearer-token (CLI/curl) callers have no ambient credentials and thus
+    no CSRF risk. Missing Origin stays allowed for them."""
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers={"Authorization": f"Bearer {api_token}"},
+    )
+    assert r.status_code == 201
+
+
+def test_delete_without_origin_and_with_session_is_rejected(authed_client):
+    """Same F-03 policy on the DELETE verb, where historical browser
+    Origin coverage is less uniform than POST."""
+    r = authed_client.delete("/api/secrets/some-id")
+    assert r.status_code == 403
+
+
 def test_reveal_rejects_cross_origin_post(client, auth_headers):
     # Create a secret first with a valid origin.
     r = client.post(

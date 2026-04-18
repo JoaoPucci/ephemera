@@ -252,10 +252,16 @@ tokens; it rides the session cookie. This means:
 #### Origin enforcement
 
 `Origin` header is validated on all state-changing routes (`POST /send/login`,
-`POST /send/logout`, `POST /api/secrets`, `POST /s/{token}/reveal`). Requests
-from a foreign Origin get 403. Missing Origin (e.g., curl, CLI) is allowed;
-the cookie's `SameSite=Strict` plus the bearer-token model handle CSRF for
-browsers.
+`POST /send/logout`, `POST /api/secrets`, `DELETE /api/secrets/{id}`,
+`POST /api/secrets/{id}/cancel`, `POST /api/secrets/tracked/clear`,
+`POST /s/{token}/reveal`). Requests from a foreign Origin get 403.
+
+Missing Origin is allowed **only** for callers using a bearer token
+(`Authorization: Bearer …`) — the CLI/curl flow. Bearer-token clients carry
+no ambient credentials, so CSRF does not apply. Missing Origin on a
+session-cookie request is refused (403) — that's the exact shape of the
+CSRF gap closed by F-03. `SameSite=Strict` remains the primary defense;
+the Origin check is a second layer.
 
 ## Database schema
 

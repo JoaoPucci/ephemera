@@ -91,9 +91,20 @@ def verify_api_token_or_session(
 
 
 def verify_same_origin(request: Request) -> None:
+    """CSRF defense: Origin must match, or the caller must be using a bearer
+    token (CLI/curl flow — no ambient credentials, no CSRF risk).
+
+    Missing-Origin requests from browsers are refused here, because missing
+    Origin + a session cookie = the exact shape of the CSRF gap in F-03.
+    Historically this function returned early on missing Origin to keep
+    CLI clients working; CLI clients use bearer auth and still do.
+    """
     origin = request.headers.get("origin")
     if origin is None:
-        return
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            return
+        raise HTTPException(status_code=403, detail="missing origin on state-changing request")
     allowed = get_settings().origins
     if origin not in allowed:
         raise HTTPException(status_code=403, detail="cross-origin request blocked")
