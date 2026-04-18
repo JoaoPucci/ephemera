@@ -2,6 +2,11 @@
 
 One-time secret sharing. See `arch_doc.md` for the full design.
 
+> **Heads up — direction in progress.** A proposal to move encryption into the
+> browser (end-to-end, server cannot read plaintexts) is drafted at
+> [`PROPOSAL-end-to-end-encryption.md`](PROPOSAL-end-to-end-encryption.md).
+> Feedback welcome via GitHub issues before implementation starts.
+
 ## Setup (once)
 
 ```bash
