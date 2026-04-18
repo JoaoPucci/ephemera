@@ -24,6 +24,9 @@ env/
 .DS_Store
 Thumbs.db
 
+# Private runbook (local only)
+DEPLOYMENT.md
+
 # Logs
 *.log
 
