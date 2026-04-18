@@ -68,9 +68,18 @@
     }
   }
 
+  const submitBtn = document.getElementById('submit-btn');
+  const submitLabel = submitBtn.textContent;
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    // In-flight guard: a rapid double-tap would otherwise create two
+    // independent secrets. The UI only shows the URL of the last response,
+    // so the first one silently orphans.
+    if (submitBtn.disabled) return;
     errBox.hidden = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating…';
 
     let res;
     try {
@@ -113,9 +122,13 @@
       const data = await res.json();
       if (track && data.url && data.id) cacheUrl(data.id, data.url);
       showResult(data);
+      // showResult hides the compose form, so the button doesn't need
+      // restoring -- leaving it disabled is also a belt on the suspender.
     } catch (err) {
       errBox.textContent = err.message || 'Something went wrong.';
       errBox.hidden = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = submitLabel;
     }
   });
 

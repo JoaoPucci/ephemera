@@ -30,19 +30,35 @@
     show('ready');
   }
 
+  const revealLabel = revealBtn.textContent;
   revealBtn.addEventListener('click', reveal);
 
   async function reveal() {
+    // Hoist the in-flight guard to the very first line so a rapid second
+    // tap can't slip through any sync work before the first handler yields
+    // at `await`. A destroyed secret we failed to render is unrecoverable,
+    // so we're deliberately strict here.
+    if (revealBtn.disabled) return;
+    revealBtn.disabled = true;
     errBox.hidden = true;
+
     const fragment = (window.location.hash || '').replace(/^#/, '');
     if (!fragment) {
+      revealBtn.disabled = false;
       errBox.textContent = 'This link is missing its decryption key.';
       errBox.hidden = false;
       return;
     }
     const body = { key: fragment };
     if (!passphraseWrap.hidden) body.passphrase = passphraseInput.value;
-    revealBtn.disabled = true;
+    // Visible "we're working on it" state -- without this, a slow network
+    // looks identical to a dead click and a nervous user taps again.
+    revealBtn.textContent = 'Revealing…';
+
+    const restoreButton = () => {
+      revealBtn.disabled = false;
+      revealBtn.textContent = revealLabel;
+    };
 
     let res;
     try {
@@ -52,28 +68,28 @@
         body: JSON.stringify(body),
       });
     } catch {
-      revealBtn.disabled = false;
+      restoreButton();
       errBox.textContent = 'Network error. Try again.';
       errBox.hidden = false;
       return;
     }
 
     if (res.status === 401) {
-      revealBtn.disabled = false;
+      restoreButton();
       errBox.textContent = 'Wrong passphrase.';
       errBox.hidden = false;
       return;
     }
     if (res.status === 410) return show('gone');
     if (res.status === 429) {
-      revealBtn.disabled = false;
+      restoreButton();
       errBox.textContent = 'Too many requests. Please wait a moment.';
       errBox.hidden = false;
       return;
     }
     if (res.status === 404) return show('gone');
     if (!res.ok) {
-      revealBtn.disabled = false;
+      restoreButton();
       errBox.textContent = 'Failed to reveal secret.';
       errBox.hidden = false;
       return;

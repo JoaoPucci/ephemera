@@ -47,22 +47,41 @@
 
   toggle.addEventListener('click', () => setMode(!backupMode));
 
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const submitLabel = submitBtn.textContent;
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    // In-flight guard: stops a rapid double-tap from firing two logins.
+    // TOTP anti-replay would reject the second request anyway and overwrite
+    // the success state with an "invalid credentials" flash.
+    if (submitBtn.disabled) return;
     err.hidden = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Signing in…';
 
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const code = codeInput.value;
     const body = new URLSearchParams({ username, password, code });
 
-    const res = await fetch('/send/login', {
-      method: 'POST',
-      body,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+    let res;
+    try {
+      res = await fetch('/send/login', {
+        method: 'POST',
+        body,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+    } catch {
+      submitBtn.disabled = false;
+      submitBtn.textContent = submitLabel;
+      err.textContent = 'Network error. Please try again.';
+      err.hidden = false;
+      return;
+    }
 
     if (res.ok) {
+      // Leave the button disabled — the page is about to reload.
       window.location.reload();
       return;
     }
@@ -82,5 +101,7 @@
       err.textContent = `Unexpected error (HTTP ${res.status}). Check server logs.`;
     }
     err.hidden = false;
+    submitBtn.disabled = false;
+    submitBtn.textContent = submitLabel;
   });
 })();
