@@ -17,6 +17,55 @@ Start with whichever matches your question:
 > [`PROPOSAL-end-to-end-encryption.md`](PROPOSAL-end-to-end-encryption.md).
 > Feedback welcome via GitHub issues before implementation starts.
 
+## Security & quality
+
+**Why this section is here.** AI-assisted builds invite legitimate skepticism
+about security and rigor. This isn't marketing — it's a concrete list of the
+controls that shipped, each backed by code you can read and tests you can run
+yourself.
+
+**Concerns a secret-sharing tool has to address, and what's in place:**
+
+| Concern | What's in place |
+|---|---|
+| DB breach exposing plaintext | Fernet + key splitting: the URL fragment (half the encryption key) never reaches the server. A database dump alone cannot decrypt anything. |
+| Plaintext in logs | Uvicorn access log excludes request bodies; FastAPI exception handlers scrub sensitive data. |
+| Weak authentication | bcrypt cost 12, TOTP with ±1-step tolerance and anti-replay, 10 one-time recovery codes, per-user lockout (10 failures in 15 min → 1 h). |
+| Username enumeration | Constant-time bcrypt check even when the username doesn't exist. |
+| Session hijacking / fixation | `HttpOnly` + `SameSite=Strict` + `Secure` cookie; session value rotated on every successful login. |
+| CSRF | `Origin` header validated on every state-changing POST. Cross-origin returns 403. |
+| XSS via uploads | SVG explicitly rejected; PNG / JPEG / GIF / WebP whitelist verified by magic bytes, not by the `Content-Type` header. 10 MB cap at the app; 11 MB cap at Caddy. |
+| Clickjacking, MIME sniffing, referrer leaks | `Content-Security-Policy: default-src 'self'` (no inline scripts); `X-Frame-Options: DENY`; `X-Content-Type-Options: nosniff`; `Referrer-Policy: no-referrer`; `Strict-Transport-Security` (conservative first-rollout max-age, to be bumped after a cert renewal). |
+| Brute force | 10/min/IP on login and reveal; 60/hr/session on create. Sliding-window, in-memory. |
+| Brute force on a leaked URL | Five wrong passphrase attempts permanently burns the secret. |
+| Stale / orphan data | Background cleanup purges expired rows every 60 s; tracked metadata auto-expires at 30 days; secrets hard-deleted on reveal. |
+| Service compromise | systemd sandbox: `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `ProtectKernel*`, `NoNewPrivileges`. Unprivileged service user with no shell; env file at `0640 root:ephemera`. |
+
+**Test coverage:**
+
+| Layer | Tool | Count |
+|---|---|---|
+| Backend unit + integration | pytest | 150 |
+| Frontend handlers (in-flight guards, error paths) | Vitest + jsdom | 14 |
+| End-to-end golden path in a real browser | Playwright (Chromium) | 1 |
+
+Tests run against the real bcrypt cost (12) — no mocked faster config — which
+is why the suite takes ~4 minutes. The E2E test drives a real browser through
+login → create → reveal across two separate browser contexts, exercising the
+full pipeline including the browser's fragment handling.
+
+**Verify for yourself.** Every control above has a counterpart in
+[`tests/`](tests/) or [`tests-js/`](tests-js/). Security design details live
+in [`docs/backend.md`](docs/backend.md) (crypto, auth, hardening); hosting
+and rollback in [`docs/deployment.md`](docs/deployment.md). Every release is
+tagged; rollback is one command.
+
+**Honest caveat.** The operator still serves the JavaScript that the browser
+executes, so an active malicious operator could in principle swap in code
+that exfiltrates plaintext before encryption. Closing that gap is the point
+of the [end-to-end encryption proposal](PROPOSAL-end-to-end-encryption.md) —
+feedback welcome.
+
 ## Setup (once)
 
 ```bash
