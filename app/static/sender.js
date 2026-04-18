@@ -301,7 +301,6 @@
 
       const fallback = item.content_type === 'image' ? 'Image secret' : 'Text secret';
       const labelText = (item.label && item.label.trim()) ? item.label : fallback;
-      const subtext = (item.label && item.label.trim()) ? (fallback + ' · ') : '';
 
       const labelEl = document.createElement('span');
       labelEl.className = 'label';
@@ -309,7 +308,13 @@
 
       const timeEl = document.createElement('span');
       timeEl.className = 'time';
-      let timeText = subtext + 'created ' + fmtRelative(item.created_at);
+      // When there's no user-supplied label, the fallback ("Image secret" /
+      // "Text secret") is already shown as the label -- no need to repeat it
+      // in the footnote. When there IS a label, the user knows what they
+      // tagged, so the content-type prefix would just crowd the row and
+      // push the footnote into a second line (which makes the status pill
+      // wrap too). Keep the footnote strictly about timing.
+      let timeText = 'created ' + fmtRelative(item.created_at);
       if (item.status === 'viewed' && item.viewed_at) {
         timeText += ' · viewed ' + fmtRelative(item.viewed_at);
       } else if (item.status === 'burned' && item.viewed_at) {

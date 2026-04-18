@@ -735,7 +735,16 @@ button.copy-error:hover {
 
 .tracked-meta { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .tracked-meta .label { color: var(--text); font-weight: 500; }
-.tracked-meta .time { color: var(--muted); font-size: 0.8rem; }
+/* Single line + ellipsis keeps the row height predictable. The full text
+   is always in the `title` attribute, so hovering reveals everything. */
+.tracked-meta .time {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
 .tracked-right { display: flex; align-items: center; gap: 0.5rem; }
 
 .tracked-remove {
@@ -845,6 +854,9 @@ button.copy-error:hover {
   letter-spacing: 0.02em;
   border: 1px solid transparent;
   text-transform: lowercase;
+  /* Belt on the suspender: if a row ever gets squeezed enough to push the
+     pill content toward wrapping, keep dot + text on one line regardless. */
+  white-space: nowrap;
 }
 
 .status-pill.pending {
