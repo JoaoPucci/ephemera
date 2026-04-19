@@ -103,6 +103,37 @@ def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client, api
     assert r.status_code == 201
 
 
+def test_post_api_secrets_without_origin_and_with_garbage_bearer_is_rejected(client):
+    """`Authorization: Bearer anything` used to bypass the Origin gate
+    because verify_same_origin only checked the prefix. Now the token is
+    validated against the DB before missing-Origin is accepted; a bogus
+    bearer produces the same 403 as missing-everything, not a 401 from
+    the downstream auth check.
+
+    Why this matters: both shapes of CSRF-risky request (missing Origin
+    + cookie, missing Origin + fake bearer) now hit the same 403 gate
+    uniformly, so the Origin check is strict on every browser-reachable
+    path regardless of what bogus Authorization header the page attaches."""
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers={"Authorization": "Bearer totally-not-a-real-token"},
+    )
+    assert r.status_code == 403
+
+
+def test_post_api_secrets_without_origin_and_with_empty_bearer_is_rejected(client):
+    """`Authorization: Bearer ` (with no token after the space) is
+    obviously-bogus and must be treated like any other missing-auth
+    browser case -- 403 at the origin gate, not 401 at the auth layer."""
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers={"Authorization": "Bearer "},
+    )
+    assert r.status_code == 403
+
+
 def test_delete_without_origin_and_with_session_is_rejected(authed_client):
     """Same policy on the DELETE verb, where historical browser Origin
     coverage is less uniform than POST."""

@@ -7,11 +7,22 @@ import bcrypt
 
 from .. import models
 from ..security_log import emit as audit
-from ._core import BCRYPT_ROUNDS, TOTP_DIGITS, AuthError
+from ._core import BCRYPT_ROUNDS, RECOVERY_CODE_COUNT, TOTP_DIGITS, AuthError
 from .lockout import check_not_locked, record_failure, record_success
 from .password import verify_password
 from .recovery_codes import consume_backup_code
 from .totp import verify_totp
+
+
+# Pre-computed dummy bcrypt hash used to equalize the unknown-user path's
+# CPU cost with the known-user worst case. The unknown-user branch runs
+# (1 + RECOVERY_CODE_COUNT) bcrypt.checkpw calls against this hash so a
+# timing attacker can't distinguish "username exists" (up to 11 bcrypts
+# when password is wrong + code isn't numeric, triggering recovery-code
+# iteration) from "username does not exist." Computed once at import
+# time; the hash itself is non-secret -- the whole point is that checkpw
+# does the same work regardless of the input.
+_DUMMY_BCRYPT_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
 
 
 def authenticate(username: str, password: str, code: str, client_ip: str = "cli") -> dict:
@@ -29,9 +40,16 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
     trimmed = username.strip() if username else ""
     user = models.get_user_by_username(trimmed) if trimmed else None
     if user is None:
-        # Constant-ish time: still do a bcrypt+totp-cost worth of work so
-        # timing doesn't leak whether the username exists.
-        bcrypt.checkpw(b"dummy", bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS)))
+        # Timing-equalize with the known-user worst case. The known-user
+        # path costs up to (1 + RECOVERY_CODE_COUNT) bcrypts: 1 for the
+        # password verify, up to RECOVERY_CODE_COUNT for the recovery-
+        # code iteration (consume_backup_code iterates through every
+        # stored hash doing bcrypt.checkpw until one matches). Run the
+        # same count here against a precomputed dummy hash so an
+        # attacker timing the response can't distinguish
+        # "username exists" from "username doesn't."
+        for _ in range(1 + RECOVERY_CODE_COUNT):
+            bcrypt.checkpw(b"dummy", _DUMMY_BCRYPT_HASH)
         audit("login.failure", username=trimmed, client_ip=client_ip, reason="unknown_user")
         raise AuthError("invalid credentials")
     try:
