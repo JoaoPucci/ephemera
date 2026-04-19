@@ -6,6 +6,7 @@ const err = document.getElementById('login-error');
 const codeInput = document.getElementById('code');
 const codeLabel = document.getElementById('code-label');
 const toggle = document.getElementById('toggle-code-mode');
+const codeToggleBtn = document.getElementById('toggle-code');
 
 // Browsers often restore form values on reload. A TOTP code is one-shot
 // by definition, so wipe it on page load. Also wipe if the page is
@@ -30,24 +31,54 @@ pwToggle.addEventListener('click', () => {
 function setMode(backup) {
   backupMode = backup;
   if (backup) {
+    // Recovery codes are long-lived single-use credentials. Mask the
+    // field on-screen so shoulder-surfing can't lift one by just watching
+    // the user type -- same rationale as the sender-form and receiver-form
+    // passphrase fields.
     codeLabel.textContent = 'Recovery code';
+    codeInput.setAttribute('type', 'password');
     codeInput.setAttribute('autocomplete', 'off');
     codeInput.setAttribute('inputmode', 'text');
     codeInput.setAttribute('pattern', '[0-9A-Za-z\\-]*');
     codeInput.placeholder = 'XXXXX-XXXXX';
+    codeToggleBtn.hidden = false;
     toggle.textContent = 'Use 6-digit code';
   } else {
+    // TOTP codes rotate every 30s with anti-replay; masking them buys
+    // nothing and costs UX. Leave plain text, hide the show/hide button.
     codeLabel.textContent = '6-digit code';
+    codeInput.setAttribute('type', 'text');
     codeInput.setAttribute('autocomplete', 'one-time-code');
     codeInput.setAttribute('inputmode', 'numeric');
     codeInput.placeholder = '';
+    codeToggleBtn.hidden = true;
     toggle.textContent = 'Use a recovery code';
   }
+  // Reset the show/hide button's internal state whenever the mode flips.
+  codeToggleBtn.setAttribute('aria-pressed', 'false');
+  codeToggleBtn.setAttribute('aria-label', 'show code');
+  codeToggleBtn.textContent = 'show';
   codeInput.value = '';
   codeInput.focus();
 }
 
 toggle.addEventListener('click', () => setMode(!backupMode));
+
+// Show/hide toggle for the recovery-code field. Only wired when the toggle
+// exists in the DOM (defensive -- the button is part of the current html
+// but if a future refactor removes it, the handler just silently no-ops).
+if (codeToggleBtn) {
+  codeToggleBtn.addEventListener('click', () => {
+    const showing = codeInput.getAttribute('type') === 'text';
+    codeInput.setAttribute('type', showing ? 'password' : 'text');
+    codeToggleBtn.textContent = showing ? 'show' : 'hide';
+    codeToggleBtn.setAttribute('aria-pressed', String(!showing));
+    codeToggleBtn.setAttribute(
+      'aria-label',
+      showing ? 'show code' : 'hide code',
+    );
+  });
+}
 
 const submitBtn = form.querySelector('button[type="submit"]');
 const submitLabel = submitBtn.textContent;
