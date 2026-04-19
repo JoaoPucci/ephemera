@@ -218,9 +218,13 @@ def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch):
     assert "even-more-recent" in rl._hits
 
 
-def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch):
+def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch, tmp_db_path):
     """cleanup.run_once() must advance sweep() across all four limiter
-    instances so the bounded-memory invariant holds uniformly."""
+    instances so the bounded-memory invariant holds uniformly.
+
+    tmp_db_path is required so run_once()'s DB-touching steps
+    (purge_expired / purge_tracked_metadata) hit a real schema; otherwise
+    the env-default path resolves to a missing ./ephemera.db under CI."""
     from app import cleanup, limiter
 
     called = []
