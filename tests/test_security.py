@@ -481,6 +481,51 @@ def test_landing_passphrase_input_is_type_password():
     )
 
 
+def test_login_code_input_has_show_hide_toggle_wiring():
+    """The login form's code input ships as type=text (TOTP is the default
+    mode; masking a 30-second rotating code buys no security). When the
+    user toggles into recovery-code mode, login.js flips the input to
+    type=password and unhides the show/hide button -- same pattern as
+    every other passphrase field in the app.
+
+    This test pins the HTML shape the JS relies on: the input lives inside
+    an .input-with-action wrapper so the toggle button can be positioned
+    next to it, and the toggle button exists (hidden by default) so
+    setMode() can show it without a conditional DOM insertion. The JS
+    state-machine is tested separately in tests-js/login.test.js."""
+    import pathlib
+    import re
+
+    html = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "app" / "static" / "login.html"
+    ).read_text()
+
+    # The code input must live inside an .input-with-action wrapper so the
+    # toggle button renders adjacent to it.
+    wrapper_match = re.search(
+        r'<div[^>]*class="[^"]*input-with-action[^"]*"[^>]*>'
+        r'(?:(?!</div>).)*<input[^>]*id="code"[^>]*>'
+        r'(?:(?!</div>).)*<button[^>]*id="toggle-code"[^>]*>[^<]*</button>'
+        r'(?:(?!</div>).)*</div>',
+        html,
+        flags=re.DOTALL,
+    )
+    assert wrapper_match is not None, (
+        "login.html must wrap #code input in an .input-with-action div "
+        "containing a #toggle-code button; setMode() requires this shape"
+    )
+
+    # The toggle button must ship hidden so TOTP mode (the default) doesn't
+    # show it; setMode(true) unhides it when entering recovery mode.
+    toggle_match = re.search(r'<button[^>]*id="toggle-code"[^>]*>', html)
+    assert toggle_match is not None
+    assert 'hidden' in toggle_match.group(0), (
+        "login.html #toggle-code button must ship `hidden` so it isn't "
+        "rendered in TOTP mode"
+    )
+
+
 def test_routes_do_not_log_tracebacks_or_grab_raw_body():
     """Invariant: route handlers must not call logger.exception or
     traceback.format_exc (tracebacks with locals leak plaintext/
