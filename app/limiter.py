@@ -31,6 +31,12 @@ class RateLimiter:
 reveal_limiter = RateLimiter(max_hits=10, window_seconds=60)
 login_limiter = RateLimiter(max_hits=10, window_seconds=60)
 create_limiter = RateLimiter(max_hits=60, window_seconds=3600)
+# Applied to reads that aren't covered by the more specific limiters above
+# (/api/me, /api/secrets/tracked, /api/secrets/{sid}/status, /s/{token}/meta).
+# Generous budget: a browsing user hits /status once per poll cycle and the
+# rest once per page load; 300 req/min leaves plenty of headroom while
+# still capping `meta`-spam style DoS from a single IP.
+read_limiter = RateLimiter(max_hits=300, window_seconds=60)
 
 
 def _client_ip(request: Request) -> str:
@@ -54,3 +60,7 @@ def create_rate_limit(request: Request) -> None:
     raw = request.cookies.get(get_settings().session_cookie_name)
     key = read_session_cookie(raw) if raw else None
     create_limiter.check(key or _client_ip(request))
+
+
+def read_rate_limit(request: Request) -> None:
+    read_limiter.check(_client_ip(request))

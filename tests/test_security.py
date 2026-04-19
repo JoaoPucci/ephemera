@@ -149,6 +149,32 @@ def test_rate_limiter_recovers_after_window_expires(monkeypatch):
     rl.check("k")  # must not raise
 
 
+def test_read_rate_limit_kicks_in_on_meta_spam(client, auth_headers):
+    """`/s/{token}/meta` used to have no rate limiter; a bogus-token probe
+    loop could hammer the app indefinitely. The generic read limiter
+    catches that past 300 req/min."""
+    from app.limiter import read_limiter
+
+    read_limiter.reset()
+    statuses = []
+    for i in range(320):
+        r = client.get(f"/s/bogus-{i}/meta")
+        statuses.append(r.status_code)
+    assert 429 in statuses
+
+
+def test_api_me_covered_by_read_rate_limit(client, auth_headers):
+    """Hitting /api/me past the 300/min budget must 429 -- the endpoint
+    used to have no limiter at all."""
+    from app.limiter import read_limiter
+
+    read_limiter.reset()
+    statuses = []
+    for _ in range(310):
+        statuses.append(client.get("/api/me", headers=auth_headers).status_code)
+    assert 429 in statuses
+
+
 def test_reveal_rate_limit_kicks_in(client, auth_headers):
     # Hammer the reveal endpoint with bogus tokens. After the limit, responses are 429.
     statuses = []

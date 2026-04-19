@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from .. import crypto, models, security_log
 from ..config import Settings, get_settings
 from ..dependencies import verify_same_origin
-from ..limiter import reveal_rate_limit
+from ..limiter import read_rate_limit, reveal_rate_limit
 from ..schemas import (
     LandingMetaResponse,
     RevealBody,
@@ -43,7 +43,11 @@ def landing_page(token: str):
     return FileResponse(STATIC_DIR / "landing.html")
 
 
-@router.get("/s/{token}/meta", response_model=LandingMetaResponse)
+@router.get(
+    "/s/{token}/meta",
+    response_model=LandingMetaResponse,
+    dependencies=[Depends(read_rate_limit)],
+)
 def landing_meta(token: str):
     row = _load_live_row(token)
     if row is None:

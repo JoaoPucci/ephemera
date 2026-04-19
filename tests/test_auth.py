@@ -232,6 +232,80 @@ def test_token_name_unique_per_user_not_global(provisioned_user, make_user):
     assert len(models.list_tokens(bob["id"])) == 1
 
 
+# ---------------------------------------------------------------------------
+# HIBP pwned-password check
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    """Minimal context-manager-compatible stand-in for urlopen()'s return."""
+    def __init__(self, body: str, status: int = 200):
+        self._body = body.encode("ascii")
+        self.status = status
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+def _sha1_parts(password: str) -> tuple[str, str]:
+    import hashlib
+    h = hashlib.sha1(password.encode()).hexdigest().upper()
+    return h[:5], h[5:]
+
+
+def test_pwned_count_returns_count_on_corpus_hit(monkeypatch):
+    """A known-breached password must round-trip through the range API
+    into a non-zero count."""
+    from app.auth import hibp
+
+    _, suffix = _sha1_parts("password123")
+    body = f"{suffix}:42\r\n{'F' * 35}:1\r\n"
+    monkeypatch.setattr(
+        hibp.urllib.request, "urlopen", lambda *a, **kw: _FakeResponse(body)
+    )
+    assert hibp.pwned_count("password123") == 42
+
+
+def test_pwned_count_returns_zero_when_suffix_absent(monkeypatch):
+    """Password not in the corpus -> 0 (fail-open with explicit False)."""
+    from app.auth import hibp
+
+    body = "0000000000000000000000000000000000A:5\r\n" + "1" * 35 + ":3\r\n"
+    monkeypatch.setattr(
+        hibp.urllib.request, "urlopen", lambda *a, **kw: _FakeResponse(body)
+    )
+    assert hibp.pwned_count("fresh-strong-unique-phrase-xyz") == 0
+
+
+def test_pwned_count_returns_none_on_network_failure(monkeypatch):
+    """An offline host (no DNS, no route) must not block password setup.
+    None is the sentinel the caller uses to skip the check with a warning."""
+    from app.auth import hibp
+
+    def _boom(*a, **kw):
+        raise hibp.urllib.error.URLError("network down")
+
+    monkeypatch.setattr(hibp.urllib.request, "urlopen", _boom)
+    assert hibp.pwned_count("anything") is None
+
+
+def test_pwned_count_returns_none_on_non_200_status(monkeypatch):
+    from app.auth import hibp
+
+    monkeypatch.setattr(
+        hibp.urllib.request,
+        "urlopen",
+        lambda *a, **kw: _FakeResponse("", status=503),
+    )
+    assert hibp.pwned_count("anything") is None
+
+
 def test_provisioning_uri_respects_custom_issuer():
     """Different instances (dev / prod) need distinct issuer strings so
     their entries don't visually collide in a shared authenticator app."""

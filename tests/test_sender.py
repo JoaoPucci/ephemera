@@ -165,6 +165,43 @@ def test_login_rejects_cross_origin(client, provisioned_user):
     assert r.status_code == 403
 
 
+def test_login_rejects_oversized_form_fields(client, provisioned_user):
+    """Caddy caps the full body at ~11MB; the app independently rejects
+    fields that exceed sane bounds so we never spend bcrypt on obvious junk."""
+    r = client.post(
+        "/send/login",
+        data={
+            "username": "a" * 300,  # >256
+            "password": provisioned_user["password"],
+            "code": provisioned_user["totp"].now(),
+        },
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 400
+
+    r = client.post(
+        "/send/login",
+        data={
+            "username": provisioned_user["username"],
+            "password": "a" * 300,
+            "code": provisioned_user["totp"].now(),
+        },
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 400
+
+    r = client.post(
+        "/send/login",
+        data={
+            "username": provisioned_user["username"],
+            "password": provisioned_user["password"],
+            "code": "x" * 80,
+        },
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 400
+
+
 def test_login_rate_limit_kicks_in(client):
     statuses = [
         _login(client, "x", "x", "000000").status_code for _ in range(12)
@@ -327,6 +364,32 @@ def test_post_multipart_with_non_preset_expires_in_returns_422(
         "/api/secrets",
         files={"file": ("pic.png", sample_png_bytes, "image/png")},
         data={"expires_in": "9999"},  # not in the preset set
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
+def test_post_multipart_rejects_oversized_passphrase(
+    client, auth_headers, sample_png_bytes
+):
+    """JSON path already caps passphrase via the Pydantic model; the
+    multipart path needs its own guard because it reads form fields raw."""
+    r = client.post(
+        "/api/secrets",
+        files={"file": ("pic.png", sample_png_bytes, "image/png")},
+        data={"expires_in": "3600", "passphrase": "x" * 250},
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
+def test_post_multipart_rejects_oversized_label(
+    client, auth_headers, sample_png_bytes
+):
+    r = client.post(
+        "/api/secrets",
+        files={"file": ("pic.png", sample_png_bytes, "image/png")},
+        data={"expires_in": "3600", "label": "x" * 100},
         headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
     )
     assert r.status_code == 422

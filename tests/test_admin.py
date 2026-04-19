@@ -57,6 +57,40 @@ def test_remove_user_refuses_to_empty_the_db(provisioned_user, capsys):
     assert "only remaining user" in capsys.readouterr().err.lower()
 
 
+def test_prompt_new_password_rejects_pwned_password(monkeypatch, capsys):
+    """A password that the HIBP API reports as breached must be refused
+    and re-prompted; the final accepted value is the one that comes back
+    clean."""
+    from app import admin
+    from app.auth import hibp
+
+    passwords = iter(["breachedpwned1!", "breachedpwned1!", "freshphrase-unique", "freshphrase-unique"])
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: next(passwords))
+    counts = iter([99999, 0])
+    monkeypatch.setattr(hibp, "pwned_count", lambda p, **kw: next(counts))
+
+    result = admin._prompt_new_password()
+    assert result == "freshphrase-unique"
+    out = capsys.readouterr().out
+    assert "99,999 known breaches" in out
+
+
+def test_prompt_new_password_warns_and_accepts_when_hibp_unreachable(
+    monkeypatch, capsys
+):
+    """Offline host / DNS blip: pwned_count returns None. The caller prints
+    a warning and accepts the password rather than blocking admin ops."""
+    from app import admin
+    from app.auth import hibp
+
+    pw = "solid-strong-local-phrase-1234"
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: pw)
+    monkeypatch.setattr(hibp, "pwned_count", lambda p, **kw: None)
+
+    assert admin._prompt_new_password() == pw
+    assert "couldn't reach" in capsys.readouterr().out.lower()
+
+
 def test_remove_user_with_force_deletes_target_and_cascades(
     provisioned_user, make_user, monkeypatch
 ):
