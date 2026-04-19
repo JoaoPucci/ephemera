@@ -28,7 +28,6 @@ User-selection rules:
 import getpass
 import io
 import json
-import logging
 import sys
 import time
 from datetime import datetime, timezone
@@ -429,11 +428,8 @@ COMMANDS = {
 
 
 def main(argv: list[str] | None = None) -> None:
-    # Make structured security events visible at the CLI; emit() writes INFO
-    # via logging, and Python's default handlers silently drop INFO.
-    # basicConfig is a no-op if the root logger already has handlers (e.g.
-    # when pytest-caplog attached one first), so it's safe for tests too.
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # Security events are visible via the handler that security_log installs
+    # on the `ephemera` parent logger on import -- no basicConfig needed here.
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] not in COMMANDS:
         print(__doc__)

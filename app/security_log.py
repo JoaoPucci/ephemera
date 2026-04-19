@@ -31,10 +31,30 @@ call-site.
 """
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import Request
+
+
+# Uvicorn's default LOGGING_CONFIG only configures `uvicorn`, `uvicorn.error`,
+# and `uvicorn.access`; it leaves the root logger with no handler. Records
+# from ephemera.* loggers propagate to root and then fall through to Python's
+# lastResort handler, which filters at WARNING -- silently dropping every
+# INFO-level event we care about (security events, cleanup-purged lines).
+#
+# Attach one INFO-level stderr handler to the `ephemera` parent logger so all
+# ephemera.* children inherit it. systemd captures stderr -> journald in
+# production; the dev terminal sees the same stream. Keep propagate=True so
+# pytest's caplog (which attaches at root) still sees records in tests.
+_EPHEMERA_ROOT = logging.getLogger("ephemera")
+_EPHEMERA_ROOT.setLevel(logging.INFO)
+if not any(getattr(h, "_ephemera_installed", False) for h in _EPHEMERA_ROOT.handlers):
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    setattr(_handler, "_ephemera_installed", True)
+    _EPHEMERA_ROOT.addHandler(_handler)
 
 
 _logger = logging.getLogger("ephemera.security")
