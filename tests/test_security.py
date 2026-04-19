@@ -149,6 +149,100 @@ def test_rate_limiter_recovers_after_window_expires(monkeypatch):
     rl.check("k")  # must not raise
 
 
+def test_limiter_evicts_empty_buckets_on_check(monkeypatch):
+    """When a key's bucket ages fully empty and that key hits again, the
+    stale entry must be replaced rather than accumulated -- so a rotating-
+    IP workload that happens to revisit keys doesn't leave dead empty
+    deques littering the dict."""
+    from app import limiter
+
+    fake_time = [100.0]
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+
+    rl = limiter.RateLimiter(max_hits=2, window_seconds=60)
+    rl.check("k")
+    assert "k" in rl._hits and len(rl._hits["k"]) == 1
+
+    # Past the window, the next check on the same key should replace the
+    # entry (via del + re-create), not leave a stale empty deque behind.
+    fake_time[0] = 200.0
+    rl.check("k")
+    assert len(rl._hits["k"]) == 1
+    # Invariant: no entry with an empty deque ever lingers in the dict
+    # after check() completes.
+    assert all(len(q) > 0 for q in rl._hits.values())
+
+
+def test_limiter_sweep_evicts_keys_that_never_return(monkeypatch):
+    """The "attacker rotates source IPs, each hits once, never comes
+    back" case. In-check lazy GC can't help -- nothing triggers a
+    re-read of a key that's never queried again. sweep() walks the
+    dict and drops fully-aged-out entries."""
+    from app import limiter
+
+    fake_time = [1000.0]
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+
+    rl = limiter.RateLimiter(max_hits=5, window_seconds=60)
+    for i in range(50):
+        rl.check(f"ip-{i}")
+    assert len(rl._hits) == 50
+
+    # No one comes back. Advance past the window.
+    fake_time[0] = 2000.0
+
+    evicted = rl.sweep()
+    assert evicted == 50
+    assert len(rl._hits) == 0
+
+
+def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch):
+    """sweep() must not drop entries whose deques still have hits inside
+    the window -- those are live buckets, not litter."""
+    from app import limiter
+
+    fake_time = [1000.0]
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+
+    rl = limiter.RateLimiter(max_hits=5, window_seconds=60)
+    rl.check("recent")           # at t=1000
+    fake_time[0] = 2000.0
+    rl.check("even-more-recent") # at t=2000
+
+    # Sweep at t=2010: "recent" is 1010s old (past the 60s window),
+    # "even-more-recent" is 10s old (still in window).
+    fake_time[0] = 2010.0
+    evicted = rl.sweep()
+    assert evicted == 1
+    assert "recent" not in rl._hits
+    assert "even-more-recent" in rl._hits
+
+
+def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch, tmp_db_path):
+    """cleanup.run_once() must advance sweep() across all four limiter
+    instances so the bounded-memory invariant holds uniformly.
+
+    tmp_db_path is required so run_once()'s DB-touching steps
+    (purge_expired / purge_tracked_metadata) hit a real schema; otherwise
+    the env-default path resolves to a missing ./ephemera.db under CI."""
+    from app import cleanup, limiter
+
+    called = []
+    for name in ("reveal_limiter", "login_limiter", "create_limiter", "read_limiter"):
+        lim = getattr(limiter, name)
+        lim.reset()
+        original = lim.sweep
+        def wrapped(orig=original, n=name):
+            called.append(n)
+            return orig()
+        monkeypatch.setattr(lim, "sweep", wrapped)
+
+    cleanup.run_once()
+    assert set(called) == {
+        "reveal_limiter", "login_limiter", "create_limiter", "read_limiter"
+    }
+
+
 def test_read_rate_limit_kicks_in_on_meta_spam(client, auth_headers):
     """`/s/{token}/meta` used to have no rate limiter; a bogus-token probe
     loop could hammer the app indefinitely. The generic read limiter
