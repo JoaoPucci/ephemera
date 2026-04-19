@@ -41,9 +41,10 @@ updates:
     commit-message:
       prefix: "deps(npm)"
 
-  # GitHub Actions — not yet used (there's no .github/workflows/), but
-  # including the ecosystem now means the first workflow file added gets
-  # auto-tracked without a follow-up Dependabot edit.
+  # GitHub Actions: tracks pinned action versions referenced from any
+  # .github/workflows/*.yml (today: ci.yml). Dependabot opens a PR when a
+  # referenced action publishes a new release, so `actions/checkout@v4`
+  # and friends get a real upgrade cadence instead of drifting silently.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

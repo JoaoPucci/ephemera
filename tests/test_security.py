@@ -284,9 +284,9 @@ def test_routes_do_not_log_tracebacks_or_grab_raw_body():
     request.form() instead; validate with a schema and keep the bytes
     out of local scope.
 
-    Raising this guard to a CI-level lint was suggested by the audit's
-    §10 Q#12 follow-up. Implemented here as a pytest so it runs in
-    the same pipeline as the other regression gates."""
+    Runs here as a pytest so it fires in the same pipeline as the
+    other regression gates — a drive-by `logger.exception` in a new
+    route fails the suite instead of reaching production."""
     import pathlib
 
     banned = [
