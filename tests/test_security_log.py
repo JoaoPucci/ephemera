@@ -1,4 +1,4 @@
-"""Tests for the structured security audit log (F-18)."""
+"""Tests for the structured security audit log."""
 import json
 import logging
 

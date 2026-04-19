@@ -82,8 +82,8 @@ def consume_for_reveal(sid: str, track: bool) -> bool:
     predicate -- only the first concurrent caller's UPDATE/DELETE matches,
     the second affects zero rows and returns False.
 
-    This is the F-01 fix. Rowcount is the gate; no RETURNING needed because
-    the caller already has the pre-SELECTed payload to decrypt with.
+    Rowcount is the gate; no RETURNING needed because the caller already
+    has the pre-SELECTed payload to decrypt with.
     """
     with _connect() as conn:
         if track:

@@ -63,7 +63,7 @@ def decrypt(ciphertext: bytes, key: bytes) -> bytes:
 
 
 # -----------------------------------------------------------------------------
-# At-rest encryption for small DB-stored secrets (e.g. the TOTP seed, F-05).
+# At-rest encryption for small DB-stored secrets (e.g. the TOTP seed).
 #
 # KEK is HKDF-derived from EPHEMERA_SECRET_KEY so operators don't need a second
 # env var. Cost: rotating SECRET_KEY makes existing ciphertexts unreadable, so

@@ -1,11 +1,10 @@
 """Operations on the `users` table.
 
-`totp_secret` is encrypted at rest (F-05). Every read through this module
-returns the plaintext base32 string; every write takes plaintext and
-encrypts transparently before the INSERT/UPDATE. Raw-SQL callers (tests
-that read via sqlite3 directly, or an operator doing forensic triage)
-see ciphertext prefixed with `v1:` -- which is exactly the invariant the
-F-05 fix guarantees.
+`totp_secret` is encrypted at rest. Every read through this module returns
+the plaintext base32 string; every write takes plaintext and encrypts
+transparently before the INSERT/UPDATE. Raw-SQL callers (tests that read
+via sqlite3 directly, or an operator doing forensic triage) see ciphertext
+prefixed with `v1:` -- the at-rest invariant this package maintains.
 """
 from typing import Optional
 

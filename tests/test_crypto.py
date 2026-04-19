@@ -104,7 +104,7 @@ def test_reconstruct_key_rejects_wrong_half_sizes():
 
 
 # ---------------------------------------------------------------------------
-# At-rest helpers (F-05)
+# At-rest helpers
 # ---------------------------------------------------------------------------
 
 
@@ -135,8 +135,9 @@ def test_decrypt_at_rest_rejects_non_v1_string(tmp_db_path):
 
 def test_decrypt_at_rest_fails_after_secret_key_rotation(tmp_db_path, monkeypatch):
     """Rotating EPHEMERA_SECRET_KEY makes existing ciphertexts unreadable.
-    This is the documented operator cost of F-05; the test pins that the
-    failure is a loud AtRestDecryptionError, not a silent wrong value."""
+    This is the documented operator cost of at-rest encryption; the test
+    pins that the failure is a loud AtRestDecryptionError, not a silent
+    wrong value."""
     import pytest
     from app import config
 

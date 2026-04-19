@@ -295,7 +295,7 @@ Missing Origin is allowed **only** for callers using a bearer token
 (`Authorization: Bearer …`) — the CLI/curl flow. Bearer-token clients carry
 no ambient credentials, so CSRF does not apply. Missing Origin on a
 session-cookie request is refused (403) — that's the exact shape of the
-CSRF gap closed by F-03. `SameSite=Strict` remains the primary defense;
+CSRF gap we explicitly refuse. `SameSite=Strict` remains the primary defense;
 the Origin check is a second layer.
 
 ## Database schema
@@ -357,7 +357,7 @@ CREATE INDEX idx_api_tokens_user_id ON api_tokens(user_id);
 CREATE UNIQUE INDEX idx_api_tokens_user_name ON api_tokens(user_id, name);  -- token names unique per-user, not globally
 ```
 
-**`users.totp_secret` is encrypted at rest (F-05).** The column holds a
+**`users.totp_secret` is encrypted at rest.** The column holds a
 Fernet token prefixed with `v1:`; the KEK is derived via HKDF-SHA256 from
 `EPHEMERA_SECRET_KEY` with a stable info string. The model layer encrypts
 on `create_user` / `update_user(totp_secret=...)` and decrypts inside

@@ -258,8 +258,8 @@ sudo -u ephemera /usr/bin/sqlite3 /var/lib/ephemera/ephemera.db \
 ```
 
 Also back up `/etc/ephemera/env`. The `EPHEMERA_SECRET_KEY` value is
-load-bearing for two things: it signs session cookies, and (since F-05)
-a KEK is HKDF-derived from it to encrypt the stored TOTP seeds.
+load-bearing for two things: it signs session cookies, and a KEK is
+HKDF-derived from it to encrypt the stored TOTP seeds at rest.
 
 If the key is rotated or lost:
 - All session cookies become unverifiable → every user re-logs in. Fine.

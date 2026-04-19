@@ -77,8 +77,8 @@ def test_reveal_twice_second_returns_404(client, auth_headers):
 
 def test_concurrent_reveals_exactly_one_gets_plaintext(client, auth_headers):
     """Two threaded reveals racing: one 200 with plaintext, the other 404.
-    Regression gate for F-01 — if the route loses its atomic gate, both
-    would return the plaintext."""
+    Regression gate for the atomic-reveal fix: if the route loses its
+    atomic gate, both callers would return the plaintext."""
     import threading
 
     secret = _create_text_secret(client, auth_headers, content="race-winner")

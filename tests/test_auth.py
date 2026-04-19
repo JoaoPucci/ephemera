@@ -251,7 +251,7 @@ def test_provisioning_uri_default_issuer_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# F-05: TOTP at rest
+# TOTP at rest
 # ---------------------------------------------------------------------------
 
 
@@ -291,11 +291,11 @@ def test_rotate_totp_writes_ciphertext(provisioned_user, tmp_db_path):
 def test_secret_key_rotation_breaks_totp_but_recovery_code_still_works(
     provisioned_user, monkeypatch
 ):
-    """Documented recovery path for F-05: if SECRET_KEY rotates, the stored
-    TOTP ciphertext is undecryptable. The user must then log in with a
-    recovery code (unaffected by the KEK change), after which `rotate-totp`
-    writes a fresh seed under the new key. Regression-gate the recovery
-    path so it can never silently break."""
+    """Documented recovery path for at-rest TOTP encryption: if SECRET_KEY
+    rotates, the stored TOTP ciphertext is undecryptable. The user must
+    then log in with a recovery code (unaffected by the KEK change), after
+    which `rotate-totp` writes a fresh seed under the new key. Regression-
+    gate the recovery path so it can never silently break."""
     from app import config
 
     # Generate a recovery code set BEFORE rotation so bcrypt hashes are intact.
@@ -322,7 +322,7 @@ def test_secret_key_rotation_breaks_totp_but_recovery_code_still_works(
 
 
 def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path, monkeypatch):
-    """A DB rescued from before the F-05 rollout has a plaintext base32
+    """A DB rescued from before the at-rest rollout has a plaintext base32
     totp_secret. init_db() must encrypt it in place, idempotently."""
     import sqlite3
     from app import models

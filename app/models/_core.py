@@ -151,7 +151,7 @@ def init_db() -> None:
         # Indices last, after the columns they reference definitely exist.
         conn.executescript(INDICES_SCRIPT)
 
-        # ---- F-05: encrypt any plaintext totp_secret rows in place ----
+        # ---- Encrypt any plaintext totp_secret rows in place ----
         # Detection key: rows prefixed with "v1:" are already encrypted.
         # Anything else is a legacy plaintext base32 TOTP seed and gets
         # rewritten. Idempotent; runs every boot but only touches rows
