@@ -251,6 +251,29 @@ def test_rate_limit_uses_forwarded_for_when_proxied():
 # ---------------------------------------------------------------------------
 
 
+def test_landing_passphrase_input_is_type_password():
+    """Receiver-side shoulder-surf hygiene: the passphrase <input> on the
+    reveal landing page must be masked by default. A show/hide toggle is
+    allowed to flip the type at runtime, but the rendered source must
+    never ship with type=text. Mirrors the same invariant the sender-side
+    form already holds; catching both sides is the point."""
+    import pathlib
+    import re
+
+    html = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "app" / "static" / "landing.html"
+    ).read_text()
+    # Find the passphrase input specifically; there may be other inputs on
+    # the page in the future.
+    pp_match = re.search(r'<input[^>]*id="passphrase"[^>]*>', html)
+    assert pp_match is not None, "no #passphrase input found on landing page"
+    tag = pp_match.group(0)
+    assert 'type="password"' in tag, (
+        f"receiver passphrase input must ship as type=password; got: {tag}"
+    )
+
+
 def test_routes_do_not_log_tracebacks_or_grab_raw_body():
     """Invariant: route handlers must not call logger.exception or
     traceback.format_exc (tracebacks with locals leak plaintext/

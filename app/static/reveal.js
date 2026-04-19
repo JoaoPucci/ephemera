@@ -12,8 +12,26 @@ const states = {
 };
 const passphraseWrap = document.getElementById('passphrase-wrap');
 const passphraseInput = document.getElementById('passphrase');
+const passphraseToggle = document.getElementById('toggle-passphrase');
 const revealBtn = document.getElementById('reveal-btn');
 const errBox = document.getElementById('reveal-error');
+
+// Passphrase visibility toggle. The receiver types the passphrase in a
+// potentially-shared context (coffee shop, screen share, colleague nearby);
+// masking by default protects it while typing, and a show button is there
+// for when it's genuinely needed. Same pattern as sender/form.js + login.js.
+if (passphraseInput && passphraseToggle) {
+  passphraseToggle.addEventListener('click', () => {
+    const showing = passphraseInput.getAttribute('type') === 'text';
+    passphraseInput.setAttribute('type', showing ? 'password' : 'text');
+    passphraseToggle.textContent = showing ? 'show' : 'hide';
+    passphraseToggle.setAttribute('aria-pressed', String(!showing));
+    passphraseToggle.setAttribute(
+      'aria-label',
+      showing ? 'show passphrase' : 'hide passphrase',
+    );
+  });
+}
 
 function show(name) {
   Object.entries(states).forEach(([k, el]) => (el.hidden = k !== name));

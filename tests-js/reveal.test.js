@@ -18,7 +18,11 @@ function mountLanding() {
       <section id="state-ready" hidden>
         <div id="passphrase-wrap" hidden>
           <label for="passphrase">Passphrase</label>
-          <input type="text" id="passphrase">
+          <div class="input-with-action">
+            <input type="password" id="passphrase" autocomplete="off">
+            <button type="button" id="toggle-passphrase" class="input-action"
+                    aria-label="show passphrase" aria-pressed="false">show</button>
+          </div>
         </div>
         <button id="reveal-btn" type="button">Reveal Secret</button>
         <p class="error" id="reveal-error" hidden></p>
@@ -162,5 +166,37 @@ describe('reveal.js — in-flight guard on the reveal button', () => {
     expect(document.getElementById('reveal-error').hidden).toBe(false);
     // Button is restored so the user isn't stuck if they reload with a correct URL.
     expect(revealBtn().disabled).toBe(false);
+  });
+});
+
+describe('reveal.js — passphrase visibility toggle', () => {
+  beforeEach(() => {
+    stubLocation();
+    mountLanding();
+  });
+
+  it('starts masked; clicking the toggle swaps between password and text', async () => {
+    // Never-resolving /meta so the toggle is the only code path being exercised.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await loadModule('reveal');
+
+    const input = document.getElementById('passphrase');
+    const toggle = document.getElementById('toggle-passphrase');
+
+    expect(input.getAttribute('type')).toBe('password');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.textContent).toBe('show');
+
+    toggle.click();
+    expect(input.getAttribute('type')).toBe('text');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.textContent).toBe('hide');
+    expect(toggle.getAttribute('aria-label')).toBe('hide passphrase');
+
+    toggle.click();
+    expect(input.getAttribute('type')).toBe('password');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.textContent).toBe('show');
+    expect(toggle.getAttribute('aria-label')).toBe('show passphrase');
   });
 });
