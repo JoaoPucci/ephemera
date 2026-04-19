@@ -3,12 +3,14 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from . import cleanup, models
+from .dependencies import verify_api_token_or_session
 from .routes import receiver, sender
 
 
@@ -79,7 +81,17 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
+    # docs_url / redoc_url / openapi_url all set to None so FastAPI serves
+    # nothing at those paths by default. We re-mount /docs and /openapi.json
+    # ourselves below, behind verify_api_token_or_session, so the API surface
+    # remains browsable by operators while staying invisible to unauthenticated
+    # probes. /redoc stays permanently off -- one UI surface is enough.
+    app = FastAPI(
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
 
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):
@@ -87,6 +99,40 @@ def create_app() -> FastAPI:
         for k, v in SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)
         return response
+
+    # ---- Auth-gated API docs ---------------------------------------------
+    # Swagger UI assets live under app/static/swagger/ (pinned versions;
+    # see app/static/swagger/README.md for the update recipe). init.js is
+    # loaded as a separate <script src="..."> so the shell contains no
+    # inline script blocks and the CSP stays at script-src 'self'. The
+    # /openapi.json endpoint returns the same schema FastAPI would have
+    # served by default, just wrapped in an auth check.
+
+    @app.get("/openapi.json", include_in_schema=False)
+    def openapi_json(_user=Depends(verify_api_token_or_session)):
+        return JSONResponse(
+            get_openapi(title=app.title, version=app.version, routes=app.routes),
+        )
+
+    @app.get("/docs", include_in_schema=False)
+    def swagger_ui(_user=Depends(verify_api_token_or_session)):
+        return HTMLResponse(
+            """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ephemera API</title>
+  <link rel="icon" type="image/png" href="/static/swagger/favicon-32x32.png">
+  <link rel="stylesheet" href="/static/swagger/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="/static/swagger/swagger-ui-bundle.js"></script>
+  <script src="/static/swagger/init.js"></script>
+</body>
+</html>
+"""
+        )
 
     app.include_router(sender.router)
     app.include_router(receiver.router)
