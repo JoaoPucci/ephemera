@@ -28,7 +28,7 @@ def make_session_cookie(user_id: int, session_generation: int) -> str:
     """Issue a signed+timestamped cookie binding the cookie to the user's
     current session generation. Re-signing with a fresh timestamp produces a
     new cookie value on every login -> rotation. Bumping the user's
-    session_generation invalidates every outstanding cookie (F-06)."""
+    session_generation invalidates every outstanding cookie."""
     payload = f"{user_id}:{session_generation}".encode()
     return _signer().sign(payload).decode("ascii")
 
@@ -108,8 +108,8 @@ def verify_same_origin(request: Request) -> None:
     """CSRF defense: Origin must match, or the caller must be using a bearer
     token (CLI/curl flow — no ambient credentials, no CSRF risk).
 
-    Missing-Origin requests from browsers are refused here, because missing
-    Origin + a session cookie = the exact shape of the CSRF gap in F-03.
+    Missing-Origin requests from browsers are refused here: missing Origin
+    + a session cookie is the exact shape of the CSRF gap we want closed.
     Historically this function returned early on missing Origin to keep
     CLI clients working; CLI clients use bearer auth and still do.
     """

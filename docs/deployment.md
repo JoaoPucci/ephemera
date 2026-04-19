@@ -257,9 +257,23 @@ sudo -u ephemera /usr/bin/sqlite3 /var/lib/ephemera/ephemera.db \
   ".backup '/var/lib/ephemera/backup-$(date +%F).db'"
 ```
 
-Also back up `/etc/ephemera/env`. If the `SECRET_KEY` is lost, all existing
-session cookies become unverifiable and users re-login. The bcrypt password
-hashes and TOTP secrets are unaffected -- they live in the DB, not in env.
+Also back up `/etc/ephemera/env`. The `EPHEMERA_SECRET_KEY` value is
+load-bearing for two things: it signs session cookies, and a KEK is
+HKDF-derived from it to encrypt the stored TOTP seeds at rest.
+
+If the key is rotated or lost:
+- All session cookies become unverifiable → every user re-logs in. Fine.
+- Every stored `totp_secret` becomes undecryptable → TOTP check fails on
+  login. Recovery is: each user logs in with password + one of their
+  **recovery codes** (which consume-one, bcrypt'd, unaffected by SECRET_KEY),
+  then runs `python -m app.admin rotate-totp` to write a fresh seed
+  encrypted under the new KEK.
+- Password hashes are bcrypt, stored in the DB, unaffected.
+
+Plan rotations accordingly — coordinate with the users before flipping
+the env, and make sure every user has at least one unused recovery code
+on hand first (`python -m app.admin regen-recovery-codes` will mint a
+fresh set).
 
 ## Operator runbook (per-instance)
 

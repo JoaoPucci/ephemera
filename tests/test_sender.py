@@ -112,9 +112,9 @@ def test_login_rotates_session_value_on_relogin(client, provisioned_user):
 
 
 def test_session_invalidated_after_session_generation_bump(authed_client, provisioned_user):
-    """F-06: bumping the user's session_generation invalidates every live
-    cookie signed over the prior generation. The existing session stops
-    working without waiting for session_max_age."""
+    """Bumping the user's session_generation invalidates every live cookie
+    signed over the prior generation. The existing session stops working
+    without waiting for session_max_age."""
     from app import models
 
     assert authed_client.get("/api/me").status_code == 200
@@ -141,7 +141,7 @@ def test_new_login_after_bump_works(client, provisioned_user):
 def test_session_cookie_from_stale_generation_is_rejected(client, provisioned_user):
     """Defence-in-depth: an attacker who captured a cookie from generation N
     gains nothing once the user rotates to N+1, even before the timestamp
-    expires. This is the property F-06 buys us."""
+    expires. This is the property the generation counter buys us."""
     from app import models
     from app.dependencies import make_session_cookie
     from app.config import get_settings

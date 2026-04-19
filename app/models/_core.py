@@ -150,3 +150,24 @@ def init_db() -> None:
 
         # Indices last, after the columns they reference definitely exist.
         conn.executescript(INDICES_SCRIPT)
+
+        # ---- Encrypt any plaintext totp_secret rows in place ----
+        # Detection key: rows prefixed with "v1:" are already encrypted.
+        # Anything else is a legacy plaintext base32 TOTP seed and gets
+        # rewritten. Idempotent; runs every boot but only touches rows
+        # that still need migrating.
+        _migrate_plaintext_totp_secrets(conn)
+
+
+def _migrate_plaintext_totp_secrets(conn: sqlite3.Connection) -> None:
+    from ..crypto import encrypt_at_rest, is_at_rest_ciphertext
+
+    rows = conn.execute("SELECT id, totp_secret FROM users").fetchall()
+    for r in rows:
+        sec = r["totp_secret"] if hasattr(r, "keys") else r[1]
+        if not sec or is_at_rest_ciphertext(sec):
+            continue
+        conn.execute(
+            "UPDATE users SET totp_secret = ? WHERE id = ?",
+            (encrypt_at_rest(sec), r["id"] if hasattr(r, "keys") else r[0]),
+        )

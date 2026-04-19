@@ -82,9 +82,9 @@ def test_permissions_policy_denies_sensitive_features(client):
 
 
 def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_client):
-    """F-03 regression: browser clients must send Origin on state-changing
-    requests. A session-cookie-authenticated POST with no Origin header is
-    the CSRF-gap shape we refuse."""
+    """Browser clients must send Origin on state-changing requests. A
+    session-cookie-authenticated POST with no Origin header is the
+    CSRF-gap shape we refuse."""
     r = authed_client.post(
         "/api/secrets",
         json={"content": "x", "content_type": "text", "expires_in": 300},
@@ -104,8 +104,8 @@ def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client, api
 
 
 def test_delete_without_origin_and_with_session_is_rejected(authed_client):
-    """Same F-03 policy on the DELETE verb, where historical browser
-    Origin coverage is less uniform than POST."""
+    """Same policy on the DELETE verb, where historical browser Origin
+    coverage is less uniform than POST."""
     r = authed_client.delete("/api/secrets/some-id")
     assert r.status_code == 403
 

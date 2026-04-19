@@ -101,3 +101,51 @@ def test_reconstruct_key_rejects_wrong_half_sizes():
         crypto.reconstruct_key(b"\x00" * 8, b"\x00" * 16)
     with pytest.raises(ValueError):
         crypto.reconstruct_key(b"\x00" * 16, b"\x00" * 8)
+
+
+# ---------------------------------------------------------------------------
+# At-rest helpers
+# ---------------------------------------------------------------------------
+
+
+def test_encrypt_at_rest_roundtrips(tmp_db_path):
+    """tmp_db_path indirectly sets EPHEMERA_SECRET_KEY via the fixture."""
+    token = crypto.encrypt_at_rest("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
+    assert token.startswith("v1:")
+    assert crypto.decrypt_at_rest(token) == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+
+
+def test_encrypt_at_rest_produces_distinct_ciphertexts_for_same_input(tmp_db_path):
+    """Fernet embeds a random IV, so two encryptions of the same plaintext
+    must differ -- otherwise an attacker can tell which users share a secret."""
+    a = crypto.encrypt_at_rest("same-plaintext")
+    b = crypto.encrypt_at_rest("same-plaintext")
+    assert a != b
+    assert crypto.decrypt_at_rest(a) == crypto.decrypt_at_rest(b) == "same-plaintext"
+
+
+def test_decrypt_at_rest_rejects_non_v1_string(tmp_db_path):
+    """is_at_rest_ciphertext gates migration detection -- a bare plaintext
+    string must NEVER be treated as a decryptable token."""
+    import pytest
+
+    with pytest.raises(crypto.AtRestDecryptionError):
+        crypto.decrypt_at_rest("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
+
+
+def test_decrypt_at_rest_fails_after_secret_key_rotation(tmp_db_path, monkeypatch):
+    """Rotating EPHEMERA_SECRET_KEY makes existing ciphertexts unreadable.
+    This is the documented operator cost of at-rest encryption; the test
+    pins that the failure is a loud AtRestDecryptionError, not a silent
+    wrong value."""
+    import pytest
+    from app import config
+
+    token = crypto.encrypt_at_rest("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "a-completely-different-key-0123456789")
+    config.get_settings.cache_clear()
+    try:
+        with pytest.raises(crypto.AtRestDecryptionError):
+            crypto.decrypt_at_rest(token)
+    finally:
+        config.get_settings.cache_clear()
