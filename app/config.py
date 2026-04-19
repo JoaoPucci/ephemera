@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import List
@@ -6,23 +7,30 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# pydantic-settings loads env files in order; later entries win. We prefer
-# a dev .env living outside the repo tree (~/.local/share/ephemera-dev/.env)
-# so accidental tar/rsync/IDE-search/backup tooling on the project folder
-# doesn't scoop the dev SECRET_KEY along with the code. Falls back to a
-# repo-root .env so fresh clones and legacy setups keep working untouched;
-# production sets env vars via systemd's EnvironmentFile and doesn't rely
-# on either path.
-_DEV_ENV_FILES = (
+# pydantic-settings loads env files in order, later entries winning.
+# Three candidate locations, ordered from most-general to most-specific:
+# a system-wide config file (ignored on dev, only present where docs say
+# to put one), the repo-root fallback for fresh clones, and the XDG dev
+# file that wins when both are present. _filter_readable drops paths
+# the current process can't open so pydantic-settings doesn't raise on
+# a file that exists-but-is-unreadable (mode 0640 is common for config
+# files that include secrets). Deployment paths and perms are specified
+# in docs/deployment.md, not restated here.
+_ENV_FILE_CANDIDATES = (
+    "/etc/ephemera/env",
     ".env",
     str(Path.home() / ".local" / "share" / "ephemera-dev" / ".env"),
 )
 
 
+def _filter_readable(paths: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(p for p in paths if os.access(p, os.R_OK))
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="EPHEMERA_",
-        env_file=_DEV_ENV_FILES,
+        env_file=_filter_readable(_ENV_FILE_CANDIDATES),
         env_file_encoding="utf-8",
         extra="ignore",
     )

@@ -152,7 +152,7 @@ All created at install time:
 |---|---|---|
 | `/opt/ephemera/` | `ephemera:ephemera` | app code + `venv/` (a working tree pinned to a release tag) |
 | `/var/lib/ephemera/` | `ephemera:ephemera` 0750 | SQLite DB + WAL/SHM sidecars |
-| `/etc/ephemera/env` | `root:ephemera` **0640** | secrets (`EPHEMERA_SECRET_KEY`, etc.). Locked-down perms so only root or the service group can read it. |
+| `/etc/ephemera/env` | `root:ephemera` **0640** | secrets (`EPHEMERA_SECRET_KEY`, etc.). Locked-down perms so only root or the service group can read it. Consumed by systemd via `EnvironmentFile=` *and* auto-discovered by the admin CLI, so `sudo -u ephemera python -m app.admin …` picks up the same config as the live service without any `source`-ing. |
 | `/etc/systemd/system/ephemera.service` | `root:root` 0644 | systemd unit |
 | `/etc/caddy/Caddyfile` | `root:root` 0644 | reverse proxy config |
 | `/var/log/caddy/` | `caddy:caddy` | Caddy access + error logs (rotated via Caddy's `roll_size`) |
