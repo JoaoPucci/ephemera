@@ -6,8 +6,17 @@ on per-table CRUD. Siblings under this package import `_connect`,
 """
 import sqlite3
 from datetime import datetime, timezone
+from typing import Callable
 
 from ..config import get_settings
+
+
+class SchemaVersionError(RuntimeError):
+    """Raised when the DB schema is at a version the current code doesn't
+    know how to run against (typically: operator rolled the code back onto
+    a DB that was already upgraded by a newer release). Refusing to boot
+    is safer than silently querying with a column layout the code assumes
+    is older than it actually is."""
 
 
 # -----------------------------------------------------------------------------
@@ -62,6 +71,15 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     last_used_at  TEXT,
     revoked_at    TEXT
 );
+
+-- Schema version. Exactly one row (the CHECK pins id=1). Stamped by init_db
+-- after all migrations finish. Queried on boot so a downgrade onto a DB at
+-- a newer schema version fails loudly instead of quietly running stale code
+-- against fresh columns.
+CREATE TABLE IF NOT EXISTS schema_version (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    version  INTEGER NOT NULL
+);
 """
 
 # Indices are declared separately so migration of legacy DBs can ADD COLUMN first
@@ -108,11 +126,61 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return {k: row[k] for k in row.keys()}
 
 
+# -----------------------------------------------------------------------------
+# Schema versioning + migration registry
+#
+# Bump CURRENT_SCHEMA_VERSION and register a migration function when adding
+# or altering a column. The function takes the open connection and issues
+# the SQL that advances the schema from (version-1) to (version). Migrations
+# run in order; each applies exactly once per DB.
+#
+# Keep migrations idempotent where cheap to do so -- it's a safety net if a
+# boot is interrupted between the migration and the version-stamp.
+#
+# v1 is the baseline (everything TABLES_SCRIPT creates + the ad-hoc
+# add-column-if-missing blocks in init_db that already existed before the
+# registry landed). Legacy DBs that predate this file get stamped to v1 on
+# the first boot after upgrade; fresh DBs are stamped to CURRENT on creation.
+# -----------------------------------------------------------------------------
+
+CURRENT_SCHEMA_VERSION = 1
+
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    # 2: _migrate_to_v2,
+    # 3: _migrate_to_v3,
+    # ...
+}
+
+
+def _get_schema_version(conn: sqlite3.Connection) -> int:
+    """Return the DB's stamped schema version, or 0 if it has never been
+    stamped (pre-registry era -- treated as v0 so the version stamp lands
+    on the next boot)."""
+    row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    conn.execute(
+        "INSERT INTO schema_version (id, version) VALUES (1, ?) "
+        "ON CONFLICT(id) DO UPDATE SET version = excluded.version",
+        (version,),
+    )
+
+
 def init_db() -> None:
     """Create schema on fresh DBs; migrate legacy single-user DBs in place.
 
-    Order matters: tables first, then ADD COLUMN migrations, then indices --
-    otherwise the index creation would race the column additions on a legacy DB.
+    Order matters:
+      1. Create tables (including schema_version) if they don't exist.
+      2. Apply legacy ad-hoc migrations (add-column-if-missing) that brought
+         pre-registry DBs up to what is now "v1".
+      3. Guard against downgrade: if DB is at a higher version than this code
+         knows about, refuse to continue.
+      4. Run any registered migrations (_MIGRATIONS) whose target version is
+         greater than the current DB version, in ascending order.
+      5. Stamp the DB to CURRENT_SCHEMA_VERSION.
+      6. Build indices + run in-place data migrations that aren't schema changes.
     """
     with _connect() as conn:
         tables_before = _tables(conn)
@@ -147,6 +215,20 @@ def init_db() -> None:
         if "user_id" not in _cols(conn, "api_tokens"):
             conn.execute("ALTER TABLE api_tokens ADD COLUMN user_id INTEGER")
             conn.execute("UPDATE api_tokens SET user_id = 1 WHERE user_id IS NULL")
+
+        # ---- Schema-version guard + registered migrations ----
+        db_version = _get_schema_version(conn)
+        if db_version > CURRENT_SCHEMA_VERSION:
+            raise SchemaVersionError(
+                f"DB schema is at version {db_version} but this build only "
+                f"supports up to {CURRENT_SCHEMA_VERSION}. Upgrade the code "
+                "or restore a pre-migration backup -- refusing to run against "
+                "a newer schema to avoid silent data corruption."
+            )
+        for target in sorted(_MIGRATIONS):
+            if target > db_version:
+                _MIGRATIONS[target](conn)
+        _set_schema_version(conn, CURRENT_SCHEMA_VERSION)
 
         # Indices last, after the columns they reference definitely exist.
         conn.executescript(INDICES_SCRIPT)
