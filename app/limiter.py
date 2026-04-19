@@ -1,27 +1,74 @@
 """Tiny in-memory sliding-window rate limiter, keyed by client IP."""
 import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 
 from fastapi import HTTPException, Request
 
 
 class RateLimiter:
+    """Sliding-window counter, keyed by (usually) client IP.
+
+    Memory hygiene:
+
+    - `check()` does lazy GC: if the key's deque ages down to empty, the
+      entry is removed from the dict. Keeps a key from persisting after
+      its window lapses when the same caller comes back later.
+    - `sweep()` does periodic GC: walks every key, drops entries whose
+      deques are fully aged out. Called from cleanup.run_once so an
+      IP that hits once and never returns doesn't occupy a dict slot
+      forever. The lazy path alone can't close that case — nothing
+      triggers a re-read of a key that's never queried again.
+
+    Together the two paths bound dict growth under both normal traffic
+    (same IPs returning) and adversarial IP-rotation.
+    """
+
     def __init__(self, max_hits: int, window_seconds: int):
         self.max_hits = max_hits
         self.window = window_seconds
-        self._hits: dict[str, deque] = defaultdict(deque)
+        self._hits: dict[str, deque] = {}
         self._lock = threading.Lock()
 
     def check(self, key: str) -> None:
         now = time.monotonic()
         with self._lock:
-            q = self._hits[key]
-            while q and now - q[0] > self.window:
-                q.popleft()
-            if len(q) >= self.max_hits:
+            q = self._hits.get(key)
+            if q is not None:
+                while q and now - q[0] > self.window:
+                    q.popleft()
+                if not q:
+                    # Bucket aged to empty -- drop the entry rather than
+                    # keep an empty deque around. Re-created below if the
+                    # caller is about to register a fresh hit.
+                    del self._hits[key]
+                    q = None
+
+            hits = 0 if q is None else len(q)
+            if hits >= self.max_hits:
                 raise HTTPException(status_code=429, detail="rate limited")
+
+            if q is None:
+                q = deque()
+                self._hits[key] = q
             q.append(now)
+
+    def sweep(self) -> int:
+        """Drop any keys whose deques are fully aged out. Returns the
+        number of keys evicted. Called periodically from cleanup.run_once
+        so rotating-IP traffic can't grow the dict without bound."""
+        now = time.monotonic()
+        evicted = 0
+        with self._lock:
+            # Snapshot so we can mutate during iteration.
+            for key in list(self._hits):
+                q = self._hits[key]
+                while q and now - q[0] > self.window:
+                    q.popleft()
+                if not q:
+                    del self._hits[key]
+                    evicted += 1
+        return evicted
 
     def reset(self) -> None:
         with self._lock:
