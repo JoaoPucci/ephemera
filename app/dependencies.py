@@ -105,19 +105,33 @@ def verify_api_token_or_session(
 
 
 def verify_same_origin(request: Request) -> None:
-    """CSRF defense: Origin must match, or the caller must be using a bearer
-    token (CLI/curl flow — no ambient credentials, no CSRF risk).
+    """CSRF defense: Origin must match, or the caller must present a
+    *valid* bearer token (CLI/curl flow — no ambient credentials, so no
+    CSRF risk).
 
-    Missing-Origin requests from browsers are refused here: missing Origin
-    + a session cookie is the exact shape of the CSRF gap we want closed.
-    Historically this function returned early on missing Origin to keep
-    CLI clients working; CLI clients use bearer auth and still do.
+    Layering: this gate is the CSRF defense for cookie-authenticated
+    requests; bearer-auth requests are CSRF-safe regardless of Origin
+    because they require a secret the browser can't attach by ambient
+    magic. A previous version of this function accepted any string
+    prefixed with `Bearer ` and let the downstream auth dependency do
+    the rejection at 401 -- net-safe but subtly asymmetric: missing-
+    Origin with `Bearer anything` reached the auth layer, whereas
+    missing-Origin with a cookie was refused here at 403. Now both
+    shapes hit the same gate: if the Authorization header doesn't
+    resolve to a real active token, treat it as a browser-case and
+    refuse at 403.
+
+    Cost: one extra DB lookup per missing-Origin bearer request. Tokens
+    are SHA-256 indexed; the lookup is sub-millisecond. Requests that
+    DO carry an Origin header skip this branch entirely.
     """
     origin = request.headers.get("origin")
     if origin is None:
-        auth = request.headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            return
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            provided = auth_header.split(" ", 1)[1].strip()
+            if provided and auth_mod.lookup_api_token(provided) is not None:
+                return
         raise HTTPException(status_code=403, detail="missing origin on state-changing request")
     allowed = get_settings().origins
     if origin not in allowed:

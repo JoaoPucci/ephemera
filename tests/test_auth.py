@@ -452,3 +452,55 @@ def test_check_not_locked_passes_when_no_lockout_set():
 
     check_not_locked({"lockout_until": None})
     check_not_locked({})  # missing key entirely also fine
+
+
+# ---------------------------------------------------------------------------
+# Timing equalization between unknown-user and known-user failure paths
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch):
+    """The known-user failure path can cost up to (1 + RECOVERY_CODE_COUNT)
+    bcrypts: 1 for password verify + up to RECOVERY_CODE_COUNT for the
+    recovery-code iteration when the submitted code isn't a valid 6-digit
+    TOTP. The unknown-user path must do the same number of checkpws so a
+    timing attacker can't tell "user exists" from "user doesn't" by
+    response time.
+
+    Rather than wall-clock timing (flaky), count bcrypt.checkpw calls
+    directly."""
+    import bcrypt as bcrypt_lib
+    from app.auth import _core, login as login_mod
+
+    count = [0]
+    real_checkpw = bcrypt_lib.checkpw
+
+    def counting_checkpw(*args, **kwargs):
+        count[0] += 1
+        return real_checkpw(*args, **kwargs)
+
+    # Patch both the library and the import in login.py's namespace.
+    monkeypatch.setattr(bcrypt_lib, "checkpw", counting_checkpw)
+    monkeypatch.setattr(login_mod.bcrypt, "checkpw", counting_checkpw)
+
+    # Unknown user, non-6-digit code (would trigger recovery-code path on a
+    # real user). Must raise AuthError and burn the full worst-case count.
+    count[0] = 0
+    with pytest.raises(auth.AuthError):
+        auth.authenticate("ghost-does-not-exist", "pw", "XXXXX-YYYYY")
+    unknown_user_checkpws = count[0]
+    assert unknown_user_checkpws == 1 + _core.RECOVERY_CODE_COUNT, (
+        f"expected {1 + _core.RECOVERY_CODE_COUNT} bcrypt.checkpw calls on "
+        f"unknown-user path, got {unknown_user_checkpws}"
+    )
+
+    # Known user, same shape of bad input (wrong password + non-6-digit code):
+    # should do the same count -- 1 password check + 10 recovery-code checks.
+    count[0] = 0
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(provisioned_user["username"], "wrong", "XXXXX-YYYYY")
+    known_user_checkpws = count[0]
+    assert known_user_checkpws == unknown_user_checkpws, (
+        f"known-user path did {known_user_checkpws} checkpws, "
+        f"unknown-user path did {unknown_user_checkpws} -- must match."
+    )
