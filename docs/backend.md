@@ -212,6 +212,15 @@ hashes of the recovery codes. The CLI refuses to overwrite an existing user;
 credential rotation is explicit via `reset-password` / `rotate-totp` /
 `regen-recovery-codes`, each of which re-authenticates before proceeding.
 
+**Password policy.** The CLI enforces `len >= 10` and then submits the first
+5 hex chars of the password's SHA-1 to the Have I Been Pwned k-anonymity
+range API. If the rest of the hash is in the returned list, the prompt
+rejects the password with the breach count and re-prompts. The plaintext
+never leaves the host. If the API is unreachable (offline / DNS blip) the
+prompt prints a warning and accepts the password — fail-open so admin
+ops don't stall on a network issue. No mixed-class requirement (NIST
+800-63B §5.1.1.2).
+
 #### Login flow
 
 ```
@@ -237,10 +246,23 @@ server:
 Rate limits (in-memory sliding window, per client IP):
 - `POST /send/login`: 10 / minute
 - `POST /s/{token}/reveal`: 10 / minute
+- `GET /api/me`, `GET /api/secrets/tracked`, `GET /api/secrets/{sid}/status`,
+  `GET /s/{token}/meta`: 300 / minute (generic read limiter — the endpoints
+  above used to be unthrottled, leaving `meta`-spam as a cheap DoS vector).
 
 Per-session rate limit (applies to authenticated callers):
 - `POST /api/secrets`: 60 / hour per session (contains blast radius of a
   hijacked session).
+
+All in-memory counters reset on process restart — an acknowledged limit
+at personal-instance scale.
+
+Form-field length caps sit above the rate limits as a second defense:
+`/send/login` refuses requests with `username`/`password`/`code` longer
+than 256/256/64 chars, and the multipart `/api/secrets` path caps
+`passphrase` (200) and `label` (60). These prevent CPU waste on bcrypt
+or multipart parsing for obvious junk if anything ever lets a large body
+past Caddy.
 
 Session cookies are `HttpOnly`, `SameSite=Strict`, `Secure` in production. A
 logout endpoint (`POST /send/logout`) clears the cookie.

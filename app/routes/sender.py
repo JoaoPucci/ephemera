@@ -23,7 +23,7 @@ from ..dependencies import (
     verify_api_token_or_session,
     verify_same_origin,
 )
-from ..limiter import create_rate_limit, login_rate_limit
+from ..limiter import create_rate_limit, login_rate_limit, read_rate_limit
 from ..schemas import (
     ApiMeResponse,
     ClearTrackedResponse,
@@ -40,6 +40,16 @@ from ..schemas import (
 router = APIRouter()
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+# Caps on untyped Form(...) fields. Caddy already limits the body to ~11MB,
+# but these save us from spending bcrypt/multipart parsing on obviously
+# oversized payloads, and they close off the "FastAPI reachable without
+# Caddy" misconfig case.
+_MAX_USERNAME_LEN = 256
+_MAX_PASSWORD_LEN = 256
+_MAX_TOTP_CODE_LEN = 64
+_MAX_PASSPHRASE_LEN = 200   # matches CreateTextSecret.passphrase in schemas.py
+_MAX_LABEL_LEN = 60         # matches CreateTextSecret.label
 
 
 def _clean_label(raw) -> Optional[str]:
@@ -86,6 +96,15 @@ def send_login(
     code: str = Form(...),
     settings: Settings = Depends(get_settings),
 ):
+    # Reject oversized form fields before spending bcrypt on them. Normal
+    # values are well under these caps; anything above is either a typo at
+    # the extreme or abuse.
+    if (
+        len(username) > _MAX_USERNAME_LEN
+        or len(password) > _MAX_PASSWORD_LEN
+        or len(code) > _MAX_TOTP_CODE_LEN
+    ):
+        raise HTTPException(status_code=400, detail="field too long")
     try:
         user = auth_mod.authenticate(
             username, password, code,
@@ -175,8 +194,13 @@ async def create_secret(
         if expires_in not in EXPIRY_PRESETS:
             raise HTTPException(status_code=422, detail="expires_in must be a preset")
         passphrase = form.get("passphrase") or None
+        if passphrase is not None and len(passphrase) > _MAX_PASSPHRASE_LEN:
+            raise HTTPException(status_code=422, detail="passphrase too long")
         track = str(form.get("track", "")).lower() in ("1", "true", "on", "yes")
-        label = _clean_label(form.get("label"))
+        raw_label = form.get("label")
+        if raw_label is not None and len(str(raw_label)) > _MAX_LABEL_LEN:
+            raise HTTPException(status_code=422, detail="label too long")
+        label = _clean_label(raw_label)
         data = await file.read()
         if len(data) > settings.max_image_bytes:
             raise HTTPException(status_code=413, detail="file too large")
@@ -220,7 +244,11 @@ async def create_secret(
     )
 
 
-@router.get("/api/me", response_model=ApiMeResponse)
+@router.get(
+    "/api/me",
+    response_model=ApiMeResponse,
+    dependencies=[Depends(read_rate_limit)],
+)
 def api_me(user: dict = Depends(verify_api_token_or_session)):
     """Return a minimal view of the authenticated user (for header UI etc.)."""
     return ApiMeResponse(
@@ -230,7 +258,11 @@ def api_me(user: dict = Depends(verify_api_token_or_session)):
     )
 
 
-@router.get("/api/secrets/{sid}/status", response_model=SecretStatusResponse)
+@router.get(
+    "/api/secrets/{sid}/status",
+    response_model=SecretStatusResponse,
+    dependencies=[Depends(read_rate_limit)],
+)
 def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
     status_row = models.get_status(sid, user["id"])
     if status_row is None:
@@ -238,7 +270,11 @@ def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
     return status_row
 
 
-@router.get("/api/secrets/tracked", response_model=TrackedListResponse)
+@router.get(
+    "/api/secrets/tracked",
+    response_model=TrackedListResponse,
+    dependencies=[Depends(read_rate_limit)],
+)
 def list_tracked(user: dict = Depends(verify_api_token_or_session)):
     """List all tracked secrets owned by the authenticated user."""
     return TrackedListResponse(items=models.list_tracked_secrets(user["id"]))

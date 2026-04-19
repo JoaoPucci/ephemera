@@ -87,14 +87,14 @@ def client(tmp_db_path):
     """FastAPI TestClient bound to an isolated DB, with rate-limiters reset."""
     from fastapi.testclient import TestClient
     from app import create_app
-    from app.limiter import reveal_limiter, login_limiter, create_limiter
+    from app.limiter import reveal_limiter, login_limiter, create_limiter, read_limiter
 
-    for lim in (reveal_limiter, login_limiter, create_limiter):
+    for lim in (reveal_limiter, login_limiter, create_limiter, read_limiter):
         lim.reset()
     app = create_app()
     with TestClient(app) as c:
         yield c
-    for lim in (reveal_limiter, login_limiter, create_limiter):
+    for lim in (reveal_limiter, login_limiter, create_limiter, read_limiter):
         lim.reset()
 
 

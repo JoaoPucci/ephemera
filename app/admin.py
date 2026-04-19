@@ -60,6 +60,8 @@ def _prompt_password(label: str = "Password") -> str:
 
 
 def _prompt_new_password() -> str:
+    from .auth.hibp import pwned_count
+
     while True:
         p1 = getpass.getpass("New password: ")
         p2 = getpass.getpass("Confirm password: ")
@@ -68,6 +70,18 @@ def _prompt_new_password() -> str:
             continue
         if len(p1) < 10:
             print("use at least 10 characters.")
+            continue
+        count = pwned_count(p1)
+        if count is None:
+            # API unreachable (offline host / DNS blip). Degrade to a loud
+            # warning rather than blocking password setup entirely.
+            print("warning: couldn't reach the breach-check API; skipping pwned check.")
+            return p1
+        if count > 0:
+            print(
+                f"this password appears in {count:,} known breaches. "
+                "pick a different one."
+            )
             continue
         return p1
 
