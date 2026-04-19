@@ -85,6 +85,11 @@ that exfiltrates plaintext before encryption. Closing that gap is the point
 of the [end-to-end encryption proposal](docs/proposals/end-to-end-encryption.md) —
 feedback welcome.
 
+**Supported browsers.** Latest two versions of Chrome, Firefox, Edge, and
+Safari. Older browsers may work but aren't tested; some of the security
+controls above (SameSite cookies, `Secure`-on-loopback, CSP directives)
+assume an evergreen browser.
+
 ## Setup (once)
 
 ```bash
