@@ -1,14 +1,28 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# pydantic-settings loads env files in order; later entries win. We prefer
+# a dev .env living outside the repo tree (~/.local/share/ephemera-dev/.env)
+# so accidental tar/rsync/IDE-search/backup tooling on the project folder
+# doesn't scoop the dev SECRET_KEY along with the code. Falls back to a
+# repo-root .env so fresh clones and legacy setups keep working untouched;
+# production sets env vars via systemd's EnvironmentFile and doesn't rely
+# on either path.
+_DEV_ENV_FILES = (
+    ".env",
+    str(Path.home() / ".local" / "share" / "ephemera-dev" / ".env"),
+)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="EPHEMERA_",
-        env_file=".env",
+        env_file=_DEV_ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",
     )
