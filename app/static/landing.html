@@ -21,7 +21,11 @@
       <p>This message can only be viewed once. After you reveal it, it will be permanently destroyed.</p>
       <div id="passphrase-wrap" hidden>
         <label for="passphrase">Passphrase</label>
-        <input type="text" id="passphrase" autocomplete="off">
+        <div class="input-with-action">
+          <input type="password" id="passphrase" autocomplete="off">
+          <button type="button" id="toggle-passphrase" class="input-action"
+                  aria-label="show passphrase" aria-pressed="false">show</button>
+        </div>
       </div>
       <button id="reveal-btn" type="button">Reveal Secret</button>
       <p class="error" id="reveal-error" hidden></p>
