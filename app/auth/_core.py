@@ -12,8 +12,13 @@ BCRYPT_ROUNDS = 12
 TOTP_DIGITS = 6
 TOTP_INTERVAL = 30
 TOTP_STEP_TOLERANCE = 1          # accept current step +/- 1
+# Cumulative-since-last-success counter; a successful login resets it to 0.
+# There is NO rolling-window decay -- 10 failures spread over a month still
+# trip the lockout. Acceptable at this scale because the rescue path (admin
+# CLI `reset-password` or login with a recovery code) is short, and the
+# alternative adds a `last_failure_at` column without meaningful security
+# benefit at a handful of users.
 MAX_FAILURES = 10
-LOCKOUT_WINDOW_SECONDS = 15 * 60
 LOCKOUT_DURATION_SECONDS = 60 * 60
 RECOVERY_CODE_COUNT = 10
 RECOVERY_CODE_LENGTH = 10         # visible chars (base32), grouped XXXXX-XXXXX

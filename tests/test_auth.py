@@ -161,6 +161,23 @@ def test_authenticate_resets_failed_attempts_on_success(provisioned_user):
     assert models.get_user_by_id(provisioned_user["id"])["failed_attempts"] == 0
 
 
+def test_lockout_counter_has_no_rolling_window():
+    """The lockout threshold is a cumulative-since-last-success counter,
+    NOT a rolling window. There used to be a `LOCKOUT_WINDOW_SECONDS`
+    constant exported from `app.auth` that implied "failures within this
+    window count"; the code never enforced that. Removed to stop the
+    constant from suggesting behaviour that isn't there. This test pins
+    the removal so it can't be re-introduced by accident."""
+    from app import auth
+    from app.auth import _core
+
+    assert not hasattr(auth, "LOCKOUT_WINDOW_SECONDS")
+    assert not hasattr(_core, "LOCKOUT_WINDOW_SECONDS")
+    # Sanity: the constants that SHOULD be there are still there.
+    assert auth.MAX_FAILURES == 10
+    assert auth.LOCKOUT_DURATION_SECONDS == 3600
+
+
 def test_lockout_after_max_failures(provisioned_user):
     for _ in range(auth.MAX_FAILURES):
         with pytest.raises(auth.AuthError):

@@ -29,7 +29,6 @@ This `__init__` re-exports the full public surface so existing
 from ._core import (
     BCRYPT_ROUNDS,
     LOCKOUT_DURATION_SECONDS,
-    LOCKOUT_WINDOW_SECONDS,
     MAX_FAILURES,
     RECOVERY_CODE_COUNT,
     RECOVERY_CODE_LENGTH,
@@ -50,7 +49,6 @@ __all__ = [
     # constants
     "BCRYPT_ROUNDS",
     "LOCKOUT_DURATION_SECONDS",
-    "LOCKOUT_WINDOW_SECONDS",
     "MAX_FAILURES",
     "RECOVERY_CODE_COUNT",
     "RECOVERY_CODE_LENGTH",
