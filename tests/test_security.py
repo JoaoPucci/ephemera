@@ -20,6 +20,88 @@ def test_security_headers_present_on_html_response(client):
         assert h in {k.lower() for k in r.headers}, f"missing header: {h}"
 
 
+# ---------------------------------------------------------------------------
+# Auth-gated API docs (/docs + /openapi.json)
+#
+# Unauthenticated callers must not be able to pull the wire contract (route
+# list, parameter names, schemas). Authenticated operators -- either via a
+# session cookie (web) or a bearer token (CLI) -- get the full Swagger UI.
+# Assets are served from app/static/swagger/ rather than a CDN so the page
+# works under our strict script-src 'self'.
+# ---------------------------------------------------------------------------
+
+
+def test_openapi_json_requires_auth(client):
+    r = client.get("/openapi.json")
+    assert r.status_code == 401
+
+
+def test_openapi_json_accessible_with_bearer(client, auth_headers):
+    r = client.get("/openapi.json", headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert "openapi" in body
+    assert "paths" in body
+    # Sanity-check a few routes we'd expect to see in the schema.
+    assert "/api/secrets" in body["paths"]
+    assert "/send/login" in body["paths"]
+
+
+def test_openapi_json_accessible_with_session(authed_client):
+    r = authed_client.get("/openapi.json")
+    assert r.status_code == 200
+    assert "openapi" in r.json()
+
+
+def test_docs_requires_auth(client):
+    r = client.get("/docs")
+    assert r.status_code == 401
+
+
+def test_docs_accessible_with_session(authed_client):
+    r = authed_client.get("/docs")
+    assert r.status_code == 200
+    html = r.text
+    # Swagger UI assets are served locally, not from a CDN, so the CSP's
+    # script-src 'self' doesn't need to be relaxed.
+    assert '/static/swagger/swagger-ui-bundle.js' in html
+    assert '/static/swagger/swagger-ui.css' in html
+    assert '/static/swagger/init.js' in html
+
+
+def test_docs_html_contains_no_inline_scripts(authed_client):
+    """The CSP is strict (script-src 'self'). The HTML shell must only
+    reference external script files; any inline <script>...</script> block
+    with a non-empty body would violate the policy and silently break
+    Swagger UI in the browser."""
+    import re
+
+    r = authed_client.get("/docs")
+    html = r.text
+    # Find every <script ...>...</script>; reject any with non-empty content.
+    for m in re.finditer(r"<script\b[^>]*>(.*?)</script>", html, flags=re.DOTALL):
+        body = m.group(1).strip()
+        assert body == "", f"inline script body found in /docs HTML: {body!r}"
+
+
+def test_docs_is_not_advertised_in_openapi_schema(client, auth_headers):
+    """/docs and /openapi.json themselves shouldn't appear as API routes
+    in the schema they serve. include_in_schema=False on both prevents
+    the meta-surface from bloating the docs."""
+    r = client.get("/openapi.json", headers=auth_headers)
+    paths = r.json()["paths"]
+    assert "/docs" not in paths
+    assert "/openapi.json" not in paths
+
+
+def test_redoc_stays_disabled(client, auth_headers):
+    """Swagger UI is the chosen docs surface; /redoc has no route mounted.
+    Check both unauthenticated (404) and authenticated (still 404) so a
+    future accidental re-enable is visible."""
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/redoc", headers=auth_headers).status_code == 404
+
+
 def test_security_headers_present_on_api_response(client, auth_headers):
     r = client.post(
         "/api/secrets",
