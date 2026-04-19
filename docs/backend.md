@@ -403,6 +403,27 @@ legacy single-user DB continues to work, with the former lone user renamed
 `admin` and all their data tagged `user_id=1`. Covered by
 `test_legacy_db_migrates_to_multiuser_schema`.
 
+### Schema versioning
+
+A `schema_version` table (single row, enforced by `CHECK (id = 1)`) carries
+the applied schema version. `init_db()`:
+
+1. Creates tables if missing (fresh DB).
+2. Runs the legacy add-column-if-missing block for pre-registry DBs.
+3. Reads the stamped version.
+4. If the DB version is **higher** than `CURRENT_SCHEMA_VERSION` in the
+   code, raises `SchemaVersionError` and refuses to start -- the usual
+   cause is an operator rolling the app back onto a DB that a newer
+   release already upgraded. Restore a pre-migration backup (or upgrade
+   the code) instead of running stale code against the new schema.
+5. Otherwise applies any registered migrations in ascending order from
+   `_MIGRATIONS` (currently empty; the baseline is `v1`), then stamps the
+   DB to `CURRENT_SCHEMA_VERSION`.
+
+Future schema changes add a new entry to `_MIGRATIONS` keyed by the new
+version number and bump `CURRENT_SCHEMA_VERSION`. No Alembic; a dict of
+callables is enough at this scale.
+
 On reveal:
 - If `track = 0`: entire row is deleted.
 - If `track = 1`: `ciphertext`, `server_key`, and `passphrase` are set to NULL,

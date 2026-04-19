@@ -390,6 +390,49 @@ def test_update_user_with_no_fields_is_a_noop(provisioned_user):
     assert before["updated_at"] == after["updated_at"]  # no-op means no timestamp bump
 
 
+def test_fresh_db_is_stamped_to_current_schema_version(tmp_db_path):
+    """init_db on a fresh DB must leave schema_version at CURRENT_SCHEMA_VERSION;
+    a later boot can then compare and refuse downgrade."""
+    import sqlite3
+    from app.models._core import CURRENT_SCHEMA_VERSION
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+    assert row is not None
+    assert int(row[0]) == CURRENT_SCHEMA_VERSION
+
+
+def test_init_db_is_idempotent_across_reruns(tmp_db_path):
+    """Running init_db a second time must not regress the version or duplicate
+    the single schema_version row (the CHECK constraint would reject)."""
+    import sqlite3
+    from app.models._core import CURRENT_SCHEMA_VERSION
+
+    models.init_db()  # second run
+    with sqlite3.connect(tmp_db_path) as conn:
+        rows = conn.execute("SELECT id, version FROM schema_version").fetchall()
+    assert len(rows) == 1
+    assert int(rows[0][1]) == CURRENT_SCHEMA_VERSION
+
+
+def test_init_db_refuses_to_run_against_newer_schema(tmp_db_path):
+    """Operator rolled the code back onto a DB that a newer build already
+    migrated. We'd rather fail loudly than quietly query with an assumed-
+    older column layout."""
+    import sqlite3
+    import pytest
+    from app.models._core import CURRENT_SCHEMA_VERSION, SchemaVersionError
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "UPDATE schema_version SET version = ? WHERE id = 1",
+            (CURRENT_SCHEMA_VERSION + 1,),
+        )
+        conn.commit()
+    with pytest.raises(SchemaVersionError):
+        models.init_db()
+
+
 def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
     """A DB written by the pre-multi-user schema should gain username on users
     and user_id on secrets/api_tokens when init_db() runs over it."""
@@ -440,5 +483,15 @@ def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
     assert sec is not None and sec["user_id"] == 1
     toks = models.list_tokens(1)
     assert len(toks) == 1 and toks[0]["name"] == "legacy-tok-name"
+
+    # Legacy DB had no schema_version table. The upgrade must stamp it to
+    # CURRENT so subsequent boots compare against a known value.
+    import sqlite3
+    from app.models._core import CURRENT_SCHEMA_VERSION
+    with sqlite3.connect(legacy_db) as conn:
+        (stamped,) = conn.execute(
+            "SELECT version FROM schema_version WHERE id = 1"
+        ).fetchone()
+    assert int(stamped) == CURRENT_SCHEMA_VERSION
 
     config.get_settings.cache_clear()
