@@ -186,3 +186,102 @@ def test_reveal_rate_limit_kicks_in(client, auth_headers):
         )
         statuses.append(resp.status_code)
     assert 429 in statuses
+
+
+# ---------------------------------------------------------------------------
+# ProxyHeaders → limiter bucketing
+# ---------------------------------------------------------------------------
+
+
+def test_rate_limit_uses_forwarded_for_when_proxied():
+    """Guards against the "everyone looks like the proxy's IP"
+    regression. In prod, uvicorn is started with `--proxy-headers
+    --forwarded-allow-ips 127.0.0.1` (see `docs/deployment.md`), which
+    installs ProxyHeadersMiddleware; that middleware rewrites
+    request.client.host from the trusted X-Forwarded-For value before
+    any dependency runs. Our limiter keys on request.client.host (via
+    _client_ip), so:
+
+    - Two requests with the same X-Forwarded-For share a bucket.
+    - Two requests with different X-Forwarded-For values get separate
+      buckets.
+
+    If anyone ever removes the middleware, or switches the limiter to
+    an aggregated key (e.g., drops client.host), this test fails with
+    both requests sharing a bucket (since TestClient's TCP peer is
+    fixed)."""
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    from app.limiter import RateLimiter, _client_ip
+
+    limiter = RateLimiter(max_hits=1, window_seconds=60)
+    app = FastAPI()
+
+    @app.get("/probe")
+    def probe(req: Request):
+        limiter.check(_client_ip(req))
+        return {"ok": True, "ip": _client_ip(req)}
+
+    # trusted_hosts="127.0.0.1" matches --forwarded-allow-ips 127.0.0.1.
+    # TestClient's internal ASGI scope presents the request as coming
+    # from "testclient"; treat any upstream as trusted inside the test
+    # so ProxyHeadersMiddleware will honour X-Forwarded-For.
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
+    client = TestClient(app)
+
+    r1 = client.get("/probe", headers={"X-Forwarded-For": "1.2.3.4"})
+    assert r1.status_code == 200
+    assert r1.json()["ip"] == "1.2.3.4"
+
+    # Same source IP: bucket exhausted on second call.
+    r2 = client.get("/probe", headers={"X-Forwarded-For": "1.2.3.4"})
+    assert r2.status_code == 429
+
+    # Different source IP: fresh budget.
+    r3 = client.get("/probe", headers={"X-Forwarded-For": "5.6.7.8"})
+    assert r3.status_code == 200
+    assert r3.json()["ip"] == "5.6.7.8"
+
+
+# ---------------------------------------------------------------------------
+# Lint: no sensitive-leaking patterns inside app/routes/
+# ---------------------------------------------------------------------------
+
+
+def test_routes_do_not_log_tracebacks_or_grab_raw_body():
+    """Invariant: route handlers must not call logger.exception or
+    traceback.format_exc (tracebacks with locals leak plaintext/
+    passphrase/client_half/password/totp_code), and must not
+    `await request.body()` (that raw bytes blob is exactly the
+    sensitive material we're trying not to bind to a name that could
+    end up in a traceback frame). Use Pydantic / request.json() /
+    request.form() instead; validate with a schema and keep the bytes
+    out of local scope.
+
+    Raising this guard to a CI-level lint was suggested by the audit's
+    §10 Q#12 follow-up. Implemented here as a pytest so it runs in
+    the same pipeline as the other regression gates."""
+    import pathlib
+
+    banned = [
+        "logger.exception",
+        "traceback.format_exc",
+        "request.body()",
+        "await request.body",
+    ]
+    routes_dir = pathlib.Path(__file__).resolve().parent.parent / "app" / "routes"
+    offenders: list[str] = []
+    for py_file in sorted(routes_dir.rglob("*.py")):
+        content = py_file.read_text()
+        for needle in banned:
+            if needle in content:
+                rel = py_file.relative_to(routes_dir.parent.parent)
+                offenders.append(f"{rel}: {needle!r}")
+    assert not offenders, (
+        "Banned logging/body-capture patterns in app/routes/:\n  "
+        + "\n  ".join(offenders)
+        + "\n(See tests/test_security.py for the rationale.)"
+    )
