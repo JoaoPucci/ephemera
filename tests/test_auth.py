@@ -250,6 +250,116 @@ def test_provisioning_uri_default_issuer_unchanged():
     assert "issuer=ephemera" in uri
 
 
+# ---------------------------------------------------------------------------
+# F-05: TOTP at rest
+# ---------------------------------------------------------------------------
+
+
+def test_totp_secret_at_rest_is_not_plaintext(provisioned_user, tmp_db_path):
+    """Invariant: the stored totp_secret is NEVER the base32 plaintext.
+    Raw SQL reads must return the versioned ciphertext prefix; the model
+    layer handles encrypt-on-write and decrypt-on-read transparently."""
+    import sqlite3
+
+    plaintext = provisioned_user["totp_secret"]
+    with sqlite3.connect(tmp_db_path) as conn:
+        stored, = conn.execute(
+            "SELECT totp_secret FROM users WHERE id = ?", (provisioned_user["id"],)
+        ).fetchone()
+    assert stored != plaintext
+    assert stored.startswith("v1:"), f"expected v1: prefix, got {stored!r}"
+    # And the model wrapper round-trips back to plaintext:
+    assert models.get_user_by_id(provisioned_user["id"])["totp_secret"] == plaintext
+
+
+def test_rotate_totp_writes_ciphertext(provisioned_user, tmp_db_path):
+    """After `update_user(totp_secret=...)` the DB cell still holds
+    ciphertext -- no code path leaves a plaintext seed sitting on disk."""
+    import sqlite3
+
+    new_secret = auth.generate_totp_secret()
+    models.update_user(provisioned_user["id"], totp_secret=new_secret)
+    with sqlite3.connect(tmp_db_path) as conn:
+        stored, = conn.execute(
+            "SELECT totp_secret FROM users WHERE id = ?", (provisioned_user["id"],)
+        ).fetchone()
+    assert stored.startswith("v1:")
+    assert stored != new_secret
+    assert models.get_user_by_id(provisioned_user["id"])["totp_secret"] == new_secret
+
+
+def test_secret_key_rotation_breaks_totp_but_recovery_code_still_works(
+    provisioned_user, monkeypatch
+):
+    """Documented recovery path for F-05: if SECRET_KEY rotates, the stored
+    TOTP ciphertext is undecryptable. The user must then log in with a
+    recovery code (unaffected by the KEK change), after which `rotate-totp`
+    writes a fresh seed under the new key. Regression-gate the recovery
+    path so it can never silently break."""
+    from app import config
+
+    # Generate a recovery code set BEFORE rotation so bcrypt hashes are intact.
+    codes, codes_json = auth.generate_recovery_codes()
+    models.update_user(provisioned_user["id"], recovery_code_hashes=codes_json)
+
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "a-brand-new-key-9876543210abcdef")
+    config.get_settings.cache_clear()
+    try:
+        # TOTP path should fail gracefully -- not crash the login handler.
+        with pytest.raises(auth.AuthError):
+            auth.authenticate(
+                provisioned_user["username"],
+                provisioned_user["password"],
+                provisioned_user["totp"].now(),
+            )
+        # Recovery code rescue path must still work.
+        user = auth.authenticate(
+            provisioned_user["username"], provisioned_user["password"], codes[0]
+        )
+        assert user["username"] == provisioned_user["username"]
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path, monkeypatch):
+    """A DB rescued from before the F-05 rollout has a plaintext base32
+    totp_secret. init_db() must encrypt it in place, idempotently."""
+    import sqlite3
+    from app import models
+
+    db_path = tmp_path / "legacy.db"
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db_path))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "legacy-migration-test-xxxxxxxxxxxxx")
+    from app import config
+    config.get_settings.cache_clear()
+
+    plaintext = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"  # valid base32, 32 chars
+    models.init_db()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO users (username, password_hash, totp_secret,
+                                   recovery_code_hashes, created_at, updated_at)
+               VALUES ('legacy', 'h', ?, '[]', 't', 't')""",
+            (plaintext,),
+        )
+
+    # Second init_db picks the row up and rewrites it.
+    models.init_db()
+    with sqlite3.connect(db_path) as conn:
+        stored, = conn.execute("SELECT totp_secret FROM users WHERE username = 'legacy'").fetchone()
+    assert stored.startswith("v1:")
+    assert stored != plaintext
+
+    # Third init_db is a no-op -- the row stays exactly as rewritten.
+    prior = stored
+    models.init_db()
+    with sqlite3.connect(db_path) as conn:
+        again, = conn.execute("SELECT totp_secret FROM users WHERE username = 'legacy'").fetchone()
+    assert again == prior
+
+    config.get_settings.cache_clear()
+
+
 def test_check_not_locked_passes_when_lockout_already_expired():
     """A lockout_until timestamp in the past (e.g., a stale lockout that
     wasn't cleared after its window elapsed) shouldn't block auth — the

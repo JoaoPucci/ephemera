@@ -328,7 +328,7 @@ CREATE TABLE users (
     username              TEXT NOT NULL,           -- unique via idx_users_username
     email                 TEXT,                    -- unique-if-set; nullable until email flows land
     password_hash         TEXT NOT NULL,           -- bcrypt, cost 12
-    totp_secret           TEXT NOT NULL,           -- base32, 32 chars
+    totp_secret           TEXT NOT NULL,           -- Fernet(HKDF(SECRET_KEY)) of the base32 seed; prefixed "v1:"
     totp_last_step        INTEGER DEFAULT 0,       -- anti-replay: reject step <= this
     recovery_code_hashes  TEXT DEFAULT '[]',       -- JSON: [{"hash": bcrypt, "used_at": ISO8601|null}]
     failed_attempts       INTEGER DEFAULT 0,
@@ -356,6 +356,18 @@ CREATE INDEX idx_api_tokens_hash ON api_tokens(token_hash);
 CREATE INDEX idx_api_tokens_user_id ON api_tokens(user_id);
 CREATE UNIQUE INDEX idx_api_tokens_user_name ON api_tokens(user_id, name);  -- token names unique per-user, not globally
 ```
+
+**`users.totp_secret` is encrypted at rest (F-05).** The column holds a
+Fernet token prefixed with `v1:`; the KEK is derived via HKDF-SHA256 from
+`EPHEMERA_SECRET_KEY` with a stable info string. The model layer encrypts
+on `create_user` / `update_user(totp_secret=...)` and decrypts inside
+`get_user_by_*`, so auth code still sees the plaintext base32 seed but
+backups, raw-SQL queries, and casual DB inspection see only ciphertext.
+
+**Cost to operators:** rotating `EPHEMERA_SECRET_KEY` now bricks every
+stored TOTP. The only recovery is for each user to present a recovery
+code and run `python -m app.admin rotate-totp`, which writes a fresh
+seed encrypted under the new KEK. Plan SECRET_KEY rotations accordingly.
 
 ### Migration from the single-user era
 
