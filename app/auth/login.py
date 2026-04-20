@@ -92,6 +92,18 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
         # code" -- no rescue-pool depletion, no DoS parity.
         if totp_step is not None:
             models.update_user(user["id"], totp_last_step=totp_step)
+            # Timing-equalize the "known user + wrong password + valid
+            # TOTP" shape with the unknown-user path. Without this, the
+            # branch costs only 1 bcrypt (password check) because
+            # verify_totp succeeded and consume_backup_code was skipped --
+            # the unknown-user path burns 11, so an attacker with a
+            # captured valid TOTP could confirm a username by timing
+            # the 401. The other failure shapes (wrong TOTP, non-6-digit
+            # code) already cost 11 because consume_backup_code iterates
+            # the whole stored list; only this specific shape shortcuts
+            # to 1 and needs padding.
+            for _ in range(RECOVERY_CODE_COUNT):
+                bcrypt.checkpw(b"dummy", _DUMMY_BCRYPT_HASH)
         lockout_until = record_failure(user)
         reason = "wrong_password" if not pw_ok else "wrong_second_factor"
         audit(
