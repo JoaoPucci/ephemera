@@ -58,3 +58,75 @@ def test_env_file_candidates_layering_includes_system_and_dev_paths():
     )
     # Repo-root fallback still there for fresh clones.
     assert ".env" in _ENV_FILE_CANDIDATES
+
+
+def test_env_file_precedence_system_wins_over_dev():
+    """pydantic-settings loads `env_file` in tuple order, later entries
+    overriding earlier ones. The candidate list must put `/etc/ephemera/env`
+    LAST so a prod host with a stale dev-side XDG file doesn't have admin-
+    CLI commands silently pick up the wrong config. Matches the UNIX
+    convention: system-wide config outranks per-user config."""
+    from app.config import _ENV_FILE_CANDIDATES
+
+    system_index = _ENV_FILE_CANDIDATES.index("/etc/ephemera/env")
+    # System must be the LAST index so it wins when multiple files exist.
+    assert system_index == len(_ENV_FILE_CANDIDATES) - 1, (
+        f"/etc/ephemera/env at position {system_index} of "
+        f"{len(_ENV_FILE_CANDIDATES)}; must be last so it wins precedence"
+    )
+    # Dev XDG file must be earlier so system overrides it.
+    xdg_index = next(
+        i for i, p in enumerate(_ENV_FILE_CANDIDATES)
+        if p.endswith(".local/share/ephemera-dev/.env")
+    )
+    assert xdg_index < system_index
+
+
+def test_db_path_default_is_xdg_not_repo_root():
+    """The code-level default for EPHEMERA_DB_PATH (used only when every
+    higher-priority source is absent -- fresh clone, no .env anywhere)
+    must resolve to the XDG data dir, not the repo root. Without this
+    invariant a new contributor running `run.py` with no config would
+    silently create ephemera.db + WAL/SHM sidecars next to source, which
+    is the hygiene anti-pattern the .env.example header and the env_file
+    tuple already steer people away from."""
+    from app.config import Settings
+
+    # Clean environment so only the field default resolves. BaseSettings
+    # reads os.environ by default; override to an empty _env_file so any
+    # EPHEMERA_DB_PATH we happen to have set while running tests doesn't
+    # mask the default-under-test.
+    s = Settings(_env_file=None, _env_file_encoding=None)
+    default_path = s.db_path
+    assert ".local/share/ephemera-dev/ephemera.db" in default_path, (
+        f"db_path default is {default_path!r}; should point at the XDG data dir"
+    )
+    assert not default_path.startswith("./")
+    assert not default_path.startswith("ephemera.db")
+
+
+def test_connect_creates_parent_directory_if_missing(tmp_path, monkeypatch):
+    """_connect must mkdir -p the db_path's parent directory before
+    sqlite3 tries to open the file inside it. Without this, a fresh
+    clone with no env config would crash at first DB touch because
+    ~/.local/share/ephemera-dev/ doesn't exist yet."""
+    from app import config
+    from app.models._core import _connect
+
+    # Point at a path whose parent doesn't exist.
+    nested = tmp_path / "deep" / "nested" / "does-not-exist-yet" / "ephemera.db"
+    assert not nested.parent.exists()
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(nested))
+    config.get_settings.cache_clear()
+    try:
+        conn = _connect()
+        try:
+            # If we got here without OSError, mkdir worked and sqlite
+            # created the file.
+            assert nested.parent.exists()
+            assert nested.exists()
+        finally:
+            conn.close()
+    finally:
+        config.get_settings.cache_clear()

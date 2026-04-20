@@ -8,23 +8,44 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 # pydantic-settings loads env files in order, later entries winning.
-# Three candidate locations, ordered from most-general to most-specific:
-# a system-wide config file (ignored on dev, only present where docs say
-# to put one), the repo-root fallback for fresh clones, and the XDG dev
-# file that wins when both are present. _filter_readable drops paths
-# the current process can't open so pydantic-settings doesn't raise on
-# a file that exists-but-is-unreadable (mode 0640 is common for config
-# files that include secrets). Deployment paths and perms are specified
-# in docs/deployment.md, not restated here.
+# Ordered from per-user (lowest priority) to system-wide (highest), so
+# the system file is authoritative when present and per-user files are
+# the expected override for single-user dev machines:
+#   1. XDG dev file   -- contributor-local config for day-to-day dev
+#   2. ./.env         -- repo-root fallback for fresh clones and legacy setups
+#   3. /etc/ephemera/env -- the install-recipe path; wins when present
+# On a prod host only the system file exists; on a dev box only a user
+# file exists; in rare mixed scenarios (dev laptop rsync'd from prod,
+# shared admin box with leftover dev config), the system file is the
+# operator's authoritative statement and should win over user-level
+# overrides -- matches the UNIX convention where system config outranks
+# per-user config.
+# _filter_readable drops paths the current process can't open so
+# pydantic-settings doesn't raise on a file that exists-but-is-unreadable
+# (mode 0640 is common for config files that include secrets).
+# Deployment paths and perms are specified in docs/deployment.md, not
+# restated here.
 _ENV_FILE_CANDIDATES = (
-    "/etc/ephemera/env",
-    ".env",
     str(Path.home() / ".local" / "share" / "ephemera-dev" / ".env"),
+    ".env",
+    "/etc/ephemera/env",
 )
 
 
 def _filter_readable(paths: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(p for p in paths if os.access(p, os.R_OK))
+
+
+# Default DB path for fresh clones with no env configuration. Points at the
+# XDG data dir (not the repo root) so a new contributor running `run.py`
+# with no .env doesn't sprinkle ephemera.db + WAL/SHM sidecars next to
+# source -- the same hygiene the .env.example header and the env_file
+# tuple steer people toward. Production overrides this via
+# EPHEMERA_DB_PATH in /etc/ephemera/env; this default only resolves when
+# every higher-priority config source is absent.
+_DEFAULT_DB_PATH = str(
+    Path.home() / ".local" / "share" / "ephemera-dev" / "ephemera.db"
+)
 
 
 class Settings(BaseSettings):
@@ -36,7 +57,7 @@ class Settings(BaseSettings):
     )
 
     secret_key: str = Field(default="dev-secret-key-change-me")
-    db_path: str = Field(default="./ephemera.db")
+    db_path: str = Field(default=_DEFAULT_DB_PATH)
     base_url: str = Field(default="http://localhost:8000")
     max_image_bytes: int = Field(default=10 * 1024 * 1024)
     allowed_origins: str = Field(default="http://localhost:8000")
