@@ -390,6 +390,49 @@ def test_update_user_with_no_fields_is_a_noop(provisioned_user):
     assert before["updated_at"] == after["updated_at"]  # no-op means no timestamp bump
 
 
+def test_update_user_rejects_unknown_columns(provisioned_user):
+    """update_user builds the SET clause via f-string interpolation over
+    its kwargs (values are parameterised; column names are not). A future
+    caller that accidentally threaded user-influenced dict keys through
+    this function would turn it into a SQL-injection sink. Guard at the
+    boundary with a whitelist so the interpolation only ever reaches
+    known-good column names."""
+    import pytest
+
+    with pytest.raises(ValueError) as exc:
+        models.update_user(
+            provisioned_user["id"],
+            password_hash="looks-fine",
+            injected_column="would-hit-f-string-interpolation",
+        )
+    assert "injected_column" in str(exc.value)
+
+    # Sanity: the known-good kwarg was never applied because the whole
+    # call was rejected before any SQL ran.
+    row = models.get_user_by_id(provisioned_user["id"])
+    assert row["password_hash"] != "looks-fine"
+
+
+def test_update_user_accepts_every_documented_writable_column(provisioned_user):
+    """The whitelist has to include every column that real callers update.
+    Catch the regression where adding a new column to the users schema
+    without also naming it in _ALLOWED_UPDATE_COLUMNS would break the
+    matching CLI command silently."""
+    # Call update_user with each whitelisted column (using benign values
+    # where the field has a tight shape). If any current real caller
+    # passes a column that's missing from the whitelist, this test fires.
+    models.update_user(
+        provisioned_user["id"],
+        username=provisioned_user["username"],  # unchanged
+        email=None,
+        password_hash="$2b$12$unusedunusedunusedunusedunusedunusedunusedunusedunusedu",
+        totp_last_step=42,
+        failed_attempts=0,
+        lockout_until=None,
+        session_generation=1,
+    )
+
+
 def test_fresh_db_is_stamped_to_current_schema_version(tmp_db_path):
     """init_db on a fresh DB must leave schema_version at CURRENT_SCHEMA_VERSION;
     a later boot can then compare and refuse downgrade."""

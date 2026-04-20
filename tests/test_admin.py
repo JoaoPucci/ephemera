@@ -116,3 +116,63 @@ def test_remove_user_with_force_deletes_target_and_cascades(
     assert models.get_user_by_username(provisioned_user["username"]) is None
     assert models.get_user_by_username("bob") is not None
     assert models.get_by_token(created["token"]) is None
+
+
+# ---------------------------------------------------------------------------
+# diagnose --show-secret
+#
+# Clock-drift diagnosis (the command's routine use case) only needs the
+# candidate TOTP codes and the step info. The raw TOTP seed is useful for
+# a rarer case (re-entering the seed in a new authenticator by hand) and
+# is noisy to have on the terminal by default: tmux scrollback, screen-
+# shares, and accidental paste-into-chat all carry the seed when it's
+# always printed. Default is no-seed; --show-secret opts in.
+# ---------------------------------------------------------------------------
+
+
+def test_diagnose_default_does_not_print_totp_secret(provisioned_user, capsys):
+    """cmd_diagnose(..., show_secret=False) suppresses the raw base32
+    seed. The three candidate TOTP codes still print so the clock-drift
+    use case is covered."""
+    admin.cmd_diagnose(provisioned_user["username"], show_secret=False)
+    out = capsys.readouterr().out
+
+    assert provisioned_user["totp_secret"] not in out
+    # Sanity: clock-drift info is still there.
+    assert "Current TOTP step:" in out
+    assert "previous step" in out
+    # And we tell the operator how to opt in.
+    assert "--show-secret" in out
+
+
+def test_diagnose_with_show_secret_prints_totp_secret(provisioned_user, capsys):
+    admin.cmd_diagnose(provisioned_user["username"], show_secret=True)
+    out = capsys.readouterr().out
+
+    assert provisioned_user["totp_secret"] in out
+    # The red-flag banner still accompanies the seed print.
+    assert "DO NOT paste" in out
+
+
+def test_diagnose_defaults_show_secret_false_when_called_via_main(
+    provisioned_user, capsys
+):
+    """Bare `python -m app.admin diagnose` (no --show-secret) must omit
+    the raw seed -- the whole point of gating the print is that the
+    routine case doesn't carry it. Route through admin.main() to cover
+    the dispatcher wiring as well as the cmd_ function."""
+    admin.main(["diagnose", "--user", provisioned_user["username"]])
+    out = capsys.readouterr().out
+
+    assert provisioned_user["totp_secret"] not in out
+
+
+def test_diagnose_main_recognises_show_secret_flag(provisioned_user, capsys):
+    """Dispatcher strips --show-secret from argv (so the arity check
+    doesn't see it as a positional) and passes show_secret=True."""
+    admin.main([
+        "diagnose", "--user", provisioned_user["username"], "--show-secret",
+    ])
+    out = capsys.readouterr().out
+
+    assert provisioned_user["totp_secret"] in out
