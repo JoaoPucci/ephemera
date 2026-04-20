@@ -69,6 +69,32 @@ def test_docs_accessible_with_session(authed_client):
     assert '/static/swagger/init.js' in html
 
 
+def test_swagger_static_assets_are_public_by_design(client):
+    """`/docs` (the HTML shell) and `/openapi.json` (the schema) are auth-
+    gated -- they're the real API surface that must not leak to unauthed
+    probes. The Swagger UI vendor assets under `/static/swagger/` (JS
+    bundle, CSS, favicon) are NOT gated, and this test pins that decision.
+
+    The bundle is generic, pinned-version vendor code; hiding it from
+    unauthed probes would reveal nothing about ephemera's routes or
+    schemas (those stay behind the gate) while costing extra per-asset
+    auth checks on every authenticated `/docs` visit. The only signal the
+    public bundle leaks is "a Swagger UI is installed here," which is
+    already implied by the `/docs` + `/openapi.json` 401 responses above.
+
+    If a future change decides to gate these too, update this test
+    deliberately rather than letting the 401 silently tell us the bundle
+    stopped loading for real users."""
+    for asset in (
+        "swagger-ui-bundle.js",
+        "swagger-ui.css",
+        "favicon-32x32.png",
+        "init.js",
+    ):
+        r = client.get(f"/static/swagger/{asset}")
+        assert r.status_code == 200, f"/static/swagger/{asset} -> {r.status_code}"
+
+
 def test_docs_html_contains_no_inline_scripts(authed_client):
     """The CSP is strict (script-src 'self'). The HTML shell must only
     reference external script files; any inline <script>...</script> block
