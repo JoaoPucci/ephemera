@@ -17,7 +17,13 @@ Commands:
     list-tokens [--user <name>]      Show API tokens for a user.
     create-token <name> [--user <u>] Mint a new API token.
     revoke-token <name> [--user <u>] Revoke a token by name.
-    diagnose [--user <name>]         Print server time + currently-valid TOTP codes.
+    diagnose [--user <name>] [--show-secret]
+                                     Print server time + currently-valid TOTP codes.
+                                     --show-secret also prints the raw TOTP seed
+                                     (only needed if you're re-entering it in an
+                                     authenticator app by hand; default omits it
+                                     so terminal scrollback / screen-share / chat
+                                     paste don't carry the seed for routine checks).
     verify [--user <name>]           Check whether a password+code pair would authenticate.
 
 User-selection rules:
@@ -345,7 +351,7 @@ def cmd_revoke_token(name: str, username: Optional[str]) -> None:
         sys.exit(1)
 
 
-def cmd_diagnose(username: Optional[str]) -> None:
+def cmd_diagnose(username: Optional[str], show_secret: bool = False) -> None:
     user = _resolve_user(username)
     secret = user["totp_secret"]
     totp = pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL)
@@ -368,9 +374,22 @@ def cmd_diagnose(username: Optional[str]) -> None:
     print(f"  current  step ({step}):      {totp.at(now_ts)}   <-- this is what it should show now")
     print(f"  next     step ({step + 1}):  {totp.at(now_ts + auth.TOTP_INTERVAL)}")
     print()
-    print("  !! DO NOT paste, screenshot, or share the line below.")
-    print("  !! It is equivalent to a password + 2FA combined.")
-    print(f"Stored TOTP secret:  {secret}")
+    # The raw TOTP seed is gated behind --show-secret. The common reason
+    # to run `diagnose` is clock drift -- the three candidate codes above
+    # answer that question. The raw seed is only needed for the rare
+    # "re-enter my authenticator entry by hand" case, and having it on
+    # the terminal by default means tmux scrollback, screen-share demos,
+    # and accidental paste-into-chat all carry the seed for the common
+    # case too.
+    if show_secret:
+        print("  !! DO NOT paste, screenshot, or share the line below.")
+        print("  !! It is equivalent to a password + 2FA combined.")
+        print(f"Stored TOTP secret:  {secret}")
+    else:
+        print(
+            "(Stored TOTP secret not shown. If you need to re-enter it in your "
+            "authenticator manually, rerun with `--show-secret`.)"
+        )
     print()
     print("If your authenticator shows a different code for the 'current step':")
     print("  -> your authenticator has an OLD entry from a previous `init` / `rotate-totp`.")
@@ -436,12 +455,15 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(0 if not argv else 2)
     fn, arity, takes_user = COMMANDS[argv[0]]
     rest = argv[1:]
-    # remove-user takes an optional --force flag (re-auth as a different user).
-    # Strip it here so the arity check below sees only positional args.
+    # Some commands take optional boolean flags that we strip here before
+    # the arity check so they don't count as positional arguments.
     extra_kwargs: dict = {}
     if argv[0] == "remove-user" and "--force" in rest:
         rest = [a for a in rest if a != "--force"]
         extra_kwargs["force"] = True
+    if argv[0] == "diagnose" and "--show-secret" in rest:
+        rest = [a for a in rest if a != "--show-secret"]
+        extra_kwargs["show_secret"] = True
     user_flag, rest = (_parse_user_flag(rest) if takes_user else (None, rest))
     if len(rest) != arity:
         print(f"`{argv[0]}` expects {arity} positional arg(s).", file=sys.stderr)

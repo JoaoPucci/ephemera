@@ -89,9 +89,41 @@ def create_user(
     return int(cur.lastrowid)
 
 
+# Whitelist for update_user kwargs. Only columns named here can be set via
+# `update_user(**fields)`. Every existing caller passes hardcoded kwargs
+# that are on this list; an unknown key indicates either a typo or a
+# future caller that tried to pass user-influenced data through. The
+# whitelist also means `update_user` never builds a SET clause from a
+# name the caller supplied at runtime -- the f-string interpolation over
+# `cols` is only reached after the key passes this gate, so a future
+# endpoint that did `update_user(uid, **request_body)` couldn't become a
+# SQL-injection sink.
+_ALLOWED_UPDATE_COLUMNS = frozenset({
+    "username",
+    "email",
+    "password_hash",
+    "totp_secret",
+    "totp_last_step",
+    "recovery_code_hashes",
+    "failed_attempts",
+    "lockout_until",
+    "session_generation",
+    # `updated_at` is set by update_user itself, not by callers, but
+    # naming it here makes the set the authoritative list of writable
+    # columns rather than "everything writable except the one the
+    # function itself sets."
+    "updated_at",
+})
+
+
 def update_user(user_id: int, **fields) -> None:
     if not fields:
         return
+    unknown = set(fields) - _ALLOWED_UPDATE_COLUMNS
+    if unknown:
+        raise ValueError(
+            f"update_user: not a writable column of users: {sorted(unknown)}"
+        )
     if "totp_secret" in fields and not is_at_rest_ciphertext(fields["totp_secret"]):
         fields["totp_secret"] = encrypt_at_rest(fields["totp_secret"])
     fields["updated_at"] = _iso(_utcnow())
