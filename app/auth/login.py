@@ -38,7 +38,7 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
     "cli" (the default) for admin re-auth paths.
     """
     trimmed = username.strip() if username else ""
-    user = models.get_user_by_username(trimmed) if trimmed else None
+    user = models.get_user_with_totp_by_username(trimmed) if trimmed else None
     if user is None:
         # Timing-equalize with the known-user worst case. The known-user
         # path costs up to (1 + RECOVERY_CODE_COUNT) bcrypts: 1 for the
