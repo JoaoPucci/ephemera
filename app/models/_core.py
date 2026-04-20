@@ -6,6 +6,7 @@ on per-table CRUD. Siblings under this package import `_connect`,
 """
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 from ..config import get_settings
@@ -105,7 +106,16 @@ def _iso(dt: datetime) -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(get_settings().db_path, isolation_level=None)
+    db_path = get_settings().db_path
+    # Ensure the parent directory exists before sqlite3 tries to create the
+    # DB file inside it. Matters on fresh clones where db_path resolves to
+    # the XDG default (~/.local/share/ephemera-dev/ephemera.db) and the
+    # directory hasn't been created yet. mkdir(exist_ok=True) is a no-op on
+    # subsequent calls; the cost is one cheap stat syscall per _connect.
+    parent = Path(db_path).parent
+    if str(parent) not in ("", "."):
+        parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
