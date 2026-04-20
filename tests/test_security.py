@@ -112,6 +112,64 @@ def test_security_headers_present_on_api_response(client, auth_headers):
         assert h in {k.lower() for k in r.headers}
 
 
+def test_every_response_carries_every_security_header(
+    client, authed_client, auth_headers
+):
+    """The middleware sets SECURITY_HEADERS unconditionally on every
+    response. Pin that across a cross-section of real route shapes so a
+    future change that lets a route override one of these values (or
+    forgets to run it through the middleware at all) fails here.
+
+    Compares exact values, not just presence, so "header is there but
+    weakened" also trips this.
+    """
+    from app import SECURITY_HEADERS
+
+    # Pre-register a secret so cancel/status routes have a real sid to hit.
+    r = client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300, "track": True},
+        headers=auth_headers,
+    )
+    sid = r.json()["id"]
+
+    def assert_full_headers(resp, label):
+        for k, expected in SECURITY_HEADERS.items():
+            got = resp.headers.get(k)
+            assert got == expected, (
+                f"{label}: {k!r} was {got!r}, expected {expected!r}"
+            )
+
+    # Cross-section of routes: page GET, API GETs, API POST, DELETE,
+    # error status, static asset, the auth-gated docs surface.
+    assert_full_headers(client.get("/send"), "GET /send")
+    assert_full_headers(client.get("/api/me", headers=auth_headers), "GET /api/me")
+    assert_full_headers(
+        client.post(
+            "/api/secrets",
+            json={"content": "y", "content_type": "text", "expires_in": 300},
+            headers=auth_headers,
+        ),
+        "POST /api/secrets (201)",
+    )
+    assert_full_headers(
+        client.get(f"/api/secrets/{sid}/status", headers=auth_headers),
+        "GET /api/secrets/{sid}/status",
+    )
+    assert_full_headers(
+        client.get("/s/nonexistent-token/meta"),
+        "GET /s/<bogus>/meta (404)",
+    )
+    assert_full_headers(client.get("/static/style.css"), "GET /static/style.css")
+    assert_full_headers(authed_client.get("/docs"), "GET /docs (session-authed)")
+    assert_full_headers(
+        client.get("/openapi.json", headers=auth_headers),
+        "GET /openapi.json (bearer-authed)",
+    )
+    # 401 error path -- security headers must still attach on the rejection.
+    assert_full_headers(client.get("/api/me"), "GET /api/me (401)")
+
+
 def test_x_content_type_options_is_nosniff(client):
     r = client.get("/send")
     assert r.headers.get("X-Content-Type-Options") == "nosniff"
