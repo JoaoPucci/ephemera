@@ -73,6 +73,25 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
         consumed_backup_json = consume_backup_code(stripped, user["recovery_code_hashes"])
 
     if not pw_ok or (totp_step is None and consumed_backup_json is None):
+        # Persist the accepted TOTP step even on a failure path. Without
+        # this, an attacker with a captured valid TOTP code can re-submit
+        # it against multiple password guesses -- the overall login fails
+        # on the password, but verify_totp keeps returning the same step
+        # because `totp_last_step` only advances on the success path. The
+        # anti-replay invariant documented in app/auth/totp.py is that a
+        # TOTP step is single-use; enforce it here regardless of the
+        # paired password outcome.
+        #
+        # Note the asymmetry with `consumed_backup_json`, which is
+        # deliberately NOT persisted on failure: recovery codes are
+        # long-lived single-use credentials, and burning one on a failed
+        # login creates a DoS path where an attacker who knows the
+        # username can drain the victim's rescue pool via triggered
+        # failures. TOTP codes rotate every 30s, so bumping `last_step`
+        # on a failure costs the victim at most "wait 30s for the next
+        # code" -- no rescue-pool depletion, no DoS parity.
+        if totp_step is not None:
+            models.update_user(user["id"], totp_last_step=totp_step)
         lockout_until = record_failure(user)
         reason = "wrong_password" if not pw_ok else "wrong_second_factor"
         audit(

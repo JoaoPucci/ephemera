@@ -523,6 +523,76 @@ def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch
     )
 
 
+def test_totp_last_step_bumped_even_on_wrong_password(provisioned_user):
+    """A captured valid TOTP must become single-use even if the paired
+    password is wrong. Otherwise an attacker with a phishing-stolen TOTP
+    could re-submit it against multiple password guesses until lockout.
+    The fix: persist totp_last_step the moment verify_totp returns a
+    step, regardless of whether the overall login succeeds.
+
+    Note: recovery codes are deliberately NOT consumed on failure (v3
+    F3-06 thread 2). The asymmetry is justified because TOTP rotates
+    every 30s while recovery codes don't -- bumping last_step on
+    failure costs the victim at most a 30s wait, whereas burning a
+    recovery code on failure creates a DoS surface on the rescue pool."""
+    current_totp = provisioned_user["totp"].now()
+
+    # Before: totp_last_step is zero (fresh user).
+    assert models.get_user_by_id(provisioned_user["id"])["totp_last_step"] == 0
+
+    # Right password + right TOTP would succeed. But send the TOTP with a
+    # WRONG password; login must fail -- AND last_step must advance so
+    # the same TOTP can't be replayed.
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(provisioned_user["username"], "wrong-password", current_totp)
+
+    row = models.get_user_by_id(provisioned_user["id"])
+    assert row["totp_last_step"] > 0, (
+        "totp_last_step must advance even when the paired password is wrong"
+    )
+    bumped_step = row["totp_last_step"]
+
+    # Second attempt with the SAME captured TOTP + a different password
+    # guess: the attacker's replay path. verify_totp should refuse the
+    # replayed step because last_step is now >= it.
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(
+            provisioned_user["username"], "another-wrong-password", current_totp
+        )
+
+    # last_step hasn't been yanked backwards by the second attempt. It may
+    # stay the same (verify_totp returned None for the replayed step, so
+    # there was nothing new to persist), or it may have advanced to a
+    # fresh live step if we happened to cross a 30s boundary. Either is
+    # fine; the invariant is "must not regress."
+    row2 = models.get_user_by_id(provisioned_user["id"])
+    assert row2["totp_last_step"] >= bumped_step
+
+
+def test_recovery_code_consumption_is_not_persisted_on_wrong_password(
+    provisioned_user,
+):
+    """Contrast with test_totp_last_step_bumped_even_on_wrong_password.
+    Recovery codes must remain valid after a wrong-password + correct-
+    recovery-code failed login, so an attacker who knows a username
+    can't DoS the victim's rescue pool via triggered failed logins.
+    Industry convention (Google/GitHub/Cloudflare all consume on
+    success only). v3 F3-06 thread 2 made this an explicit decision."""
+    codes, blob = auth.generate_recovery_codes()
+    models.update_user(provisioned_user["id"], recovery_code_hashes=blob)
+
+    # Wrong password + correct recovery code -> auth fails.
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(provisioned_user["username"], "wrong-password", codes[0])
+
+    # The code is still usable -- a subsequent login with the RIGHT
+    # password + same code must succeed.
+    user = auth.authenticate(
+        provisioned_user["username"], provisioned_user["password"], codes[0]
+    )
+    assert user["id"] == provisioned_user["id"]
+
+
 def test_recovery_code_lookup_is_constant_time_across_consumption_state(
     provisioned_user, monkeypatch
 ):
