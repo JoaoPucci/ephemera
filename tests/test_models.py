@@ -433,6 +433,28 @@ def test_update_user_accepts_every_documented_writable_column(provisioned_user):
     )
 
 
+def test_default_user_getters_do_not_return_totp_secret(provisioned_user):
+    """The default user-row accessors must never hand back the TOTP
+    plaintext. Most call sites (session auth, bearer auth, admin flows
+    that aren't TOTP-facing) have no business seeing the seed; the two
+    that do use the explicit `_with_totp` variant. Keeping the default
+    key-less means a future log line or error handler that dumps a user
+    dict can't leak it."""
+    by_id = models.get_user_by_id(provisioned_user["id"])
+    by_name = models.get_user_by_username(provisioned_user["username"])
+
+    assert by_id is not None and by_name is not None
+    assert "totp_secret" not in by_id
+    assert "totp_secret" not in by_name
+    # Opt-in variant still works for the callers that need it.
+    with_totp = models.get_user_with_totp_by_id(provisioned_user["id"])
+    assert with_totp["totp_secret"] == provisioned_user["totp_secret"]
+    with_totp_by_name = models.get_user_with_totp_by_username(
+        provisioned_user["username"]
+    )
+    assert with_totp_by_name["totp_secret"] == provisioned_user["totp_secret"]
+
+
 def test_fresh_db_is_stamped_to_current_schema_version(tmp_db_path):
     """init_db on a fresh DB must leave schema_version at CURRENT_SCHEMA_VERSION;
     a later boot can then compare and refuse downgrade."""

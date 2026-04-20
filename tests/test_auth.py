@@ -359,8 +359,11 @@ def test_totp_secret_at_rest_is_not_plaintext(provisioned_user, tmp_db_path):
         ).fetchone()
     assert stored != plaintext
     assert stored.startswith("v1:"), f"expected v1: prefix, got {stored!r}"
-    # And the model wrapper round-trips back to plaintext:
-    assert models.get_user_by_id(provisioned_user["id"])["totp_secret"] == plaintext
+    # And the opt-in with-TOTP wrapper round-trips back to plaintext:
+    assert (
+        models.get_user_with_totp_by_id(provisioned_user["id"])["totp_secret"]
+        == plaintext
+    )
 
 
 def test_rotate_totp_writes_ciphertext(provisioned_user, tmp_db_path):
@@ -376,7 +379,10 @@ def test_rotate_totp_writes_ciphertext(provisioned_user, tmp_db_path):
         ).fetchone()
     assert stored.startswith("v1:")
     assert stored != new_secret
-    assert models.get_user_by_id(provisioned_user["id"])["totp_secret"] == new_secret
+    assert (
+        models.get_user_with_totp_by_id(provisioned_user["id"])["totp_secret"]
+        == new_secret
+    )
 
 
 def test_secret_key_rotation_breaks_totp_but_recovery_code_still_works(

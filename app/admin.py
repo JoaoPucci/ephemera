@@ -352,7 +352,11 @@ def cmd_revoke_token(name: str, username: Optional[str]) -> None:
 
 
 def cmd_diagnose(username: Optional[str], show_secret: bool = False) -> None:
-    user = _resolve_user(username)
+    # `_resolve_user` returns without TOTP plaintext (module default).
+    # This command generates candidate TOTP codes from the seed, so
+    # explicitly re-fetch the with-TOTP variant.
+    resolved = _resolve_user(username)
+    user = models.get_user_with_totp_by_id(resolved["id"])
     secret = user["totp_secret"]
     totp = pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL)
 
@@ -398,7 +402,9 @@ def cmd_diagnose(username: Optional[str], show_secret: bool = False) -> None:
 
 
 def cmd_verify(username: Optional[str]) -> None:
-    user = _resolve_user(username)
+    # Verifies TOTP against the stored seed -- fetch the with-TOTP variant.
+    resolved = _resolve_user(username)
+    user = models.get_user_with_totp_by_id(resolved["id"])
     password = getpass.getpass("Password: ")
     code = input("6-digit code: ").strip()
 

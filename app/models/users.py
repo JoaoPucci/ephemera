@@ -1,10 +1,24 @@
 """Operations on the `users` table.
 
-`totp_secret` is encrypted at rest. Every read through this module returns
-the plaintext base32 string; every write takes plaintext and encrypts
+`totp_secret` is encrypted at rest. Writes take plaintext and encrypt
 transparently before the INSERT/UPDATE. Raw-SQL callers (tests that read
 via sqlite3 directly, or an operator doing forensic triage) see ciphertext
 prefixed with `v1:` -- the at-rest invariant this package maintains.
+
+Reads are split in two:
+
+* `get_user_by_id` / `get_user_by_username` are the default accessors.
+  They SELECT an explicit column list that OMITS `totp_secret` entirely,
+  so the returned dict has no `totp_secret` key. Use these everywhere
+  except the paths that genuinely have to verify a TOTP code.
+* `get_user_with_totp_by_id` / `get_user_with_totp_by_username` SELECT *
+  and return the decrypted base32 plaintext in `row["totp_secret"]`.
+  Only three call sites need this: `app.auth.login.authenticate`,
+  `app.admin.cmd_diagnose`, and `app.admin.cmd_verify`.
+
+The split keeps the plaintext seed off every session/dependency/admin
+read path, so a future log line or error handler that dumps a user dict
+can't leak it.
 """
 from typing import Optional
 
@@ -16,6 +30,17 @@ from ..crypto import (
 )
 from ..security_log import emit as audit
 from ._core import _connect, _iso, _row_to_dict, _utcnow
+
+
+# Columns returned by the default (no-TOTP) getters. Enumerated explicitly
+# rather than SELECT * so that adding a new column to the users table is a
+# deliberate choice about whether it widens the default surface.
+_USER_COLUMNS_NO_TOTP = (
+    "id, username, email, password_hash, "
+    "totp_last_step, recovery_code_hashes, "
+    "failed_attempts, lockout_until, session_generation, "
+    "created_at, updated_at"
+)
 
 
 def _decrypt_totp(row_dict: dict) -> dict:
@@ -50,12 +75,36 @@ def user_count() -> int:
 
 
 def get_user_by_id(user_id: int) -> Optional[dict]:
+    """Fetch a user row WITHOUT `totp_secret`. See module docstring."""
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT {_USER_COLUMNS_NO_TOTP} FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def get_user_by_username(username: str) -> Optional[dict]:
+    """Fetch a user row WITHOUT `totp_secret`. See module docstring."""
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT {_USER_COLUMNS_NO_TOTP} FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def get_user_with_totp_by_id(user_id: int) -> Optional[dict]:
+    """Fetch a user row INCLUDING the decrypted TOTP plaintext. Use only
+    from code that actually has to verify a TOTP code."""
     with _connect() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     return _decrypt_totp(_row_to_dict(row)) if row else None
 
 
-def get_user_by_username(username: str) -> Optional[dict]:
+def get_user_with_totp_by_username(username: str) -> Optional[dict]:
+    """Fetch a user row INCLUDING the decrypted TOTP plaintext. Use only
+    from code that actually has to verify a TOTP code."""
     with _connect() as conn:
         row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     return _decrypt_totp(_row_to_dict(row)) if row else None
