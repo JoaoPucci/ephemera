@@ -523,6 +523,50 @@ def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch
     )
 
 
+def test_known_user_wrong_password_correct_totp_runs_worst_case_bcrypt_count(
+    provisioned_user, monkeypatch
+):
+    """The unknown-user failure path always burns (1 + RECOVERY_CODE_COUNT)
+    bcrypts so response time doesn't reveal whether the username exists.
+    The known-user + wrong-password branch matches that cost when the
+    submitted code is non-TOTP (consume_backup_code iterates all stored
+    hashes). But the known-user + wrong-password + VALID TOTP shape
+    shortcuts to 1 bcrypt because verify_totp succeeds and
+    consume_backup_code is skipped. Without padding that branch, an
+    attacker with a captured TOTP could time the 401 to confirm a
+    username exists.
+
+    Mirrors test_unknown_user_runs_worst_case_bcrypt_count at the other
+    axis of the symmetry."""
+    import bcrypt as bcrypt_lib
+    from app.auth import _core, login as login_mod
+
+    count = [0]
+    real_checkpw = bcrypt_lib.checkpw
+
+    def counting_checkpw(*args, **kwargs):
+        count[0] += 1
+        return real_checkpw(*args, **kwargs)
+
+    monkeypatch.setattr(bcrypt_lib, "checkpw", counting_checkpw)
+    monkeypatch.setattr(login_mod.bcrypt, "checkpw", counting_checkpw)
+
+    count[0] = 0
+    valid_totp = provisioned_user["totp"].now()
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(
+            provisioned_user["username"], "wrong-password", valid_totp
+        )
+
+    expected = 1 + _core.RECOVERY_CODE_COUNT
+    assert count[0] == expected, (
+        f"known-user + wrong-password + valid-TOTP branch did {count[0]} "
+        f"bcrypt.checkpw calls, expected {expected} (1 for the password "
+        f"check + {_core.RECOVERY_CODE_COUNT} dummy pads so the timing "
+        f"matches the unknown-user failure path)"
+    )
+
+
 def test_totp_last_step_bumped_even_on_wrong_password(provisioned_user):
     """A captured valid TOTP must become single-use even if the paired
     password is wrong. Otherwise an attacker with a phishing-stolen TOTP
