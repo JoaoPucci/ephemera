@@ -96,8 +96,14 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):
         response = await call_next(request)
+        # Unconditional set -- the middleware is the authority on these
+        # headers. Any future route that tried to set a conflicting value
+        # (say, a looser CSP for a debug endpoint) gets silently
+        # overwritten here rather than quietly winning. Enforces the
+        # "deny by default, uniformly" stance at the structural level;
+        # the cross-route invariant test pins it at the test level too.
         for k, v in SECURITY_HEADERS.items():
-            response.headers.setdefault(k, v)
+            response.headers[k] = v
         return response
 
     # ---- Auth-gated API docs ---------------------------------------------

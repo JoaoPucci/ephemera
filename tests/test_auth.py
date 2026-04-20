@@ -521,3 +521,71 @@ def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch
         f"known-user path did {known_user_checkpws} checkpws, "
         f"unknown-user path did {unknown_user_checkpws} -- must match."
     )
+
+
+def test_recovery_code_lookup_is_constant_time_across_consumption_state(
+    provisioned_user, monkeypatch
+):
+    """consume_backup_code must run bcrypt.checkpw once per stored entry
+    regardless of how many codes have been used. Without this invariant a
+    timing attacker could distinguish between users by consumption state
+    (a user with 10 fresh codes runs 10 checks; a user with only 1 code
+    left used to run only 1). End-to-end via authenticate() to catch
+    both the helper's loop AND the caller's wrapping behaviour."""
+    import bcrypt as bcrypt_lib
+    from app.auth import _core, login as login_mod
+
+    # Freshly-minted recovery codes for Alice so we have known plaintexts.
+    codes, blob = auth.generate_recovery_codes()
+    models.update_user(provisioned_user["id"], recovery_code_hashes=blob)
+
+    count = [0]
+    real_checkpw = bcrypt_lib.checkpw
+
+    def counting_checkpw(*args, **kwargs):
+        count[0] += 1
+        return real_checkpw(*args, **kwargs)
+
+    monkeypatch.setattr(bcrypt_lib, "checkpw", counting_checkpw)
+    monkeypatch.setattr(login_mod.bcrypt, "checkpw", counting_checkpw)
+
+    # --- Baseline: failed login with 0 codes consumed --------------------
+    count[0] = 0
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(provisioned_user["username"], "wrong", "XXXXX-YYYYY")
+    baseline_checkpws = count[0]
+    assert baseline_checkpws == 1 + _core.RECOVERY_CODE_COUNT
+
+    # --- Consume 4 codes via real successful logins ----------------------
+    for used_code in codes[:4]:
+        auth.authenticate(
+            provisioned_user["username"], provisioned_user["password"], used_code
+        )
+
+    # --- Failed login again, now with 4 codes used ---------------------
+    count[0] = 0
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(provisioned_user["username"], "wrong", "XXXXX-YYYYY")
+    after_4_checkpws = count[0]
+
+    assert after_4_checkpws == baseline_checkpws, (
+        f"consumption-state leak: baseline did {baseline_checkpws} checkpws, "
+        f"after 4 consumed codes did {after_4_checkpws} -- must match."
+    )
+
+    # --- Consume all remaining codes, then probe with none unused -------
+    for used_code in codes[4:]:
+        auth.authenticate(
+            provisioned_user["username"], provisioned_user["password"], used_code
+        )
+
+    count[0] = 0
+    with pytest.raises(auth.AuthError):
+        auth.authenticate(provisioned_user["username"], "wrong", "XXXXX-YYYYY")
+    all_used_checkpws = count[0]
+    assert all_used_checkpws == baseline_checkpws, (
+        f"consumption-state leak at k=10: baseline {baseline_checkpws} vs "
+        f"all-used {all_used_checkpws} -- must match."
+    )
+
+
