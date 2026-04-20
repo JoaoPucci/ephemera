@@ -16,7 +16,11 @@ jobs:
   backend:
     name: Python tests (pytest)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Generous cap: the suite runs a lot of real bcrypt (cost 12) to cover
+    # the constant-time auth paths. Local runs are ~8min; shared 2vCPU
+    # runners roughly double that and occasionally spike. GH Actions is
+    # free for public repos, so there's no reason to keep the cap tight.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -59,7 +63,7 @@ jobs:
   e2e:
     name: End-to-end smoke (Playwright)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
