@@ -128,12 +128,20 @@ def _resolve_user(username: Optional[str]) -> dict:
     sys.exit(1)
 
 
-def _reauth(user: dict) -> dict:
-    """Re-authenticate as `user` before any sensitive action."""
+def _reauth(user: dict) -> None:
+    """Re-authenticate as `user` before any sensitive action.
+
+    Returns on success, exits non-zero on failure. No return value --
+    callers don't need the authenticated user dict (they already have
+    the one `_resolve_user` handed them), and holding a reference to
+    `authenticate()`'s return value would also re-surface the plaintext-
+    seed-in-memory shape that the models-layer split was designed to
+    avoid.
+    """
     password = _prompt_password()
     code = input("6-digit code (or recovery code): ").strip()
     try:
-        return auth.authenticate(user["username"], password, code)
+        auth.authenticate(user["username"], password, code)
     except auth.LockoutError as e:
         print(f"account locked until {e.until_iso}.", file=sys.stderr)
         sys.exit(2)

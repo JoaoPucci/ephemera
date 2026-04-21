@@ -643,6 +643,26 @@ def test_recovery_code_consumption_is_not_persisted_on_wrong_password(
     assert user["id"] == provisioned_user["id"]
 
 
+def test_authenticate_success_return_does_not_contain_totp_secret(provisioned_user):
+    """The models-layer split keeps the plaintext TOTP seed out of every
+    read path whose name does NOT contain `with_totp` -- reading
+    `user["totp_secret"]` off the default getter raises KeyError. The one
+    remaining symbol that handed a with-TOTP dict back to callers was
+    `authenticate()`'s success return. No caller reads the field today,
+    but a future log line / error handler / telemetry hook that dumps
+    the user dict would have leaked the seed. Pairs with
+    test_default_user_getters_do_not_return_totp_secret at the models
+    layer to pin: plaintext TOTP only flows through a symbol whose
+    name contains `with_totp`.
+    """
+    current_totp = provisioned_user["totp"].now()
+    user = auth.authenticate(
+        provisioned_user["username"], provisioned_user["password"], current_totp
+    )
+    assert user["id"] == provisioned_user["id"]
+    assert "totp_secret" not in user
+
+
 def test_recovery_code_lookup_is_constant_time_across_consumption_state(
     provisioned_user, monkeypatch
 ):
