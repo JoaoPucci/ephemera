@@ -67,12 +67,31 @@ async function cancelOnServer(id) {
 }
 
 function fmtRelative(iso) {
-  const then = new Date(iso).getTime();
-  const diff = (Date.now() - then) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return Math.floor(diff / 60) + ' min ago';
-  if (diff < 86400) return Math.floor(diff / 3600) + ' h ago';
-  return Math.floor(diff / 86400) + ' d ago';
+  // Intl.RelativeTimeFormat returns locale-correct phrasing AND handles
+  // plural forms per target locale natively ("il y a 2 heures" in fr,
+  // "2時間前" in ja, etc.). "short" keeps the phrasing compact to match
+  // the tracked-list row UX; "auto" swaps numbers for words at the
+  // obvious boundaries ("yesterday" instead of "1 day ago").
+  const rtf = new Intl.RelativeTimeFormat(window.i18n.currentLocale, {
+    numeric: 'auto',
+    style: 'short',
+  });
+  const deltaSeconds = (new Date(iso).getTime() - Date.now()) / 1000;  // negative = past
+  const abs = Math.abs(deltaSeconds);
+  if (abs < 60) return rtf.format(Math.round(deltaSeconds), 'second');
+  if (abs < 3600) return rtf.format(Math.round(deltaSeconds / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(deltaSeconds / 3600), 'hour');
+  return rtf.format(Math.round(deltaSeconds / 86400), 'day');
+}
+
+function pluralKey(base, n) {
+  // Intl.PluralRules returns the CLDR category for the count ("one",
+  // "other", and in some locales "zero"/"two"/"few"/"many"). Callers
+  // place one template per category under the base key; the English
+  // catalog covers "one" + "other", other locales add what they need.
+  // The shim falls back to English if a category is missing.
+  const cat = new Intl.PluralRules(window.i18n.currentLocale).select(n);
+  return `${base}.${cat}`;
 }
 
 async function copyRowUrl(li, timeEl, originalTimeText, url) {
@@ -156,21 +175,26 @@ export async function renderTrackedList() {
     // When there's no user-supplied label, the fallback ("Image secret" /
     // "Text secret") is already shown as the label -- no need to repeat it
     // in the footnote. Keep the footnote strictly about timing.
-    let timeText = 'created ' + fmtRelative(item.created_at);
+    const loc = window.i18n.currentLocale;
+    let timeText = window.i18n.t('tracked.time_created', { when: fmtRelative(item.created_at) });
     if (item.status === 'viewed' && item.viewed_at) {
-      timeText += ' · viewed ' + fmtRelative(item.viewed_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_viewed', { when: fmtRelative(item.viewed_at) });
     } else if (item.status === 'burned' && item.viewed_at) {
-      timeText += ' · burned ' + fmtRelative(item.viewed_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_burned', { when: fmtRelative(item.viewed_at) });
     } else if (item.status === 'canceled' && item.viewed_at) {
-      timeText += ' · canceled ' + fmtRelative(item.viewed_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_canceled', { when: fmtRelative(item.viewed_at) });
     } else if (item.status === 'expired') {
-      timeText += ' · expired ' + fmtRelative(item.expires_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_expired', { when: fmtRelative(item.expires_at) });
     }
     timeEl.textContent = timeText;
-    // Exact timestamps on hover for older entries where "3d ago" is ambiguous.
-    const hoverBits = [`created ${new Date(item.created_at).toLocaleString()}`];
-    if (item.viewed_at) hoverBits.push(`${item.status} ${new Date(item.viewed_at).toLocaleString()}`);
-    else if (item.status === 'expired') hoverBits.push(`expired ${new Date(item.expires_at).toLocaleString()}`);
+    // Exact timestamps on hover for older entries where the relative
+    // phrase is ambiguous. Same event keys, just absolute dates this time.
+    const hoverBits = [window.i18n.t('tracked.time_created', { when: new Date(item.created_at).toLocaleString(loc) })];
+    if (item.viewed_at) {
+      hoverBits.push(window.i18n.t('tracked.time_' + item.status, { when: new Date(item.viewed_at).toLocaleString(loc) }));
+    } else if (item.status === 'expired') {
+      hoverBits.push(window.i18n.t('tracked.time_expired', { when: new Date(item.expires_at).toLocaleString(loc) }));
+    }
     timeEl.title = hoverBits.join(' · ');
 
     const meta = document.createElement('div');
@@ -276,11 +300,7 @@ export async function renderTrackedList() {
   if (clearBtn) {
     clearBtn.hidden = nonPending === 0;
     if (clearLbl && nonPending > 0) {
-      // Simple 1/other pick -- we deliberately skip ICU/ngettext for this
-      // branch per plan section 11; it's the one pluralized string in the
-      // app and it works for all six target locales.
-      const key = nonPending === 1 ? 'button.clear_past_one' : 'button.clear_past_other';
-      clearLbl.textContent = window.i18n.t(key, { n: nonPending });
+      clearLbl.textContent = window.i18n.t(pluralKey('button.clear_past', nonPending), { n: nonPending });
     }
   }
 
@@ -302,7 +322,8 @@ export async function renderTrackedList() {
   // Remember the last "idle" label so we can restore it (it carries the
   // current count, set by renderTrackedList, and may differ between calls).
   function idleLabel() {
-    return clearBtn.dataset.idleLabel || window.i18n.t('button.clear_past_other', { n: 0 });
+    return clearBtn.dataset.idleLabel
+      || window.i18n.t(pluralKey('button.clear_past', 0), { n: 0 });
   }
   clearBtn.addEventListener('click', async (e) => {
     e.stopPropagation();

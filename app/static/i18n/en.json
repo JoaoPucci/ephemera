@@ -24,8 +24,10 @@
     "cancel": "cancel",
     "confirm": "confirm?",
     "canceling": "canceling…",
-    "clear_past_one": "Clear {{n}} past entry",
-    "clear_past_other": "Clear {{n}} past entries",
+    "clear_past": {
+      "one": "Clear {{n}} past entry",
+      "other": "Clear {{n}} past entries"
+    },
     "clearing": "clearing…"
   },
   "status": {
@@ -50,6 +52,11 @@
     "aria_cancel": "cancel this secret",
     "tooltip_cancel": "Revoke the URL so the receiver can no longer view this",
     "tooltip_copy": "Click to copy link",
-    "tooltip_orphan": "The URL includes an encryption key stored only in the browser where this secret was created. Open ephemera in that browser to copy the link."
+    "tooltip_orphan": "The URL includes an encryption key stored only in the browser where this secret was created. Open ephemera in that browser to copy the link.",
+    "time_created": "created {{when}}",
+    "time_viewed": "viewed {{when}}",
+    "time_burned": "burned {{when}}",
+    "time_canceled": "canceled {{when}}",
+    "time_expired": "expired {{when}}"
   }
 }
