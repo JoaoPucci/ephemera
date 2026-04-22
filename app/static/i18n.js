@@ -1,21 +1,61 @@
-// Language picker + locale persistence. Runs once on load.
+// Language picker + translation shim.
 //
-// On first visit the server's Accept-Language / default-en resolution
-// picks the locale; from then on this script honors whatever the user
-// chose in the picker via:
+// Two responsibilities:
+//   1. Picker: change event on <select id="lang-picker"> -> setLocale(lang)
+//      writes localStorage + cookie, fires PATCH /api/me/language (persists
+//      for authed users; 204 no-op for anonymous), and reloads so every
+//      server-rendered {{ _("...") }} flips to the new locale.
+//   2. t(key, vars): dotted-key lookup into the catalog embedded in
+//      <script type="application/json" id="i18n-catalog"> by the Jinja
+//      layout. Falls through to the English catalog in #i18n-fallback on
+//      any miss so a stub locale catalog (just `{}`) still renders
+//      English instead of literal key names.
 //
-//   * localStorage["ephemera_lang_v1"] (survives across tabs)
-//   * ephemera_lang_v1=<tag>; cookie    (read by the server on next nav)
-//   * PATCH /api/me/language             (persisted to users.preferred_language
-//                                         when authed; no-op 204 otherwise)
-//
-// The ContextVar + middleware resolve the picker's cookie on the next
-// request, so a page reload after setLocale() renders every server-side
-// {{ _("...") }} in the new locale. Translation of JS-injected strings
-// lands in a follow-up commit once the i18next shim is wired in.
+// Inline-JSON-not-inline-JS because the CSP is script-src 'self': a
+// <script>window.X = ...</script> block would be blocked; a
+// <script type="application/json">...</script> block is treated as data
+// and is CSP-safe.
 (() => {
   const KEY = 'ephemera_lang_v1';
   const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;  // one year
+
+  function parseJsonTag(id) {
+    const el = document.getElementById(id);
+    if (!el) return {};
+    try { return JSON.parse(el.textContent || '{}'); } catch { return {}; }
+  }
+
+  const catalog = parseJsonTag('i18n-catalog');
+  const fallback = parseJsonTag('i18n-fallback');
+  const activeLocale = document.documentElement.lang || 'en';
+
+  function lookup(tree, key) {
+    // Dotted-key traversal. t("error.network") walks tree.error.network.
+    // Returns undefined on any missing segment so the caller can fall
+    // through to the next source.
+    let cur = tree;
+    for (const seg of key.split('.')) {
+      if (cur == null || typeof cur !== 'object') return undefined;
+      cur = cur[seg];
+    }
+    return typeof cur === 'string' ? cur : undefined;
+  }
+
+  function interpolate(template, vars) {
+    // {{name}} -> vars.name. Unknown vars stay as the literal {{name}} so
+    // missing-variable bugs are visible in the UI rather than silently
+    // producing empty strings.
+    if (!vars) return template;
+    return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (m, name) =>
+      name in vars ? String(vars[name]) : m,
+    );
+  }
+
+  function t(key, vars) {
+    const hit = lookup(catalog, key) ?? lookup(fallback, key);
+    if (hit === undefined) return key;   // visible sentinel for missing keys
+    return interpolate(hit, vars);
+  }
 
   function readCookie(name) {
     const prefix = name + '=';
@@ -30,13 +70,8 @@
   }
 
   async function setLocale(lang) {
-    // Persist client-side first so the fallback path (network blip,
-    // server 5xx) still remembers the choice on next nav.
     localStorage.setItem(KEY, lang);
     writeCookie(KEY, lang);
-    // PATCH may 401/400 for logged-out or bad input; we don't bail on
-    // failure because the cookie is already authoritative for anonymous
-    // users and the reload will still pick up the new language.
     try {
       await fetch('/api/me/language', {
         method: 'PATCH',
@@ -44,8 +79,7 @@
         body: JSON.stringify({ language: lang }),
       });
     } catch (_) {
-      // Network error -- still reload; the cookie will drive the next
-      // request.
+      // Cookie is already authoritative; the reload will honour it.
     }
     window.location.reload();
   }
@@ -55,21 +89,15 @@
     if (!sel) return;
     sel.addEventListener('change', (e) => {
       const lang = e.target.value;
-      // Don't reload if the user picks what's already active (could
-      // happen on mobile double-taps against the <select>).
-      if (lang === document.documentElement.lang) return;
+      if (lang === activeLocale) return;
       setLocale(lang);
     });
   }
 
-  // Expose for tests + for task #5's i18next wiring to call into once
-  // localized JS strings start flowing. Currently just setLocale()
-  // matters; t(key) and currentLocale land in the follow-up.
   window.i18n = {
+    t,
     setLocale,
-    get currentLocale() {
-      return localStorage.getItem(KEY) || document.documentElement.lang || 'en';
-    },
+    get currentLocale() { return activeLocale; },
   };
 
   if (document.readyState === 'loading') {

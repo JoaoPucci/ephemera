@@ -1,0 +1,55 @@
+{
+  "error": {
+    "network": "Network error. Please try again.",
+    "locked_with_until": "Too many failed attempts. Locked until {{until}}.",
+    "locked": "Too many failed attempts. Account locked.",
+    "too_many_attempts": "Too many attempts. Please wait a moment.",
+    "form_stale": "Form fields out of date — hard-refresh the page (Ctrl+Shift+R) and try again.",
+    "invalid_credentials": "Invalid credentials.",
+    "unexpected_http": "Unexpected error (HTTP {{status}}). Check server logs.",
+    "missing_key": "This link is missing its decryption key.",
+    "wrong_passphrase": "Wrong passphrase.",
+    "reveal_failed": "Failed to reveal secret.",
+    "request_failed": "Request failed ({{status}}).",
+    "generic": "Something went wrong.",
+    "please_enter_message": "Please enter a message.",
+    "please_select_image": "Please select an image."
+  },
+  "button": {
+    "signing_in": "Signing in…",
+    "revealing": "Revealing…",
+    "creating": "Creating…",
+    "copied": "Copied",
+    "copy_failed": "Copy failed",
+    "cancel": "cancel",
+    "confirm": "confirm?",
+    "canceling": "canceling…",
+    "clear_past_one": "Clear {{n}} past entry",
+    "clear_past_other": "Clear {{n}} past entries",
+    "clearing": "clearing…"
+  },
+  "status": {
+    "pending": "pending",
+    "viewed": "viewed",
+    "burned": "burned",
+    "canceled": "canceled",
+    "expired": "expired",
+    "gone": "no longer tracked"
+  },
+  "sender": {
+    "expires_prefix": "Expires: ",
+    "viewed_at_prefix": "at "
+  },
+  "tracked": {
+    "image_secret": "Image secret",
+    "text_secret": "Text secret",
+    "copy_ok": "copied to clipboard",
+    "copy_fail": "copy failed",
+    "orphan_hint": "created elsewhere",
+    "aria_remove": "remove from list",
+    "aria_cancel": "cancel this secret",
+    "tooltip_cancel": "Revoke the URL so the receiver can no longer view this",
+    "tooltip_copy": "Click to copy link",
+    "tooltip_orphan": "The URL includes an encryption key stored only in the browser where this secret was created. Open ephemera in that browser to copy the link."
+  }
+}

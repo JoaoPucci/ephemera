@@ -22,6 +22,7 @@ the caller having to thread a Request through.
 from __future__ import annotations
 
 import contextvars
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
@@ -64,6 +65,7 @@ current_locale: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 _TRANSLATIONS_DIR = Path(__file__).parent / "translations"
+_JS_CATALOG_DIR = Path(__file__).parent / "static" / "i18n"
 
 
 # ---------------------------------------------------------------------------
@@ -176,13 +178,36 @@ def lazy_gettext(message: str) -> LazyProxy:
     return LazyProxy(_resolve_lazy, message, enable_cache=False)
 
 
+@lru_cache(maxsize=None)
+def js_catalog(locale: str) -> dict:
+    """Load the JS-side JSON catalog for a locale, falling back to an empty
+    dict when the file is missing or malformed. The English catalog is the
+    source of truth for JS strings; every other locale is an overlay --
+    the i18n.js shim falls back to English for any missing key, so a stub
+    {} is a valid "not translated yet" state.
+
+    Template authors should pull this in through template_context() rather
+    than calling directly so the fallback (English) gets embedded alongside."""
+    path = _JS_CATALOG_DIR / f"{locale}.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
 def template_context(request: Request) -> dict:
     """Base context dict for every Jinja2 TemplateResponse. Provides
     `request` (required by FastAPI's Jinja2 integration), the current
     `locale` (for the <html lang=""> attribute and conditional rendering),
     and `_` (a gettext callable bound to the request's locale so
     `{{ _("...") }}` in templates resolves correctly). Route handlers
-    merge any page-specific keys on top of this."""
+    merge any page-specific keys on top of this.
+
+    js_catalog and js_fallback are inlined into the page <head> so the
+    shim resolves t() calls without a second fetch (skips the flash of
+    untranslated strings that an async JSON fetch would create)."""
     locale = getattr(request.state, "locale", DEFAULT)
     return {
         "request": request,
@@ -190,6 +215,8 @@ def template_context(request: Request) -> dict:
         "_": gettext_for(locale),
         "supported": SUPPORTED,
         "language_labels": LANGUAGE_LABELS,
+        "js_catalog": js_catalog(locale),
+        "js_fallback": js_catalog(DEFAULT),
     }
 
 
