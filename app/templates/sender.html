@@ -1,25 +1,17 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>ephemera — create secret</title>
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/theme.js"></script>
-</head>
-<body>
-  <button type="button" id="theme-toggle" class="theme-toggle" aria-label="toggle theme">dark</button>
-  <button type="button" id="user-btn" class="user-btn" aria-label="sign out">
+{% extends "_layout.html" %}
+{% block title %}{{ _("ephemera — create secret") }}{% endblock %}
+{% block chrome %}
+  <button type="button" id="user-btn" class="user-btn" aria-label="{{ _('sign out') }}">
     <span class="user-dot" aria-hidden="true"></span><span
           id="user-name">&hellip;</span><span class="user-sep" aria-hidden="true">·</span><span
-          class="user-action">sign out</span>
+          class="user-action">{{ _("sign out") }}</span>
   </button>
-  <div class="wordmark">ephemera</div>
+{% endblock %}
+{% block body %}
   <main class="card" id="main-card">
     <section id="tracked-section" hidden>
       <button type="button" id="tracked-header" class="tracked-panel-header" aria-expanded="false" aria-controls="tracked-body">
-        <span class="tracked-panel-title">Secrets you're tracking</span>
+        <span class="tracked-panel-title">{{ _("Secrets you're tracking") }}</span>
         <span id="tracked-count" class="tracked-panel-count">0</span>
         <span class="tracked-panel-chevron" aria-hidden="true"></span>
       </button>
@@ -28,9 +20,7 @@
           <ul id="tracked-list"></ul>
           <div class="tracked-panel-footer">
             <button type="button" id="tracked-clear" class="tracked-clear" hidden
-                    title="Remove every row that is no longer pending — pending secrets are kept">
-              <!-- Feather "trash-2" icon (MIT). currentColor inherits the button's
-                   theme/armed foreground so it tints danger-red when armed. -->
+                    title="{{ _('Remove every row that is no longer pending — pending secrets are kept') }}">
               <svg class="tracked-clear-icon" width="14" height="14" viewBox="0 0 24 24"
                    fill="none" stroke="currentColor" stroke-width="2"
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -39,7 +29,7 @@
                 <line x1="10" y1="11" x2="10" y2="17"></line>
                 <line x1="14" y1="11" x2="14" y2="17"></line>
               </svg>
-              <span id="tracked-clear-label">Clear past entries</span>
+              <span id="tracked-clear-label">{{ _("Clear past entries") }}</span>
             </button>
           </div>
         </div>
@@ -48,80 +38,80 @@
 
     <div id="compose">
       <div class="tabs" role="tablist">
-        <button class="tab active" data-tab="text" type="button">Text</button>
-        <button class="tab" data-tab="image" type="button">Image</button>
+        <button class="tab active" data-tab="text" type="button">{{ _("Text") }}</button>
+        <button class="tab" data-tab="image" type="button">{{ _("Image") }}</button>
       </div>
 
       <form id="secret-form">
       <section id="panel-text" class="panel">
-        <label for="content">Enter your secret</label>
-        <textarea id="content" name="content" rows="8" placeholder="Type your message..."></textarea>
+        <label for="content">{{ _("Enter your secret") }}</label>
+        <textarea id="content" name="content" rows="8" placeholder="{{ _('Type your message...') }}"></textarea>
       </section>
 
       <section id="panel-image" class="panel" hidden>
-        <label>Image</label>
+        <label>{{ _("Image") }}</label>
         <div id="dropzone" class="dropzone" tabindex="0">
-          <p>Drop image here or click to browse</p>
+          <p>{{ _("Drop image here or click to browse") }}</p>
           <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
           <div id="preview" hidden>
             <span id="file-name"></span>
-            <button type="button" id="clear-file" class="link">clear</button>
+            <button type="button" id="clear-file" class="link">{{ _("clear") }}</button>
           </div>
         </div>
       </section>
 
-      <label for="expires_in">Expires in</label>
+      <label for="expires_in">{{ _("Expires in") }}</label>
       <select id="expires_in" name="expires_in">
-        <option value="300">5 minutes</option>
-        <option value="1800">30 minutes</option>
-        <option value="3600">1 hour</option>
-        <option value="14400">4 hours</option>
-        <option value="43200">12 hours</option>
-        <option value="86400" selected>24 hours</option>
-        <option value="259200">3 days</option>
-        <option value="604800">7 days</option>
+        <option value="300">{{ _("5 minutes") }}</option>
+        <option value="1800">{{ _("30 minutes") }}</option>
+        <option value="3600">{{ _("1 hour") }}</option>
+        <option value="14400">{{ _("4 hours") }}</option>
+        <option value="43200">{{ _("12 hours") }}</option>
+        <option value="86400" selected>{{ _("24 hours") }}</option>
+        <option value="259200">{{ _("3 days") }}</option>
+        <option value="604800">{{ _("7 days") }}</option>
       </select>
 
-      <label for="passphrase">Passphrase (optional)</label>
+      <label for="passphrase">{{ _("Passphrase (optional)") }}</label>
       <div class="input-with-action">
         <input type="password" id="passphrase" name="passphrase" autocomplete="new-password">
         <button type="button" id="toggle-passphrase" class="input-action"
-                aria-label="show passphrase" aria-pressed="false">show</button>
+                aria-label="{{ _('show passphrase') }}" aria-pressed="false">{{ _("show") }}</button>
       </div>
 
       <label class="toggle">
         <input type="checkbox" id="track" name="track">
         <span class="toggle-slider" aria-hidden="true"></span>
-        Track viewing status
+        {{ _("Track viewing status") }}
       </label>
 
       <div id="label-wrap" hidden>
-        <label for="label">Label (for your tracked list)</label>
-        <input type="text" id="label" maxlength="60" placeholder="e.g. API key for Acme">
+        <label for="label">{{ _("Label (for your tracked list)") }}</label>
+        <input type="text" id="label" maxlength="60" placeholder="{{ _('e.g. API key for Acme') }}">
       </div>
 
       <p class="form-hint">
-        After you create this, you won't be able to read the content again —
-        not even from your own side. Save a copy elsewhere if you'll want one.
+        {{ _("After you create this, you won't be able to read the content again — not even from your own side. Save a copy elsewhere if you'll want one.") }}
       </p>
-      <button type="submit" id="submit-btn">Create Secret</button>
+      <button type="submit" id="submit-btn">{{ _("Create Secret") }}</button>
       <p class="error" id="sender-error" hidden></p>
     </form>
     </div>
 
     <section id="result" hidden>
-      <h2 class="success">Secret created.</h2>
+      <h2 class="success">{{ _("Secret created.") }}</h2>
       <div class="url-box"><code id="result-url"></code></div>
-      <button type="button" id="copy-url" class="copy-btn">Copy URL</button>
+      <button type="button" id="copy-url" class="copy-btn">{{ _("Copy URL") }}</button>
       <p id="result-expiry" class="muted"></p>
       <div id="status-widget" class="status-widget" hidden>
-        <span class="status-label">Status</span>
+        <span class="status-label">{{ _("Status") }}</span>
         <span id="status-value" class="status-pill pending">pending</span>
         <span id="status-detail" class="muted-inline"></span>
       </div>
-      <button type="button" id="create-another" class="link">Create another</button>
+      <button type="button" id="create-another" class="link">{{ _("Create another") }}</button>
     </section>
   </main>
+{% endblock %}
+{% block scripts %}
   <script type="module" src="/static/sender.js"></script>
-</body>
-</html>
+{% endblock %}

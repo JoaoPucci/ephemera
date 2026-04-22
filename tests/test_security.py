@@ -604,7 +604,7 @@ def test_landing_passphrase_input_is_type_password():
 
     html = (
         pathlib.Path(__file__).resolve().parent.parent
-        / "app" / "static" / "landing.html"
+        / "app" / "templates" / "landing.html"
     ).read_text()
     # Find the passphrase input specifically; there may be other inputs on
     # the page in the future.
@@ -633,7 +633,7 @@ def test_login_code_input_has_show_hide_toggle_wiring():
 
     html = (
         pathlib.Path(__file__).resolve().parent.parent
-        / "app" / "static" / "login.html"
+        / "app" / "templates" / "login.html"
     ).read_text()
 
     # The code input must live inside an .input-with-action wrapper so the

@@ -91,7 +91,7 @@ form.addEventListener('submit', async (e) => {
   if (submitBtn.disabled) return;
   err.hidden = true;
   submitBtn.disabled = true;
-  submitBtn.textContent = 'Signing in…';
+  submitBtn.textContent = window.i18n.t('button.signing_in');
 
   const username = document.getElementById('username').value;
   const password = document.getElementById('password').value;
@@ -108,7 +108,7 @@ form.addEventListener('submit', async (e) => {
   } catch {
     submitBtn.disabled = false;
     submitBtn.textContent = submitLabel;
-    err.textContent = 'Network error. Please try again.';
+    err.textContent = window.i18n.t('error.network');
     err.hidden = false;
     return;
   }
@@ -122,16 +122,16 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json().catch(() => ({}));
     const until = data.detail && data.detail.until;
     err.textContent = until
-      ? `Too many failed attempts. Locked until ${new Date(until).toLocaleString()}.`
-      : 'Too many failed attempts. Account locked.';
+      ? window.i18n.t('error.locked_with_until', { until: new Date(until).toLocaleString(window.i18n.currentLocale) })
+      : window.i18n.t('error.locked');
   } else if (res.status === 429) {
-    err.textContent = 'Too many attempts. Please wait a moment.';
+    err.textContent = window.i18n.t('error.too_many_attempts');
   } else if (res.status === 422) {
-    err.textContent = 'Form fields out of date — hard-refresh the page (Ctrl+Shift+R) and try again.';
+    err.textContent = window.i18n.t('error.form_stale');
   } else if (res.status === 401) {
-    err.textContent = 'Invalid credentials.';
+    err.textContent = window.i18n.t('error.invalid_credentials');
   } else {
-    err.textContent = `Unexpected error (HTTP ${res.status}). Check server logs.`;
+    err.textContent = window.i18n.t('error.unexpected_http', { status: res.status });
   }
   err.hidden = false;
   submitBtn.disabled = false;

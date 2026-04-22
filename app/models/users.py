@@ -39,6 +39,7 @@ _USER_COLUMNS_NO_TOTP = (
     "id, username, email, password_hash, "
     "totp_last_step, recovery_code_hashes, "
     "failed_attempts, lockout_until, session_generation, "
+    "preferred_language, "
     "created_at, updated_at"
 )
 
@@ -157,6 +158,7 @@ _ALLOWED_UPDATE_COLUMNS = frozenset({
     "failed_attempts",
     "lockout_until",
     "session_generation",
+    "preferred_language",
     # `updated_at` is set by update_user itself, not by callers, but
     # naming it here makes the set the authoritative list of writable
     # columns rather than "everything writable except the one the
@@ -186,6 +188,13 @@ def delete_user(user_id: int) -> None:
     """Delete a user and (via ON DELETE CASCADE) all their secrets and tokens."""
     with _connect() as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+def set_preferred_language(user_id: int, language: Optional[str]) -> None:
+    """Store the user's preferred UI language (BCP-47 tag like 'ja' or 'pt-BR').
+    Passing None clears the preference so locale resolution falls back to the
+    request-scoped signals (cookie, Accept-Language, default)."""
+    update_user(user_id, preferred_language=language)
 
 
 def bump_session_generation(user_id: int) -> int:

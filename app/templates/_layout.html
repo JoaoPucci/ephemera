@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}ephemera{% endblock %}</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+  {# CSP is script-src 'self' -- inline <script> with code is blocked, but
+     <script type="application/json"> embeds as data (no execution) and is
+     CSP-safe. i18n.js reads both nodes from the DOM at init. #}
+  <script type="application/json" id="i18n-catalog">{{ js_catalog|tojson }}</script>
+  <script type="application/json" id="i18n-fallback">{{ js_fallback|tojson }}</script>
+  <script src="/static/i18n.js"></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body{% if is_authenticated %} data-authenticated="true"{% endif %}>
+  <div class="top-chrome top-chrome-right">
+    {% if launched|length > 1 %}
+    <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
+      {% for tag in launched %}
+      <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}"></button>
+  </div>
+  {% block chrome %}{% endblock %}
+  <div class="wordmark">ephemera</div>
+  {% block body %}{% endblock %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>

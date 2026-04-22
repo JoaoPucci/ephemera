@@ -5,16 +5,26 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from .config import get_settings
 from . import cleanup, models
 from .dependencies import verify_api_token_or_session
-from .routes import receiver, sender
+from .i18n import current_locale, resolve_locale
+from .routes import prefs, receiver, sender
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
+# Single shared Jinja2 environment. The i18n extension enables {% trans %}
+# blocks (we use {{ _("...") }} instead, but the extension also tells the
+# pybabel extractor to treat the template as translation-aware). Route
+# handlers build their context through app.i18n.template_context(request).
+TEMPLATES = Jinja2Templates(directory=str(TEMPLATES_DIR))
+TEMPLATES.env.add_extension("jinja2.ext.i18n")
 
 # CSP: deny-by-default then explicitly enumerate what ephemera actually uses.
 # Nothing is fetched cross-origin (no CDN, no web fonts, no analytics). The
@@ -106,6 +116,25 @@ def create_app() -> FastAPI:
             response.headers[k] = v
         return response
 
+    @app.middleware("http")
+    async def set_request_locale(request: Request, call_next):
+        # Static assets never render localized content; skip the resolver
+        # (which would otherwise do a cookie parse + DB lookup on every
+        # image/css/js fetch) for the hot path.
+        if request.url.path.startswith("/static"):
+            return await call_next(request)
+        locale = resolve_locale(request)
+        request.state.locale = locale
+        # ContextVar gives lazy_gettext a reliable per-request locale without
+        # threading Request through every module-level string. reset() in
+        # finally is mandatory -- a leaked token silently bleeds one
+        # request's locale into the next handler on the same worker.
+        token = current_locale.set(locale)
+        try:
+            return await call_next(request)
+        finally:
+            current_locale.reset(token)
+
     # ---- Auth-gated API docs ---------------------------------------------
     # Swagger UI assets live under app/static/swagger/ (pinned versions;
     # see app/static/swagger/README.md for the update recipe). init.js is
@@ -167,6 +196,7 @@ def create_app() -> FastAPI:
 
     app.include_router(sender.router)
     app.include_router(receiver.router)
+    app.include_router(prefs.router)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

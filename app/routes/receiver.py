@@ -1,13 +1,13 @@
 """Receiver routes: landing, metadata, reveal."""
 import base64
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
 
 from .. import crypto, models, security_log
 from ..config import Settings, get_settings
 from ..dependencies import verify_same_origin
+from ..errors import http_error
+from ..i18n import template_context
 from ..limiter import read_rate_limit, reveal_rate_limit
 from ..schemas import (
     LandingMetaResponse,
@@ -20,11 +20,9 @@ from ..schemas import (
 
 router = APIRouter()
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-
 
 def _gone() -> HTTPException:
-    return HTTPException(status_code=404, detail="gone")
+    return http_error(404, "gone")
 
 
 def _load_live_row(token: str):
@@ -39,8 +37,10 @@ def _load_live_row(token: str):
 
 
 @router.get("/s/{token}")
-def landing_page(token: str):
-    return FileResponse(STATIC_DIR / "landing.html")
+def landing_page(token: str, request: Request):
+    from .. import TEMPLATES
+
+    return TEMPLATES.TemplateResponse(request, "landing.html", template_context(request))
 
 
 @router.get(
@@ -73,7 +73,7 @@ def reveal(
 
     if row["passphrase"] is not None:
         if not body.passphrase:
-            raise HTTPException(status_code=401, detail="passphrase required")
+            raise http_error(401, "passphrase_required")
         import bcrypt
 
         if not bcrypt.checkpw(body.passphrase.encode(), row["passphrase"].encode()):
@@ -88,22 +88,22 @@ def reveal(
                     "reveal.burned",
                     secret_id=row["id"], client_ip=ip,
                 )
-                raise HTTPException(status_code=410, detail="too many attempts, secret burned")
-            raise HTTPException(status_code=401, detail="wrong passphrase")
+                raise http_error(410, "too_many_attempts_burned")
+            raise http_error(401, "wrong_passphrase")
 
     try:
         client_half = crypto.decode_half(body.key)
     except Exception:
-        raise HTTPException(status_code=400, detail="malformed key")
+        raise http_error(400, "malformed_key")
 
     if len(client_half) != 16:
-        raise HTTPException(status_code=400, detail="invalid key length")
+        raise http_error(400, "invalid_key_length")
 
     try:
         full_key = crypto.reconstruct_key(row["server_key"], client_half)
         plaintext = crypto.decrypt(row["ciphertext"], full_key)
     except (crypto.DecryptionError, ValueError):
-        raise HTTPException(status_code=400, detail="decryption failed")
+        raise http_error(400, "decryption_failed")
 
     # Atomically claim the row; if a concurrent reveal already won, 404 and
     # discard the plaintext we decrypted. See models.consume_for_reveal.

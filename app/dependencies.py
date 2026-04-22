@@ -7,12 +7,13 @@ resolves to a user row; dependencies below return that row (or raise 401).
 """
 from typing import Optional
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Header, Request
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
 
 from . import auth as auth_mod
 from . import models
 from .config import get_settings
+from .errors import http_error
 
 
 # ---------------------------------------------------------------------------
@@ -89,14 +90,14 @@ def verify_api_token_or_session(
             user = models.get_user_by_id(token_row["user_id"])
             if user is not None:
                 return user
-        raise HTTPException(status_code=401, detail="invalid api token")
+        raise http_error(401, "invalid_api_token")
 
     uid = current_user_id(request)
     if uid is not None:
         user = models.get_user_by_id(uid)
         if user is not None:
             return user
-    raise HTTPException(status_code=401, detail="not authenticated")
+    raise http_error(401, "not_authenticated")
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +133,7 @@ def verify_same_origin(request: Request) -> None:
             provided = auth_header.split(" ", 1)[1].strip()
             if provided and auth_mod.lookup_api_token(provided) is not None:
                 return
-        raise HTTPException(status_code=403, detail="missing origin on state-changing request")
+        raise http_error(403, "missing_origin")
     allowed = get_settings().origins
     if origin not in allowed:
-        raise HTTPException(status_code=403, detail="cross-origin request blocked")
+        raise http_error(403, "cross_origin_blocked")

@@ -67,12 +67,31 @@ async function cancelOnServer(id) {
 }
 
 function fmtRelative(iso) {
-  const then = new Date(iso).getTime();
-  const diff = (Date.now() - then) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return Math.floor(diff / 60) + ' min ago';
-  if (diff < 86400) return Math.floor(diff / 3600) + ' h ago';
-  return Math.floor(diff / 86400) + ' d ago';
+  // Intl.RelativeTimeFormat returns locale-correct phrasing AND handles
+  // plural forms per target locale natively ("il y a 2 heures" in fr,
+  // "2時間前" in ja, etc.). "short" keeps the phrasing compact to match
+  // the tracked-list row UX; "auto" swaps numbers for words at the
+  // obvious boundaries ("yesterday" instead of "1 day ago").
+  const rtf = new Intl.RelativeTimeFormat(window.i18n.currentLocale, {
+    numeric: 'auto',
+    style: 'short',
+  });
+  const deltaSeconds = (new Date(iso).getTime() - Date.now()) / 1000;  // negative = past
+  const abs = Math.abs(deltaSeconds);
+  if (abs < 60) return rtf.format(Math.round(deltaSeconds), 'second');
+  if (abs < 3600) return rtf.format(Math.round(deltaSeconds / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(deltaSeconds / 3600), 'hour');
+  return rtf.format(Math.round(deltaSeconds / 86400), 'day');
+}
+
+function pluralKey(base, n) {
+  // Intl.PluralRules returns the CLDR category for the count ("one",
+  // "other", and in some locales "zero"/"two"/"few"/"many"). Callers
+  // place one template per category under the base key; the English
+  // catalog covers "one" + "other", other locales add what they need.
+  // The shim falls back to English if a category is missing.
+  const cat = new Intl.PluralRules(window.i18n.currentLocale).select(n);
+  return `${base}.${cat}`;
 }
 
 async function copyRowUrl(li, timeEl, originalTimeText, url) {
@@ -98,7 +117,7 @@ async function copyRowUrl(li, timeEl, originalTimeText, url) {
     ok = false;
   }
   li.classList.add(ok ? 'flash-copy' : 'flash-error');
-  timeEl.textContent = ok ? 'copied to clipboard' : 'copy failed';
+  timeEl.textContent = ok ? window.i18n.t('tracked.copy_ok') : window.i18n.t('tracked.copy_fail');
   li.setAttribute('aria-live', 'polite');
   setTimeout(() => {
     li.classList.remove('flash-copy', 'flash-error');
@@ -136,7 +155,9 @@ export async function renderTrackedList() {
     li.dataset.id = item.id;
     li.dataset.status = item.status;
 
-    const fallback = item.content_type === 'image' ? 'Image secret' : 'Text secret';
+    const fallback = item.content_type === 'image'
+      ? window.i18n.t('tracked.image_secret')
+      : window.i18n.t('tracked.text_secret');
     const labelText = (item.label && item.label.trim()) ? item.label : fallback;
 
     const labelEl = document.createElement('span');
@@ -154,21 +175,26 @@ export async function renderTrackedList() {
     // When there's no user-supplied label, the fallback ("Image secret" /
     // "Text secret") is already shown as the label -- no need to repeat it
     // in the footnote. Keep the footnote strictly about timing.
-    let timeText = 'created ' + fmtRelative(item.created_at);
+    const loc = window.i18n.currentLocale;
+    let timeText = window.i18n.t('tracked.time_created', { when: fmtRelative(item.created_at) });
     if (item.status === 'viewed' && item.viewed_at) {
-      timeText += ' · viewed ' + fmtRelative(item.viewed_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_viewed', { when: fmtRelative(item.viewed_at) });
     } else if (item.status === 'burned' && item.viewed_at) {
-      timeText += ' · burned ' + fmtRelative(item.viewed_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_burned', { when: fmtRelative(item.viewed_at) });
     } else if (item.status === 'canceled' && item.viewed_at) {
-      timeText += ' · canceled ' + fmtRelative(item.viewed_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_canceled', { when: fmtRelative(item.viewed_at) });
     } else if (item.status === 'expired') {
-      timeText += ' · expired ' + fmtRelative(item.expires_at);
+      timeText += ' · ' + window.i18n.t('tracked.time_expired', { when: fmtRelative(item.expires_at) });
     }
     timeEl.textContent = timeText;
-    // Exact timestamps on hover for older entries where "3d ago" is ambiguous.
-    const hoverBits = [`created ${new Date(item.created_at).toLocaleString()}`];
-    if (item.viewed_at) hoverBits.push(`${item.status} ${new Date(item.viewed_at).toLocaleString()}`);
-    else if (item.status === 'expired') hoverBits.push(`expired ${new Date(item.expires_at).toLocaleString()}`);
+    // Exact timestamps on hover for older entries where the relative
+    // phrase is ambiguous. Same event keys, just absolute dates this time.
+    const hoverBits = [window.i18n.t('tracked.time_created', { when: new Date(item.created_at).toLocaleString(loc) })];
+    if (item.viewed_at) {
+      hoverBits.push(window.i18n.t('tracked.time_' + item.status, { when: new Date(item.viewed_at).toLocaleString(loc) }));
+    } else if (item.status === 'expired') {
+      hoverBits.push(window.i18n.t('tracked.time_expired', { when: new Date(item.expires_at).toLocaleString(loc) }));
+    }
     timeEl.title = hoverBits.join(' · ');
 
     const meta = document.createElement('div');
@@ -178,13 +204,13 @@ export async function renderTrackedList() {
 
     const pill = document.createElement('span');
     pill.className = 'status-pill ' + item.status;
-    pill.textContent = item.status;
+    pill.textContent = window.i18n.t('status.' + item.status);
 
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'tracked-remove';
-    rm.setAttribute('aria-label', 'remove from list');
-    rm.title = 'remove';
+    rm.setAttribute('aria-label', window.i18n.t('tracked.aria_remove'));
+    rm.title = window.i18n.t('tracked.aria_remove');
     rm.textContent = '×';
 
     const right = document.createElement('div');
@@ -197,24 +223,24 @@ export async function renderTrackedList() {
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.className = 'tracked-cancel';
-      cancelBtn.textContent = 'cancel';
-      cancelBtn.title = 'Revoke the URL so the receiver can no longer view this';
-      cancelBtn.setAttribute('aria-label', 'cancel this secret');
+      cancelBtn.textContent = window.i18n.t('button.cancel');
+      cancelBtn.title = window.i18n.t('tracked.tooltip_cancel');
+      cancelBtn.setAttribute('aria-label', window.i18n.t('tracked.aria_cancel'));
       let armTimer = null;
       cancelBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!cancelBtn.classList.contains('armed')) {
           cancelBtn.classList.add('armed');
-          cancelBtn.textContent = 'confirm?';
+          cancelBtn.textContent = window.i18n.t('button.confirm');
           armTimer = setTimeout(() => {
             cancelBtn.classList.remove('armed');
-            cancelBtn.textContent = 'cancel';
+            cancelBtn.textContent = window.i18n.t('button.cancel');
           }, 3000);
           return;
         }
         if (armTimer) clearTimeout(armTimer);
         cancelBtn.disabled = true;
-        cancelBtn.textContent = 'canceling…';
+        cancelBtn.textContent = window.i18n.t('button.canceling');
         await cancelOnServer(item.id);
         forgetUrl(item.id);
         renderTrackedList();
@@ -234,7 +260,7 @@ export async function renderTrackedList() {
       li.classList.add('copyable');
       li.setAttribute('role', 'button');
       li.setAttribute('tabindex', '0');
-      li.title = 'Click to copy link';
+      li.title = window.i18n.t('tracked.tooltip_copy');
       const activate = async (e) => {
         // Ignore clicks that originated on row-level action buttons.
         if (e.target && e.target.closest('.tracked-remove, .tracked-cancel')) return;
@@ -250,12 +276,10 @@ export async function renderTrackedList() {
       // reconstruct it server-side because the key fragment never leaves the
       // creating browser. Make the row clearly "informational, not actionable".
       li.classList.add('orphan');
-      li.title =
-        'The URL includes an encryption key stored only in the browser where this ' +
-        'secret was created. Open ephemera in that browser to copy the link.';
+      li.title = window.i18n.t('tracked.tooltip_orphan');
       const hint = document.createElement('span');
       hint.className = 'orphan-hint';
-      hint.textContent = 'created elsewhere';
+      hint.textContent = window.i18n.t('tracked.orphan_hint');
       meta.appendChild(hint);
     }
 
@@ -276,8 +300,7 @@ export async function renderTrackedList() {
   if (clearBtn) {
     clearBtn.hidden = nonPending === 0;
     if (clearLbl && nonPending > 0) {
-      const word = nonPending === 1 ? 'entry' : 'entries';
-      clearLbl.textContent = `Clear ${nonPending} past ${word}`;
+      clearLbl.textContent = window.i18n.t(pluralKey('button.clear_past', nonPending), { n: nonPending });
     }
   }
 
@@ -298,13 +321,16 @@ export async function renderTrackedList() {
   let armTimer = null;
   // Remember the last "idle" label so we can restore it (it carries the
   // current count, set by renderTrackedList, and may differ between calls).
-  function idleLabel() { return clearBtn.dataset.idleLabel || 'Clear past entries'; }
+  function idleLabel() {
+    return clearBtn.dataset.idleLabel
+      || window.i18n.t(pluralKey('button.clear_past', 0), { n: 0 });
+  }
   clearBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!clearBtn.classList.contains('armed')) {
       clearBtn.dataset.idleLabel = clearLbl.textContent;
       clearBtn.classList.add('armed');
-      clearLbl.textContent = 'confirm?';
+      clearLbl.textContent = window.i18n.t('button.confirm');
       armTimer = setTimeout(() => {
         clearBtn.classList.remove('armed');
         clearLbl.textContent = idleLabel();
@@ -313,7 +339,7 @@ export async function renderTrackedList() {
     }
     if (armTimer) clearTimeout(armTimer);
     clearBtn.disabled = true;
-    clearLbl.textContent = 'clearing…';
+    clearLbl.textContent = window.i18n.t('button.clearing');
     try {
       await fetch('/api/secrets/tracked/clear', { method: 'POST' });
     } catch {}

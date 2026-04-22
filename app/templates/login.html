@@ -1,0 +1,36 @@
+{% extends "_layout.html" %}
+{% block title %}{{ _("ephemera — sign in") }}{% endblock %}
+{% block body %}
+  <main class="card">
+    <form id="login-form">
+      <label for="username">{{ _("Username") }}</label>
+      <input type="text" id="username" name="username" autocomplete="username"
+             autocapitalize="none" spellcheck="false" required>
+
+      <label for="password">{{ _("Password") }}</label>
+      <div class="input-with-action">
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <button type="button" id="toggle-password" class="input-action"
+                aria-label="{{ _('show password') }}" aria-pressed="false">{{ _("show") }}</button>
+      </div>
+
+      <label for="code" id="code-label">{{ _("6-digit code") }}</label>
+      <div class="input-with-action">
+        <input type="text" id="code" name="code" autocomplete="one-time-code"
+               inputmode="numeric" pattern="[0-9A-Za-z\-]*" required>
+        <button type="button" id="toggle-code" class="input-action"
+                aria-label="{{ _('show code') }}" aria-pressed="false" hidden>{{ _("show") }}</button>
+      </div>
+
+      <button type="submit">{{ _("Sign in") }}</button>
+
+      <p class="error" id="login-error" hidden></p>
+      <p class="muted" style="margin-top: 1rem; text-align: left;">
+        <button type="button" id="toggle-code-mode" class="link" style="padding:0;">{{ _("Use a recovery code") }}</button>
+      </p>
+    </form>
+  </main>
+{% endblock %}
+{% block scripts %}
+  <script type="module" src="/static/login.js"></script>
+{% endblock %}

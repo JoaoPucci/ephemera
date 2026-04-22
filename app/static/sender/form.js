@@ -89,7 +89,7 @@ form.addEventListener('submit', async (e) => {
   if (submitBtn.disabled) return;
   errBox.hidden = true;
   submitBtn.disabled = true;
-  submitBtn.textContent = 'Creating…';
+  submitBtn.textContent = window.i18n.t('button.creating');
 
   let res;
   try {
@@ -97,7 +97,7 @@ form.addEventListener('submit', async (e) => {
     const label = track ? (document.getElementById('label').value || '').trim() : '';
     if (activeTab === 'text') {
       const content = document.getElementById('content').value;
-      if (!content.trim()) throw new Error('Please enter a message.');
+      if (!content.trim()) throw new Error(window.i18n.t('error.please_enter_message'));
       const body = {
         content,
         content_type: 'text',
@@ -112,7 +112,7 @@ form.addEventListener('submit', async (e) => {
         body: JSON.stringify(body),
       });
     } else {
-      if (!fileInput.files.length) throw new Error('Please select an image.');
+      if (!fileInput.files.length) throw new Error(window.i18n.t('error.please_select_image'));
       const fd = new FormData();
       fd.append('file', fileInput.files[0]);
       fd.append('expires_in', document.getElementById('expires_in').value);
@@ -125,15 +125,27 @@ form.addEventListener('submit', async (e) => {
 
     if (res.status === 401) { window.location.reload(); return; }
     if (!res.ok) {
-      let msg = 'Request failed (' + res.status + ').';
-      try { const j = await res.json(); if (j.detail) msg = j.detail; } catch {}
+      let msg = window.i18n.t('error.request_failed', { status: res.status });
+      // Server's {code, message} shape: prefer the localized error.<code>
+      // toast when available, else the English fallback `message`, else the
+      // generic "Request failed (N)" above.
+      try {
+        const j = await res.json();
+        if (j.detail && j.detail.code) {
+          const key = 'error.' + j.detail.code;
+          const localized = window.i18n.t(key);
+          msg = localized === key ? (j.detail.message || msg) : localized;
+        } else if (typeof j.detail === 'string') {
+          msg = j.detail;
+        }
+      } catch {}
       throw new Error(msg);
     }
     const data = await res.json();
     if (track && data.url && data.id) cacheUrl(data.id, data.url);
     showResult(data);
   } catch (err) {
-    errBox.textContent = err.message || 'Something went wrong.';
+    errBox.textContent = err.message || window.i18n.t('error.generic');
     errBox.hidden = false;
   } finally {
     // Restore the button whether we succeeded or threw: on success the
@@ -153,7 +165,7 @@ function showResult({ url, id, expires_at }) {
   document.getElementById('result-url').textContent = url;
   const expiry = new Date(expires_at);
   document.getElementById('result-expiry').textContent =
-    'Expires: ' + expiry.toLocaleString();
+    window.i18n.t('sender.expires_prefix') + expiry.toLocaleString(window.i18n.currentLocale);
 
   const track = document.getElementById('track').checked;
   const widget = document.getElementById('status-widget');
@@ -188,9 +200,10 @@ function paintStatus(valueEl, detailEl, data) {
   statuses.forEach((s) => valueEl.classList.remove(s));
   const s = (data && data.status) || 'pending';
   valueEl.classList.add(s);
-  valueEl.textContent = s === 'gone' ? 'no longer tracked' : s;
+  valueEl.textContent = window.i18n.t('status.' + s);
   if (data && data.viewed_at) {
-    detailEl.textContent = 'at ' + new Date(data.viewed_at).toLocaleString();
+    detailEl.textContent = window.i18n.t('sender.viewed_at_prefix')
+      + new Date(data.viewed_at).toLocaleString(window.i18n.currentLocale);
   } else {
     detailEl.textContent = '';
   }

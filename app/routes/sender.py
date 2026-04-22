@@ -1,5 +1,4 @@
 """Sender routes: login, logout, secret creation, status lookup."""
-from pathlib import Path
 from typing import Optional
 
 import bcrypt
@@ -7,11 +6,9 @@ from fastapi import (
     APIRouter,
     Depends,
     Form,
-    HTTPException,
     Request,
     Response,
 )
-from fastapi.responses import FileResponse
 
 from .. import auth as auth_mod
 from .. import crypto, models, security_log, validation
@@ -23,6 +20,8 @@ from ..dependencies import (
     verify_api_token_or_session,
     verify_same_origin,
 )
+from ..errors import http_error
+from ..i18n import template_context
 from ..limiter import create_rate_limit, login_rate_limit, read_rate_limit
 from ..schemas import (
     ApiMeResponse,
@@ -38,8 +37,6 @@ from ..schemas import (
 
 
 router = APIRouter()
-
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # Caps on untyped Form(...) fields. Caddy already limits the body to ~11MB,
 # but these save us from spending bcrypt/multipart parsing on obviously
@@ -74,8 +71,10 @@ def _build_url(token: str, client_half: bytes) -> str:
 
 @router.get("/send")
 def send_page(request: Request):
+    from .. import TEMPLATES
+
     page = "sender.html" if is_logged_in(request) else "login.html"
-    return FileResponse(STATIC_DIR / page)
+    return TEMPLATES.TemplateResponse(request, page, template_context(request))
 
 
 # ---------------------------------------------------------------------------
@@ -104,19 +103,16 @@ def send_login(
         or len(password) > _MAX_PASSWORD_LEN
         or len(code) > _MAX_TOTP_CODE_LEN
     ):
-        raise HTTPException(status_code=400, detail="field too long")
+        raise http_error(400, "field_too_long")
     try:
         user = auth_mod.authenticate(
             username, password, code,
             client_ip=security_log.client_ip(request),
         )
     except auth_mod.LockoutError as e:
-        raise HTTPException(
-            status_code=423,
-            detail={"error": "locked", "until": e.until_iso},
-        )
+        raise http_error(423, "locked", until=e.until_iso)
     except auth_mod.AuthError:
-        raise HTTPException(status_code=401, detail="invalid credentials")
+        raise http_error(401, "invalid_credentials")
 
     # Session rotation: re-signing with a fresh timestamp gives a new cookie value.
     # The cookie also binds to the user's current session_generation so that
@@ -173,7 +169,7 @@ async def create_secret(
             raw = await request.json()
             payload = CreateTextSecret(**raw)
         except Exception as e:
-            raise HTTPException(status_code=422, detail=f"invalid json body: {e}")
+            raise http_error(422, "invalid_json_body", message=f"Invalid JSON body: {e}")
         content_type = "text"
         mime = None
         plaintext = payload.content.encode("utf-8")
@@ -186,33 +182,33 @@ async def create_secret(
         form = await request.form()
         file = form.get("file")
         if file is None or not hasattr(file, "read"):
-            raise HTTPException(status_code=422, detail="missing file")
+            raise http_error(422, "missing_file")
         try:
             expires_in = int(form.get("expires_in", ""))
         except (TypeError, ValueError):
-            raise HTTPException(status_code=422, detail="invalid expires_in")
+            raise http_error(422, "invalid_expires_in")
         if expires_in not in EXPIRY_PRESETS:
-            raise HTTPException(status_code=422, detail="expires_in must be a preset")
+            raise http_error(422, "expires_in_not_preset")
         passphrase = form.get("passphrase") or None
         if passphrase is not None and len(passphrase) > _MAX_PASSPHRASE_LEN:
-            raise HTTPException(status_code=422, detail="passphrase too long")
+            raise http_error(422, "passphrase_too_long")
         track = str(form.get("track", "")).lower() in ("1", "true", "on", "yes")
         raw_label = form.get("label")
         if raw_label is not None and len(str(raw_label)) > _MAX_LABEL_LEN:
-            raise HTTPException(status_code=422, detail="label too long")
+            raise http_error(422, "label_too_long")
         label = _clean_label(raw_label)
         data = await file.read()
         if len(data) > settings.max_image_bytes:
-            raise HTTPException(status_code=413, detail="file too large")
+            raise http_error(413, "file_too_large")
         declared = (file.content_type or "").split(";")[0].strip().lower()
         try:
             mime = validation.validate_image(data, declared, settings.max_image_bytes)
         except validation.ValidationError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise http_error(400, "validation_error", message=str(e))
         content_type = "image"
         plaintext = data
     else:
-        raise HTTPException(status_code=415, detail="unsupported content type")
+        raise http_error(415, "unsupported_content_type")
 
     key = crypto.generate_key()
     server_half, client_half = crypto.split_key(key)
@@ -266,7 +262,7 @@ def api_me(user: dict = Depends(verify_api_token_or_session)):
 def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
     status_row = models.get_status(sid, user["id"])
     if status_row is None:
-        raise HTTPException(status_code=404, detail="not found")
+        raise http_error(404, "not_found")
     return status_row
 
 
@@ -311,7 +307,7 @@ def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
     'canceled' (kept in the tracked list for audit). On anything else: 404.
     """
     if not models.cancel(sid, user["id"]):
-        raise HTTPException(status_code=404, detail="not found or already gone")
+        raise http_error(404, "not_found_or_gone")
     security_log.emit(
         "secret.canceled",
         user_id=user["id"], username=user["username"], secret_id=sid,

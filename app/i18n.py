@@ -1,0 +1,279 @@
+"""Locale resolution, catalog loading, and the `lazy_gettext` proxy.
+
+Precedence for the request locale:
+  1. ?lang=xx query param   (testing + shareable forced-locale links)
+  2. ephemera_lang_v1 cookie (anonymous users; set by the picker widget)
+  3. users.preferred_language (authenticated users)
+  4. Accept-Language header
+  5. DEFAULT
+
+Unknown/unsupported tags fall through silently -- locale is advisory, so a
+bad hint must never 400 a request.
+
+BCP-47 (web wire format) vs POSIX (on-disk catalog directory): web side
+speaks "pt-BR"/"zh-CN", gettext wants "pt_BR"/"zh_Hans". POSIX_MAP is the
+one place the conversion happens -- don't do it inline anywhere else.
+
+lazy_gettext resolves against a ContextVar the i18n middleware sets per
+request, so module-level constants (validator messages, schema field
+descriptions) evaluate in the right locale at str()-coerce time without
+the caller having to thread a Request through.
+"""
+from __future__ import annotations
+
+import contextvars
+import json
+from functools import lru_cache
+from pathlib import Path
+from typing import Callable, Optional
+
+from babel.support import LazyProxy, Translations
+from fastapi import Request
+
+
+SUPPORTED: tuple[str, ...] = (
+    "en",
+    "ja",
+    "pt-BR",
+    "es",
+    "zh-CN",
+    "zh-TW",
+    "fr",
+    "de",
+    "ru",
+    "ko",
+)
+DEFAULT: str = "en"
+
+# Subset of SUPPORTED that the picker advertises. Translation catalogs ship
+# empty for the non-English members until a translator fills them in, so
+# shipping the picker with all six would surface locales that resolve cleanly
+# (lang attribute, Accept-Language negotiation, cookie round-trip) but render
+# every string in English anyway -- a picker that lies about what it delivers.
+# Resolution-layer code always uses SUPPORTED; only the picker reads LAUNCHED.
+# When `ja` lands, move it from SUPPORTED-only to LAUNCHED and the picker
+# starts rendering the option without any other wiring.
+LAUNCHED: tuple[str, ...] = ("en",)
+
+# BCP-47 (web wire format) -> POSIX (on-disk catalog directory).
+POSIX_MAP: dict[str, str] = {
+    "en": "en",
+    "ja": "ja",
+    "pt-BR": "pt_BR",
+    "es": "es",
+    "zh-CN": "zh_Hans",
+    "zh-TW": "zh_Hant",
+    "fr": "fr",
+    "de": "de",
+    "ru": "ru",
+    "ko": "ko",
+}
+
+# Labels rendered inside the picker widget. Each language is named in its
+# own language (endonym) so a speaker never has to recognize their locale
+# in a language they don't read. Keep in sync with SUPPORTED above.
+LANGUAGE_LABELS: dict[str, str] = {
+    "en": "English",
+    "ja": "日本語",
+    "pt-BR": "Português (Brasil)",
+    "es": "Español",
+    "zh-CN": "简体中文",
+    "zh-TW": "繁體中文",
+    "fr": "Français",
+    "de": "Deutsch",
+    "ru": "Русский",
+    "ko": "한국어",
+}
+
+# Set by the i18n middleware per request; read by lazy_gettext at str()-coerce
+# time. Default covers direct-imports in tests, the admin CLI, and any other
+# path where no middleware runs -- lazy strings render as English instead of
+# blowing up on a missing ContextVar value.
+current_locale: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "ephemera_locale", default=DEFAULT
+)
+
+_TRANSLATIONS_DIR = Path(__file__).parent / "translations"
+_JS_CATALOG_DIR = Path(__file__).parent / "static" / "i18n"
+
+
+# ---------------------------------------------------------------------------
+# Resolution
+# ---------------------------------------------------------------------------
+
+
+def _validate(tag: Optional[str]) -> Optional[str]:
+    """Return the canonical SUPPORTED form of a candidate tag (case-
+    insensitive), or None if it isn't supported."""
+    if not tag:
+        return None
+    lowered = {s.lower(): s for s in SUPPORTED}
+    return lowered.get(tag.lower())
+
+
+def negotiate(accept_language: Optional[str]) -> str:
+    """Best-match a SUPPORTED locale from an Accept-Language header. Scans
+    entries in order (browsers emit the preferred locale first) and returns
+    the first exact-or-primary-subtag hit. No q-value weighting -- not worth
+    the complexity for a six-locale list."""
+    if not accept_language:
+        return DEFAULT
+    lowered = {s.lower(): s for s in SUPPORTED}
+    for part in accept_language.split(","):
+        tag = part.split(";", 1)[0].strip()
+        if not tag:
+            continue
+        hit = lowered.get(tag.lower())
+        if hit:
+            return hit
+        primary = tag.split("-", 1)[0].lower()
+        if primary in lowered:
+            return lowered[primary]
+    return DEFAULT
+
+
+def resolve_locale(request: Request) -> str:
+    """Full precedence walk. Called once per request by the i18n middleware;
+    handlers normally read the cached result from request.state.locale rather
+    than calling this function a second time."""
+    # Lazy imports to keep app.i18n importable from low layers without
+    # dragging in the whole dependency graph at import time.
+    from .dependencies import current_user_id
+    from .models import users as users_model
+
+    lang = _validate(request.query_params.get("lang"))
+    if lang:
+        return lang
+
+    lang = _validate(request.cookies.get("ephemera_lang_v1"))
+    if lang:
+        return lang
+
+    uid = current_user_id(request)
+    if uid is not None:
+        user = users_model.get_user_by_id(uid)
+        if user:
+            lang = _validate(user.get("preferred_language"))
+            if lang:
+                return lang
+
+    return negotiate(request.headers.get("accept-language"))
+
+
+def get_locale(request: Request) -> str:
+    """FastAPI dependency. Returns the locale the middleware stashed on
+    request.state, or resolves from scratch when the middleware hasn't run
+    (unit tests that bypass the app stack, and only those)."""
+    cached = getattr(request.state, "locale", None)
+    if cached:
+        return cached
+    return resolve_locale(request)
+
+
+# ---------------------------------------------------------------------------
+# Translation catalog
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=None)
+def _translations_for(posix: str) -> Translations:
+    """Load the gettext catalog for a POSIX locale. Cached forever -- messages
+    don't change at runtime. A missing .mo yields Babel's null Translations,
+    so untranslated msgids render as themselves instead of 500'ing."""
+    return Translations.load(
+        dirname=str(_TRANSLATIONS_DIR),
+        locales=[posix],
+        domain="messages",
+    )
+
+
+def gettext_for(locale: str) -> Callable[[str], str]:
+    """Return a gettext callable bound to an explicit locale. Pass into
+    Jinja2 template contexts as `_`, or bind locally in route handlers that
+    raise translated HTTPExceptions."""
+    posix = POSIX_MAP.get(locale, POSIX_MAP[DEFAULT])
+    return _translations_for(posix).gettext
+
+
+def _resolve_lazy(message: str) -> str:
+    return gettext_for(current_locale.get())(message)
+
+
+def lazy_gettext(message: str) -> LazyProxy:
+    """Late-binding translation wrapper for module-level constants (validator
+    messages, schema field descriptions). The returned proxy re-resolves on
+    every str()-coerce against the per-request locale in `current_locale`,
+    so a single import-time `_("foo")` still renders per-request."""
+    return LazyProxy(_resolve_lazy, message, enable_cache=False)
+
+
+@lru_cache(maxsize=None)
+def js_catalog(locale: str) -> dict:
+    """Load the JS-side JSON catalog for a locale, falling back to an empty
+    dict when the file is missing or malformed. The English catalog is the
+    source of truth for JS strings; every other locale is an overlay --
+    the i18n.js shim falls back to English for any missing key, so a stub
+    {} is a valid "not translated yet" state.
+
+    Template authors should pull this in through template_context() rather
+    than calling directly so the fallback (English) gets embedded alongside."""
+    path = _JS_CATALOG_DIR / f"{locale}.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def template_context(request: Request) -> dict:
+    """Base context dict for every Jinja2 TemplateResponse. Provides
+    `request` (required by FastAPI's Jinja2 integration), the current
+    `locale` (for the <html lang=""> attribute and conditional rendering),
+    `_` (a gettext callable bound to the request's locale so
+    `{{ _("...") }}` in templates resolves correctly), and
+    `is_authenticated` (exposed as a body data-attribute so client-side JS
+    can decide whether to hit authed-only endpoints without a probe round-
+    trip). Route handlers merge any page-specific keys on top of this.
+
+    js_catalog and js_fallback are inlined into the page <head> so the
+    shim resolves t() calls without a second fetch (skips the flash of
+    untranslated strings that an async JSON fetch would create)."""
+    # Lazy import mirrors resolve_locale() -- keeps app.i18n importable from
+    # low layers without pulling the dependencies graph at import time.
+    from .dependencies import current_user_id
+
+    locale = getattr(request.state, "locale", DEFAULT)
+    return {
+        "request": request,
+        "locale": locale,
+        "_": gettext_for(locale),
+        # `launched` drives the picker; `supported` is the resolution surface
+        # (still queryable via ?lang=, cookie, DB pref). The picker hides
+        # entirely at render time when launched has <2 members.
+        "launched": LAUNCHED,
+        "supported": SUPPORTED,
+        "language_labels": LANGUAGE_LABELS,
+        "js_catalog": js_catalog(locale),
+        "js_fallback": js_catalog(DEFAULT),
+        # Not an auth surface -- just a rendering hint for JS. The server's
+        # real auth happens at endpoint-level dependencies. A forged
+        # data-authenticated attribute gets a 401 on the next write call.
+        "is_authenticated": current_user_id(request) is not None,
+    }
+
+
+__all__ = [
+    "SUPPORTED",
+    "LAUNCHED",
+    "DEFAULT",
+    "POSIX_MAP",
+    "LANGUAGE_LABELS",
+    "current_locale",
+    "negotiate",
+    "resolve_locale",
+    "get_locale",
+    "gettext_for",
+    "lazy_gettext",
+    "template_context",
+]
