@@ -7,7 +7,7 @@ import bcrypt
 
 from .. import models
 from ..security_log import emit as audit
-from ._core import BCRYPT_ROUNDS, RECOVERY_CODE_COUNT, TOTP_DIGITS, AuthError
+from ._core import BCRYPT_ROUNDS, RECOVERY_CODE_COUNT, TOTP_DIGITS, AuthError, LockoutError
 from .lockout import check_not_locked, record_failure, record_success
 from .password import verify_password
 from .recovery_codes import consume_backup_code
@@ -54,7 +54,7 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
         raise AuthError("invalid credentials")
     try:
         check_not_locked(user)
-    except Exception:
+    except LockoutError:
         audit(
             "login.failure",
             user_id=user["id"], username=user["username"],
@@ -129,4 +129,11 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
         "login.success",
         user_id=user["id"], username=user["username"], client_ip=client_ip,
     )
+    # Strip the plaintext TOTP seed from the return so it doesn't travel any
+    # further than the verify_totp call above. The models-layer split (see
+    # `get_user_with_totp_by_username` vs `get_user_by_username`) keeps the
+    # seed out of every other read path; this last `pop` keeps it out of the
+    # one remaining symbol -- `authenticate()`'s return -- that otherwise
+    # hands the with-TOTP dict to callers who only read id/username/session.
+    user.pop("totp_secret", None)
     return user
