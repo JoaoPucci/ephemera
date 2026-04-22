@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}ephemera{% endblock %}</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+  {#
+    Language picker + i18next bundle get wired into the <head> in task #11.
+    The head block keeps the pre-paint ordering: theme.js first (FOUC dodge),
+    then language script, then the body.
+  #}
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}">dark</button>
+  {% block chrome %}{% endblock %}
+  <div class="wordmark">ephemera</div>
+  {% block body %}{% endblock %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>

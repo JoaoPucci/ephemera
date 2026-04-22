@@ -164,6 +164,21 @@ def lazy_gettext(message: str) -> LazyProxy:
     return LazyProxy(_resolve_lazy, message, enable_cache=False)
 
 
+def template_context(request: Request) -> dict:
+    """Base context dict for every Jinja2 TemplateResponse. Provides
+    `request` (required by FastAPI's Jinja2 integration), the current
+    `locale` (for the <html lang=""> attribute and conditional rendering),
+    and `_` (a gettext callable bound to the request's locale so
+    `{{ _("...") }}` in templates resolves correctly). Route handlers
+    merge any page-specific keys on top of this."""
+    locale = getattr(request.state, "locale", DEFAULT)
+    return {
+        "request": request,
+        "locale": locale,
+        "_": gettext_for(locale),
+    }
+
+
 __all__ = [
     "SUPPORTED",
     "DEFAULT",
@@ -174,4 +189,5 @@ __all__ = [
     "get_locale",
     "gettext_for",
     "lazy_gettext",
+    "template_context",
 ]
