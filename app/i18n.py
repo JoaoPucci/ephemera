@@ -43,6 +43,18 @@ POSIX_MAP: dict[str, str] = {
     "zh-TW": "zh_Hant",
 }
 
+# Labels rendered inside the picker widget. Each language is named in its
+# own language (endonym) so a speaker never has to recognize their locale
+# in a language they don't read. Keep in sync with SUPPORTED above.
+LANGUAGE_LABELS: dict[str, str] = {
+    "en": "English",
+    "ja": "日本語",
+    "pt-BR": "Português (Brasil)",
+    "es": "Español",
+    "zh-CN": "简体中文",
+    "zh-TW": "繁體中文",
+}
+
 # Set by the i18n middleware per request; read by lazy_gettext at str()-coerce
 # time. Default covers direct-imports in tests, the admin CLI, and any other
 # path where no middleware runs -- lazy strings render as English instead of
@@ -176,6 +188,8 @@ def template_context(request: Request) -> dict:
         "request": request,
         "locale": locale,
         "_": gettext_for(locale),
+        "supported": SUPPORTED,
+        "language_labels": LANGUAGE_LABELS,
     }
 
 
@@ -183,6 +197,7 @@ __all__ = [
     "SUPPORTED",
     "DEFAULT",
     "POSIX_MAP",
+    "LANGUAGE_LABELS",
     "current_locale",
     "negotiate",
     "resolve_locale",

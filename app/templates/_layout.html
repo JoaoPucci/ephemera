@@ -7,15 +7,16 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js"></script>
-  {#
-    Language picker + i18next bundle get wired into the <head> in task #11.
-    The head block keeps the pre-paint ordering: theme.js first (FOUC dodge),
-    then language script, then the body.
-  #}
+  <script src="/static/i18n.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
 <body>
   <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}">dark</button>
+  <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
+    {% for tag in supported %}
+    <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
+    {% endfor %}
+  </select>
   {% block chrome %}{% endblock %}
   <div class="wordmark">ephemera</div>
   {% block body %}{% endblock %}
