@@ -23,7 +23,10 @@ APP_DIR=/opt/ephemera
 VENV_DIR="$APP_DIR/venv"
 DB_DIR=/var/lib/ephemera
 BACKUP_DIR=/var/backups/ephemera
-MIN_FREE_KB=512000   # 500 MB free required on each of DB_DIR and BACKUP_DIR
+MIN_FREE_KB=512000           # 500 MB free required on each of DB_DIR and BACKUP_DIR
+MAX_BACKUP_AGE_SECONDS=129600  # 36h: daily cron cadence is ~24h, so >36h means
+                               # at least one run was missed -- abort the deploy
+                               # before it can compound on a broken backup posture
 HEALTHZ_URL=http://127.0.0.1:8000/healthz
 HEALTHZ_MAX_RETRIES=20
 HEALTHZ_RETRY_INTERVAL=1
@@ -52,23 +55,33 @@ for d in "$DB_DIR" "$BACKUP_DIR"; do
   fi
 done
 
-# --- 2. Pre-deploy backup ---------------------------------------------------
+# --- 2. Verify the latest daily backup -------------------------------------
+# Deploy doesn't take its own backup -- /etc/cron.daily/ephemera-backup runs
+# on the daily cadence, writes ephemera-YYYY-MM-DD.db, retains 30 days.
+# Instead of duplicating the backup logic (with its own filename scheme and
+# retention class), we assert the latest one is fresh and intact before
+# touching code. If the cron is broken and the last snapshot is >36h old, we
+# refuse to deploy -- a broken backup posture should stop the pipeline, not
+# ride along silently.
 
-echo "==> Running pre-deploy backup"
-sudo /etc/cron.daily/ephemera-backup || die "pre-deploy backup invocation failed"
-
-BACKUP_FILE="$BACKUP_DIR/ephemera-$(date +%F).db"
-if [[ ! -s "$BACKUP_FILE" ]]; then
-  die "backup file $BACKUP_FILE missing or empty"
+echo "==> Verifying latest daily backup"
+LATEST_BACKUP=$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'ephemera-*.db' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n1 | cut -d' ' -f2-)
+if [[ -z "$LATEST_BACKUP" ]]; then
+  die "no ephemera-*.db backup found in $BACKUP_DIR (is /etc/cron.daily/ephemera-backup installed?)"
 fi
-backup_size=$(stat -c '%s' "$BACKUP_FILE")
+backup_mtime=$(stat -c '%Y' "$LATEST_BACKUP")
+backup_age_seconds=$(( $(date +%s) - backup_mtime ))
+if (( backup_age_seconds > MAX_BACKUP_AGE_SECONDS )); then
+  die "latest backup $LATEST_BACKUP is $((backup_age_seconds / 3600))h old (>$((MAX_BACKUP_AGE_SECONDS / 3600))h); daily cron may be broken"
+fi
+backup_size=$(stat -c '%s' "$LATEST_BACKUP")
 if (( backup_size < 8192 )); then
-  die "backup file $BACKUP_FILE is suspiciously small (${backup_size} bytes < 8192)"
+  die "latest backup $LATEST_BACKUP is suspiciously small (${backup_size} bytes < 8192)"
 fi
-if [[ "$(sqlite3 "$BACKUP_FILE" 'pragma integrity_check;')" != "ok" ]]; then
-  die "backup file $BACKUP_FILE failed pragma integrity_check"
+if [[ "$(sqlite3 "$LATEST_BACKUP" 'pragma integrity_check;')" != "ok" ]]; then
+  die "latest backup $LATEST_BACKUP failed pragma integrity_check"
 fi
-echo "==> Backup OK: $BACKUP_FILE (${backup_size} bytes)"
+echo "==> Backup OK: $LATEST_BACKUP (${backup_size} bytes, $((backup_age_seconds / 3600))h old)"
 
 # --- 3. Git sync ------------------------------------------------------------
 

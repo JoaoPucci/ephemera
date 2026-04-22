@@ -283,9 +283,14 @@ is done, `git push origin vX.Y.Z` from the operator laptop (the `scripts/
 release.sh` invocation) is enough to ship — the workflow at
 `.github/workflows/deploy.yml` fires on any semver tag landing on
 `origin`, joins the server's Tailscale tailnet, SSHes in as a dedicated
-`deploy` user, runs a pre-deploy SQLite backup, checks it out, `pip
-install --require-hashes`es, restarts the service, and polls `/healthz`
-for up to 20 seconds before declaring success.
+`deploy` user, verifies that the latest daily SQLite backup is fresh
+(≤36h old) and passes `PRAGMA integrity_check`, checks out the tag,
+`pip install --require-hashes`es, restarts the service, and polls
+`/healthz` for up to 20 seconds before declaring success. If the latest
+backup is older than 36h or fails integrity, the deploy aborts before
+touching code — a broken backup posture should stop the pipeline, not
+ride along silently. The daily backup cron itself is left untouched;
+the deploy reads what's there rather than writing a new file.
 
 The server-side sequence lives at `scripts/deploy/deploy.sh` (version-
 controlled, readable by anyone). The trust boundary between SSH input
@@ -345,7 +350,7 @@ Run as root on the server.
 
    ```
    deploy ALL=(ephemera) NOPASSWD: /opt/ephemera/scripts/deploy/deploy.sh
-   deploy ALL=(root) NOPASSWD: /bin/systemctl restart ephemera, /bin/systemctl is-active ephemera, /etc/cron.daily/ephemera-backup
+   deploy ALL=(root) NOPASSWD: /bin/systemctl restart ephemera, /bin/systemctl is-active ephemera
    ```
 
    Exact forms, no wildcards — a trailing `...` would let a future
