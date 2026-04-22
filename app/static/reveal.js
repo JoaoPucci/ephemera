@@ -66,7 +66,7 @@ async function reveal() {
   const fragment = (window.location.hash || '').replace(/^#/, '');
   if (!fragment) {
     revealBtn.disabled = false;
-    errBox.textContent = 'This link is missing its decryption key.';
+    errBox.textContent = window.i18n.t('error.missing_key');
     errBox.hidden = false;
     return;
   }
@@ -74,7 +74,7 @@ async function reveal() {
   if (!passphraseWrap.hidden) body.passphrase = passphraseInput.value;
   // Visible "we're working on it" state -- without this, a slow network
   // looks identical to a dead click and a nervous user taps again.
-  revealBtn.textContent = 'Revealing…';
+  revealBtn.textContent = window.i18n.t('button.revealing');
 
   const restoreButton = () => {
     revealBtn.disabled = false;
@@ -90,28 +90,28 @@ async function reveal() {
     });
   } catch {
     restoreButton();
-    errBox.textContent = 'Network error. Try again.';
+    errBox.textContent = window.i18n.t('error.network');
     errBox.hidden = false;
     return;
   }
 
   if (res.status === 401) {
     restoreButton();
-    errBox.textContent = 'Wrong passphrase.';
+    errBox.textContent = window.i18n.t('error.wrong_passphrase');
     errBox.hidden = false;
     return;
   }
   if (res.status === 410) return show('gone');
   if (res.status === 429) {
     restoreButton();
-    errBox.textContent = 'Too many requests. Please wait a moment.';
+    errBox.textContent = window.i18n.t('error.too_many_attempts');
     errBox.hidden = false;
     return;
   }
   if (res.status === 404) return show('gone');
   if (!res.ok) {
     restoreButton();
-    errBox.textContent = 'Failed to reveal secret.';
+    errBox.textContent = window.i18n.t('error.reveal_failed');
     errBox.hidden = false;
     return;
   }

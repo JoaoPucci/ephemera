@@ -25,7 +25,7 @@ export async function copyWithFeedback(button, text) {
     ok = false;
   }
   button.classList.add(ok ? 'copied' : 'copy-error');
-  button.textContent = ok ? 'Copied' : 'Copy failed';
+  button.textContent = ok ? window.i18n.t('button.copied') : window.i18n.t('button.copy_failed');
   button.setAttribute('aria-live', 'polite');
   setTimeout(() => {
     button.textContent = original;

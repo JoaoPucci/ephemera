@@ -98,7 +98,7 @@ async function copyRowUrl(li, timeEl, originalTimeText, url) {
     ok = false;
   }
   li.classList.add(ok ? 'flash-copy' : 'flash-error');
-  timeEl.textContent = ok ? 'copied to clipboard' : 'copy failed';
+  timeEl.textContent = ok ? window.i18n.t('tracked.copy_ok') : window.i18n.t('tracked.copy_fail');
   li.setAttribute('aria-live', 'polite');
   setTimeout(() => {
     li.classList.remove('flash-copy', 'flash-error');
@@ -136,7 +136,9 @@ export async function renderTrackedList() {
     li.dataset.id = item.id;
     li.dataset.status = item.status;
 
-    const fallback = item.content_type === 'image' ? 'Image secret' : 'Text secret';
+    const fallback = item.content_type === 'image'
+      ? window.i18n.t('tracked.image_secret')
+      : window.i18n.t('tracked.text_secret');
     const labelText = (item.label && item.label.trim()) ? item.label : fallback;
 
     const labelEl = document.createElement('span');
@@ -178,13 +180,13 @@ export async function renderTrackedList() {
 
     const pill = document.createElement('span');
     pill.className = 'status-pill ' + item.status;
-    pill.textContent = item.status;
+    pill.textContent = window.i18n.t('status.' + item.status);
 
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'tracked-remove';
-    rm.setAttribute('aria-label', 'remove from list');
-    rm.title = 'remove';
+    rm.setAttribute('aria-label', window.i18n.t('tracked.aria_remove'));
+    rm.title = window.i18n.t('tracked.aria_remove');
     rm.textContent = '×';
 
     const right = document.createElement('div');
@@ -197,24 +199,24 @@ export async function renderTrackedList() {
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.className = 'tracked-cancel';
-      cancelBtn.textContent = 'cancel';
-      cancelBtn.title = 'Revoke the URL so the receiver can no longer view this';
-      cancelBtn.setAttribute('aria-label', 'cancel this secret');
+      cancelBtn.textContent = window.i18n.t('button.cancel');
+      cancelBtn.title = window.i18n.t('tracked.tooltip_cancel');
+      cancelBtn.setAttribute('aria-label', window.i18n.t('tracked.aria_cancel'));
       let armTimer = null;
       cancelBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!cancelBtn.classList.contains('armed')) {
           cancelBtn.classList.add('armed');
-          cancelBtn.textContent = 'confirm?';
+          cancelBtn.textContent = window.i18n.t('button.confirm');
           armTimer = setTimeout(() => {
             cancelBtn.classList.remove('armed');
-            cancelBtn.textContent = 'cancel';
+            cancelBtn.textContent = window.i18n.t('button.cancel');
           }, 3000);
           return;
         }
         if (armTimer) clearTimeout(armTimer);
         cancelBtn.disabled = true;
-        cancelBtn.textContent = 'canceling…';
+        cancelBtn.textContent = window.i18n.t('button.canceling');
         await cancelOnServer(item.id);
         forgetUrl(item.id);
         renderTrackedList();
@@ -234,7 +236,7 @@ export async function renderTrackedList() {
       li.classList.add('copyable');
       li.setAttribute('role', 'button');
       li.setAttribute('tabindex', '0');
-      li.title = 'Click to copy link';
+      li.title = window.i18n.t('tracked.tooltip_copy');
       const activate = async (e) => {
         // Ignore clicks that originated on row-level action buttons.
         if (e.target && e.target.closest('.tracked-remove, .tracked-cancel')) return;
@@ -250,12 +252,10 @@ export async function renderTrackedList() {
       // reconstruct it server-side because the key fragment never leaves the
       // creating browser. Make the row clearly "informational, not actionable".
       li.classList.add('orphan');
-      li.title =
-        'The URL includes an encryption key stored only in the browser where this ' +
-        'secret was created. Open ephemera in that browser to copy the link.';
+      li.title = window.i18n.t('tracked.tooltip_orphan');
       const hint = document.createElement('span');
       hint.className = 'orphan-hint';
-      hint.textContent = 'created elsewhere';
+      hint.textContent = window.i18n.t('tracked.orphan_hint');
       meta.appendChild(hint);
     }
 
@@ -276,8 +276,11 @@ export async function renderTrackedList() {
   if (clearBtn) {
     clearBtn.hidden = nonPending === 0;
     if (clearLbl && nonPending > 0) {
-      const word = nonPending === 1 ? 'entry' : 'entries';
-      clearLbl.textContent = `Clear ${nonPending} past ${word}`;
+      // Simple 1/other pick -- we deliberately skip ICU/ngettext for this
+      // branch per plan section 11; it's the one pluralized string in the
+      // app and it works for all six target locales.
+      const key = nonPending === 1 ? 'button.clear_past_one' : 'button.clear_past_other';
+      clearLbl.textContent = window.i18n.t(key, { n: nonPending });
     }
   }
 
@@ -298,13 +301,15 @@ export async function renderTrackedList() {
   let armTimer = null;
   // Remember the last "idle" label so we can restore it (it carries the
   // current count, set by renderTrackedList, and may differ between calls).
-  function idleLabel() { return clearBtn.dataset.idleLabel || 'Clear past entries'; }
+  function idleLabel() {
+    return clearBtn.dataset.idleLabel || window.i18n.t('button.clear_past_other', { n: 0 });
+  }
   clearBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!clearBtn.classList.contains('armed')) {
       clearBtn.dataset.idleLabel = clearLbl.textContent;
       clearBtn.classList.add('armed');
-      clearLbl.textContent = 'confirm?';
+      clearLbl.textContent = window.i18n.t('button.confirm');
       armTimer = setTimeout(() => {
         clearBtn.classList.remove('armed');
         clearLbl.textContent = idleLabel();
@@ -313,7 +318,7 @@ export async function renderTrackedList() {
     }
     if (armTimer) clearTimeout(armTimer);
     clearBtn.disabled = true;
-    clearLbl.textContent = 'clearing…';
+    clearLbl.textContent = window.i18n.t('button.clearing');
     try {
       await fetch('/api/secrets/tracked/clear', { method: 'POST' });
     } catch {}
