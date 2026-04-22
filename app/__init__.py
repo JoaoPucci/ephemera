@@ -12,7 +12,7 @@ from .config import get_settings
 from . import cleanup, models
 from .dependencies import verify_api_token_or_session
 from .i18n import current_locale, resolve_locale
-from .routes import receiver, sender
+from .routes import prefs, receiver, sender
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -162,6 +162,7 @@ def create_app() -> FastAPI:
 
     app.include_router(sender.router)
     app.include_router(receiver.router)
+    app.include_router(prefs.router)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
