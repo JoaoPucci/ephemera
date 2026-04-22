@@ -122,6 +122,20 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def ping() -> None:
+    """Touch the DB with a no-op query. Raises on open / read failure.
+
+    Surfaces DB-reachability regressions (disk full, perms flipped, WAL
+    unwritable, file unlinked) that would otherwise stay invisible until
+    the first real request. No rows read, no schema assumed.
+    """
+    conn = _connect()
+    try:
+        conn.execute("SELECT 1").fetchone()
+    finally:
+        conn.close()
+
+
 def _cols(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 

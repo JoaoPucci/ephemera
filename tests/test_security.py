@@ -21,6 +21,57 @@ def test_security_headers_present_on_html_response(client):
 
 
 # ---------------------------------------------------------------------------
+# /healthz probe
+#
+# Unauthenticated liveness + readiness check for the auto-deploy workflow's
+# post-restart gate. Must be reachable without creds (the Actions runner has
+# none), must touch the DB (FastAPI alone returning 200 is not enough -- a
+# broken DB or missing env var must surface as 503), and must stay invisible
+# to the OpenAPI schema so unauth probes don't see it advertised.
+# ---------------------------------------------------------------------------
+
+
+def test_healthz_returns_200_with_ok_true_when_db_reachable(client):
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"ok": True}
+
+
+def test_healthz_returns_503_when_db_unreachable(client, monkeypatch):
+    """Simulate DB open/read failure; must surface as 503, not 200.
+
+    The point of /healthz over the prior `/send` smoke test is that /send
+    renders its login page without touching secrets-tables on the happy
+    path, so a broken DB returns 200. /healthz explicitly pokes the DB via
+    models.ping(); when that raises, the response must be 503 so the
+    Actions workflow's post-restart gate fails loudly.
+    """
+    import sqlite3
+
+    from app import models
+
+    def _raise(*_a, **_kw):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(models, "ping", _raise)
+    r = client.get("/healthz")
+    assert r.status_code == 503
+    body = r.json()
+    assert body["ok"] is False
+    assert body["reason"] == "db_unreachable"
+
+
+def test_healthz_is_not_advertised_in_openapi_schema(client, auth_headers):
+    """Same posture as /docs and /openapi.json -- do not leak the endpoint
+    via the schema. Ops can curl it directly; probes get nothing from a
+    schema read."""
+    r = client.get("/openapi.json", headers=auth_headers)
+    assert r.status_code == 200
+    assert "/healthz" not in r.json()["paths"]
+
+
+# ---------------------------------------------------------------------------
 # Auth-gated API docs (/docs + /openapi.json)
 #
 # Unauthenticated callers must not be able to pull the wire contract (route

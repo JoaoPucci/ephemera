@@ -114,6 +114,31 @@ def create_app() -> FastAPI:
     # /openapi.json endpoint returns the same schema FastAPI would have
     # served by default, just wrapped in an auth check.
 
+    # ---- Health probe -----------------------------------------------------
+    # Unauthenticated, rate-limit-exempt liveness + readiness check. Touches
+    # the DB with a no-op query and confirms the secret key is loaded. The
+    # auto-deploy workflow polls this after `systemctl restart` to catch
+    # regressions that would return 200 on /send while the app is actually
+    # broken (DB unreachable, missing env, WAL permission flip). Returns
+    # {"ok": true} 200 on success, {"ok": false, "reason": ...} 503 on any
+    # failure. Excluded from the OpenAPI schema to match the audit posture
+    # of /docs and /openapi.json (no unauth-visible surface advertisement).
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():
+        settings = get_settings()
+        if not settings.secret_key:
+            return JSONResponse(
+                {"ok": False, "reason": "missing_secret_key"}, status_code=503
+            )
+        try:
+            models.ping()
+        except Exception:
+            return JSONResponse(
+                {"ok": False, "reason": "db_unreachable"}, status_code=503
+            )
+        return JSONResponse({"ok": True}, status_code=200)
+
     @app.get("/openapi.json", include_in_schema=False)
     def openapi_json(_user=Depends(verify_api_token_or_session)):
         return JSONResponse(
