@@ -275,84 +275,6 @@ the env, and make sure every user has at least one unused recovery code
 on hand first (`python -m app.admin regen-recovery-codes` will mint a
 fresh set).
 
-## Translations
-
-Ephemera ships six UI locales: **en, ja, pt-BR, es, zh-CN, zh-TW**. `en`
-is the source of truth; every string starts life in English and is
-translated from there. Two parallel catalogs, one workflow:
-
-| Layer | Format | On-disk path | Edited by |
-|---|---|---|---|
-| Python + Jinja2 templates | gettext `.po` → `.mo` | `app/translations/<POSIX>/LC_MESSAGES/messages.{po,mo}` | Translator (`.po`); toolchain produces `.mo` |
-| JS-rendered strings | hand-authored JSON | `app/static/i18n/<BCP47>.json` | Translator |
-
-BCP-47 (wire format, `pt-BR`/`zh-CN`) vs POSIX (filesystem, `pt_BR`/
-`zh_Hans`): the two conventions are reconciled in `POSIX_MAP` inside
-`app/i18n.py`. Don't inline the conversion anywhere else -- one place
-to change means one place to break.
-
-**Locale resolution precedence (high → low):**
-1. `?lang=xx` query parameter (for testing + forced-locale share links)
-2. `ephemera_lang_v1` cookie (set by the picker widget)
-3. `users.preferred_language` column (authed users; persisted via
-   `PATCH /api/me/language`)
-4. `Accept-Language` header
-5. Default (`en`)
-
-Unknown tags fall through silently. Locale is advisory, so a bad hint
-never 400s a request.
-
-### Refreshing catalogs after a string change
-
-After editing any `_("...")` call in a `.py` or `.html` template:
-
-```bash
-./scripts/i18n.sh extract    # rescan sources -> app/translations/messages.pot
-./scripts/i18n.sh update     # merge POT into every locale's .po
-# translate the empty msgstr entries in app/translations/<locale>/LC_MESSAGES/messages.po
-./scripts/i18n.sh compile    # .po -> binary .mo
-```
-
-Commit the `.po`, `.mo`, and POT template together. Compiled `.mo`
-files ship in the repo so the single-binary deploy has no build step --
-a release tag contains everything the runtime needs.
-
-Strings rendered by JavaScript live in `app/static/i18n/<locale>.json`
-and are hand-authored against the keys in `en.json`. No extraction
-tool; the shim in `app/static/i18n.js` looks up dotted keys like
-`error.wrong_passphrase` against the active catalog and falls through
-to English for any miss.
-
-### Adding a new locale
-
-1. Add the BCP-47 tag to `SUPPORTED`, the POSIX code to `POSIX_MAP`, and
-   an endonym label to `LANGUAGE_LABELS` in `app/i18n.py`.
-2. Bootstrap the gettext catalog:
-   ```bash
-   ./scripts/i18n.sh init <POSIX>      # e.g. fr, pt_PT
-   ```
-3. Create an empty JSON stub:
-   ```bash
-   echo '{}' > app/static/i18n/<BCP47>.json
-   ```
-4. Translate the `.po` msgstr entries, populate the JSON, compile the
-   `.mo`, commit.
-
-Partial translations are safe to ship. Any un-translated msgid renders
-its English source verbatim (gettext's null-catalog fallthrough); any
-missing JSON key resolves through the English fallback catalog the
-template inlines into every page.
-
-### Deploy impact
-
-None beyond a regular release. The `.mo` files and JSON catalogs are
-tracked repo contents, picked up by the normal tag-pinned deploy flow.
-If a `.mo` is ever missing on disk, the runtime silently falls back to
-English rather than 500'ing -- visible to users in that locale but not
-service-breaking.
-
----
-
 ## Operator runbook (per-instance)
 
 Operators typically keep a private `DEPLOYMENT.md` at the repo root,
@@ -373,3 +295,165 @@ monitoring hooks, etc.). Recommended sections to include in such a runbook:
 
 Kept locally and never pushed, so instance specifics stay off a public
 repo.
+
+---
+
+## Translations
+
+Ephemera's i18n stack is in place; the launched-locales list grows as
+translators onboard. Today: **en**. Resolution machinery recognizes the
+full `SUPPORTED` set (**en, ja, pt-BR, es, zh-CN, zh-TW**) so an
+authenticated user's preference or a forced-locale share link (see
+§Locale resolution below) can address any of them, but the picker
+widget only renders tags listed in `LAUNCHED` — a locale with an empty
+catalog would resolve cleanly and then render 100% English, which is
+worse UX than not offering it.
+
+`en` is the source of truth; every string starts life in English and
+is translated from there. Two parallel catalogs, one workflow:
+
+| Layer | Format | On-disk path | Edited by |
+|---|---|---|---|
+| Python + Jinja2 templates | gettext `.po` → `.mo` | `app/translations/<POSIX>/LC_MESSAGES/messages.{po,mo}` | Translator (`.po`); toolchain produces `.mo` |
+| JS-rendered strings | hand-authored JSON | `app/static/i18n/<BCP47>.json` | Translator |
+
+BCP-47 (wire format, `pt-BR`/`zh-CN`) vs POSIX (filesystem, `pt_BR`/
+`zh_Hans`): the two conventions are reconciled in `POSIX_MAP` inside
+`app/i18n.py`. Don't inline the conversion anywhere else — one place
+to change means one place to break.
+
+### Locale resolution
+
+Precedence (high → low), first match wins:
+
+1. `?lang=xx` query parameter (shareable forced-locale links; also used
+   by tests). Public feature, stateless — does not write the cookie.
+2. `ephemera_lang_v1` cookie (set by the picker widget).
+3. `users.preferred_language` column (authenticated users; persisted
+   via `PATCH /api/me/language`).
+4. `Accept-Language` header.
+5. `en` (default).
+
+The cookie beating the DB preference is deliberate: when the picker
+fires, it writes the cookie first and PATCHes the DB asynchronously.
+If the PATCH fails (network blip, server rejects), the cookie wins so
+the user still sees the locale they just picked. Normal operation
+keeps cookie and DB in sync; the cookie-wins layer only matters when
+they've diverged.
+
+Unknown tags fall through silently. Locale is advisory, so a bad hint
+never 400s a request.
+
+### Error-response shape (API contract)
+
+HTTP error responses across the app now use a structured `detail`
+object rather than a bare string. The old shape (pre-i18n) returned:
+
+```json
+{ "detail": "invalid credentials" }
+```
+
+The new shape returns:
+
+```json
+{ "detail": { "code": "invalid_credentials", "message": "Invalid credentials." } }
+```
+
+`code` is a stable snake_case identifier that never changes; `message`
+is the English fallback for curl / unauthenticated CLI / API clients
+that don't resolve the code against a localized catalog. Extra
+context fields (e.g. `until=<iso-timestamp>` on lockout responses)
+merge into the object alongside `code` and `message`.
+
+**Breaking change for API consumers** that matched on `detail` as a
+string: switch to `response.json()["detail"]["code"]` for stable
+programmatic matching, or read `["detail"]["message"]` for the human
+text. The code vocabulary lives in `app/errors.py`; every code there
+is a public contract.
+
+### Refreshing catalogs after a string change
+
+After editing any `_("...")` call in a `.py` or `.html` template:
+
+```bash
+./scripts/i18n.sh extract    # rescan sources -> app/translations/messages.pot
+./scripts/i18n.sh update     # merge POT into every locale's .po
+# translate empty msgstr entries in app/translations/<locale>/LC_MESSAGES/messages.po
+./scripts/i18n.sh compile    # .po -> binary .mo
+```
+
+Commit the `.po`, `.mo`, and POT template together. Compiled `.mo`
+files ship in the repo so the single-binary deploy has no build step —
+a release tag contains everything the runtime needs.
+
+Strings rendered by JavaScript live in `app/static/i18n/<locale>.json`
+and are hand-authored against the keys in `en.json`. No extraction
+tool; the shim in `app/static/i18n.js` looks up dotted keys like
+`error.wrong_passphrase` against the active catalog and falls through
+to English for any miss. The `test_every_js_i18n_key_exists_in_en_catalog`
+test (in `tests/test_i18n.py`) asserts every `i18n.t('...')` call site
+in the JS resolves to a real key in `en.json` — so "added a
+translation call, forgot to add the key" fails CI instead of rendering
+the key as a literal sentinel to users.
+
+### Plural forms (per-locale CLDR categories)
+
+The JS shim resolves plurals via `Intl.PluralRules(locale).select(n)`,
+which returns a CLDR category from `{zero, one, two, few, many, other}`.
+English uses `one` + `other`. Russian uses `one` + `few` + `many` +
+`other`. Arabic uses all six.
+
+Translators for new locales must include every category their language
+uses in the JSON catalog, not just English's two. Example:
+
+```json
+"button.clear_past": {
+  "one":   "...",
+  "few":   "...",   // Russian, Polish, etc.
+  "many":  "...",   // same
+  "other": "..."    // always required -- CLDR's fallback category
+}
+```
+
+If a category is missing, the shim falls back to the English
+catalog's version — which uses English's plural rules, not the target
+language's, and will render wrong.
+
+### Adding a new locale
+
+1. Add the BCP-47 tag to `SUPPORTED`, the POSIX code to `POSIX_MAP`,
+   and an endonym label to `LANGUAGE_LABELS` in `app/i18n.py`. Do NOT
+   add it to `LAUNCHED` yet — the picker should not advertise a locale
+   whose catalog is empty.
+2. Bootstrap the gettext catalog:
+   ```bash
+   ./scripts/i18n.sh init <POSIX>      # e.g. fr, pt_PT
+   ```
+3. Create an empty JSON stub:
+   ```bash
+   echo '{}' > app/static/i18n/<BCP47>.json
+   ```
+4. Translate the `.po` msgstr entries. Populate the JSON, including
+   every CLDR plural category the locale uses (see above).
+5. Compile the `.mo`. Run the suite — the key-coverage test catches
+   any JS `i18n.t()` call sites you missed in the JSON.
+6. **Only when the catalog is complete**, add the tag to `LAUNCHED` in
+   `app/i18n.py`. Once at least two locales are in `LAUNCHED`, the
+   picker widget starts rendering for every visitor.
+
+Partial translations are safe to *ship*, they're just hidden from the
+picker. Any un-translated msgid renders its English source verbatim
+(gettext's null-catalog fallthrough); any missing JSON key resolves
+through the English fallback catalog the template inlines into every
+page.
+
+### Deploy impact
+
+None beyond a regular release. The `.mo` files and JSON catalogs are
+tracked repo contents, picked up by the normal tag-pinned deploy flow.
+If a `.mo` is ever missing on disk, the runtime silently falls back to
+English rather than 500'ing — visible to users in that locale but not
+service-breaking. Adding Babel and Jinja2 as runtime dependencies
+means the hash-pinned `requirements.txt` grew; operators deploying
+over the v0.6.x line will see the `pip install --require-hashes` step
+fetch the new wheels on the next deploy.

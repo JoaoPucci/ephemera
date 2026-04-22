@@ -15,14 +15,16 @@
   <script src="/static/i18n.js"></script>
   {% block head_extra %}{% endblock %}
 </head>
-<body>
+<body{% if is_authenticated %} data-authenticated="true"{% endif %}>
   <div class="top-chrome top-chrome-right">
+    {% if launched|length > 1 %}
     <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
-      {% for tag in supported %}
+      {% for tag in launched %}
       <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
       {% endfor %}
     </select>
-    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}">dark</button>
+    {% endif %}
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}"></button>
   </div>
   {% block chrome %}{% endblock %}
   <div class="wordmark">ephemera</div>

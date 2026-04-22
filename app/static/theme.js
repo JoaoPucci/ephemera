@@ -21,8 +21,9 @@
   function setAndPersist(theme) {
     localStorage.setItem(KEY, theme);
     apply(theme);
-    const btn = document.getElementById('theme-toggle');
-    if (btn) btn.textContent = theme === 'dark' ? 'light' : 'dark';
+    // Button text stays empty; the ::before glyph flips via [data-theme]
+    // selectors in style.css. Visible affordance stays language-neutral so a
+    // Japanese or Portuguese visitor doesn't see a stray English word.
   }
 
   // Run immediately so the page never flashes in the wrong theme.
@@ -39,7 +40,6 @@
   function wire() {
     const btn = document.getElementById('theme-toggle');
     if (!btn) return;
-    btn.textContent = current() === 'dark' ? 'light' : 'dark';
     btn.addEventListener('click', () => {
       const next = current() === 'dark' ? 'light' : 'dark';
       setAndPersist(next);

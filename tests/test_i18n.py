@@ -1,9 +1,14 @@
 """Tests for the i18n system: locale resolution, migration, prefs endpoint,
 error shape, and the JS catalog inlining."""
+import json
+import re
+from pathlib import Path
+
 from app.errors import ERROR_MESSAGES, http_error
 from app.i18n import (
     DEFAULT,
     LANGUAGE_LABELS,
+    LAUNCHED,
     POSIX_MAP,
     SUPPORTED,
     _validate,
@@ -34,6 +39,20 @@ def test_supported_and_labels_cover_the_same_set():
 
 def test_default_is_in_supported():
     assert DEFAULT in SUPPORTED
+
+
+def test_launched_is_subset_of_supported():
+    """LAUNCHED is the picker-visible subset -- every member must also be
+    in SUPPORTED (so it resolves via Accept-Language / cookie / DB pref)."""
+    for tag in LAUNCHED:
+        assert tag in SUPPORTED, f"LAUNCHED tag not in SUPPORTED: {tag}"
+
+
+def test_launched_contains_default():
+    """Whatever set of locales is currently launched, the default (English)
+    must be among them -- otherwise the picker could render only tags the
+    app can't actually localize into."""
+    assert DEFAULT in LAUNCHED
 
 
 # ---------------------------------------------------------------------------
@@ -288,13 +307,30 @@ def test_v1_legacy_db_upgrades_to_v2(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_patch_language_anonymous_is_noop_204(client):
+def test_patch_language_anonymous_rejected_401(client):
+    """Anonymous callers get 401 with the `not_authenticated` code. The
+    picker JS short-circuits on anonymous before this fires, so in normal
+    operation this path is only hit by forged / misconfigured clients."""
     r = client.patch(
         "/api/me/language",
         json={"language": "ja"},
         headers=ORIGIN,
     )
-    assert r.status_code == 204
+    assert r.status_code == 401
+    assert r.json()["detail"]["code"] == "not_authenticated"
+
+
+def test_patch_language_anonymous_does_not_leak_language_validation(client):
+    """Even with a body the authed-flow would reject at 400 (unsupported
+    language), the anonymous caller must still see 401 first. Otherwise
+    the endpoint would leak whether a tag is in SUPPORTED to anyone
+    probing -- a minor but real fingerprint surface."""
+    r = client.patch(
+        "/api/me/language",
+        json={"language": "xx-NOT-REAL"},
+        headers=ORIGIN,
+    )
+    assert r.status_code == 401
 
 
 def test_patch_language_null_clears(authed_client, provisioned_user):
@@ -324,8 +360,10 @@ def test_patch_language_authed_persists(authed_client, provisioned_user):
     assert user["preferred_language"] == "zh-CN"
 
 
-def test_patch_language_unsupported_rejected(client):
-    r = client.patch(
+def test_patch_language_unsupported_rejected(authed_client):
+    """Body validation (400) only reached after auth passes -- anonymous
+    callers get 401 first, see the auth-leak test above."""
+    r = authed_client.patch(
         "/api/me/language",
         json={"language": "xx"},
         headers=ORIGIN,
@@ -393,10 +431,129 @@ def test_page_inlines_active_and_fallback_catalogs(client):
     assert "Wrong passphrase" in body
 
 
-def test_picker_widget_marks_active_option_selected(client):
+def test_picker_hidden_when_only_one_locale_launched(client):
+    """Current state: LAUNCHED=('en',). The picker renders only when
+    there's a real choice to offer -- a single-option <select> is a UX
+    wart. Resolution still works for SUPPORTED tags (cookies, ?lang=) so
+    this test also asserts the resolution surface is untouched."""
+    assert LAUNCHED == ("en",), (
+        "test pins the ship-state; if LAUNCHED grew, update this test "
+        "to the new gate (picker appears once len >= 2)"
+    )
+    r = client.get("/send")
+    assert '<select id="lang-picker"' not in r.text
+    # Resolution surface still accepts SUPPORTED tags even though the picker
+    # is hidden -- query-param and cookie paths remain reachable.
+    r2 = client.get("/send?lang=pt-BR")
+    assert 'lang="pt-BR"' in r2.text
+
+
+def test_picker_renders_when_multiple_locales_launched(client, monkeypatch):
+    """Tomorrow's state: once a second locale ships, the picker must
+    render with the active option marked selected. Monkeypatches LAUNCHED
+    so the rendering path is exercised now, before the second locale
+    actually lands."""
+    import app.i18n as i18n_mod
+
+    monkeypatch.setattr(i18n_mod, "LAUNCHED", ("en", "pt-BR"))
     r = client.get("/send?lang=pt-BR")
     body = r.text
+    assert '<select id="lang-picker"' in body
     assert 'value="pt-BR" selected' in body
-    # Other options render without `selected`.
-    assert 'value="en" selected' not in body
-    assert 'value="ja" selected' not in body
+    assert 'value="en"' in body
+    # Un-launched tags do NOT appear as options even though they resolve.
+    assert 'value="ja"' not in body
+
+
+def test_body_data_authenticated_present_for_authed(authed_client):
+    r = authed_client.get("/send")
+    assert 'data-authenticated="true"' in r.text
+
+
+def test_body_data_authenticated_absent_for_anonymous(client):
+    """Anonymous page loads must not carry the data-authenticated
+    attribute -- the picker JS branches on it to decide whether to PATCH
+    /api/me/language, so a stray attribute would cost every anonymous
+    language change a wasted 401 round-trip."""
+    r = client.get("/send")
+    assert 'data-authenticated' not in r.text
+
+
+# ---------------------------------------------------------------------------
+# JS key-coverage regression
+#
+# Every `i18n.t('some.key')` reference in the JS sources must resolve to
+# a real key in app/static/i18n/en.json. The shim already falls through to
+# the key name as a visible sentinel on a miss, but seeing "button.retry"
+# render literally in the UI is a regression that should fail CI, not the
+# user's first visit. This test is the tripwire.
+# ---------------------------------------------------------------------------
+
+
+_JS_T_CALL_RE = re.compile(r"""i18n\.t\(\s*['"]([a-z][a-z0-9_.]*)['"]""")
+
+
+def _enumerate_string_paths(tree, prefix=""):
+    """Yield every dotted path that leads to a string leaf in the
+    catalog. Plural containers (dicts of 'one'/'other'/...) yield the
+    container path itself in addition to each leaf inside -- both forms
+    are valid lookup targets from JS."""
+    if isinstance(tree, dict):
+        if any(isinstance(v, str) for v in tree.values()):
+            yield prefix
+        for name, child in tree.items():
+            child_prefix = f"{prefix}.{name}" if prefix else name
+            yield from _enumerate_string_paths(child, child_prefix)
+    elif isinstance(tree, str):
+        yield prefix
+
+
+def test_every_js_i18n_key_exists_in_en_catalog():
+    """Scan every .js file under app/static/ for i18n.t('...') calls;
+    assert each referenced stem is reachable in the English catalog. A
+    miss means someone added a translation call without adding the key
+    and the UI would render the literal sentinel (e.g. "button.retry")
+    to every English user.
+
+    Three valid shapes for a captured stem:
+      - Exact leaf:          t('error.network')       -> error.network
+      - Plural container:    t('button.clear_past')   -> button.clear_past
+      - Concatenation stem:  t('status.' + foo)       -> regex captures
+                             'status.'; valid when any catalog path
+                             starts with it.
+    Fully-dynamic keys (no literal first-arg) don't match the regex at
+    all -- they have no statically-checkable contract and are skipped."""
+    en_catalog = js_catalog("en")
+    assert en_catalog, "en.json must not be empty"
+
+    js_root = Path(__file__).resolve().parent.parent / "app" / "static"
+    js_files = [p for p in js_root.rglob("*.js") if "swagger" not in p.parts]
+    assert js_files, "no JS files found -- test setup is wrong"
+
+    referenced: set[str] = set()
+    for path in js_files:
+        for match in _JS_T_CALL_RE.finditer(path.read_text(encoding="utf-8")):
+            referenced.add(match.group(1))
+
+    assert referenced, (
+        "regex found no i18n.t() calls -- either the regex drifted or JS "
+        "stopped using the shim; both worth a second look"
+    )
+
+    catalog_paths = set(_enumerate_string_paths(en_catalog))
+
+    missing: list[str] = []
+    for key in sorted(referenced):
+        if key in catalog_paths:
+            continue
+        # Concatenation stem: accept if any catalog path starts with it.
+        # Captures both ending-in-`.` (e.g. `status.`) and ending-in-`_`
+        # (e.g. `tracked.time_`) variants uniformly.
+        if any(p.startswith(key) for p in catalog_paths):
+            continue
+        missing.append(key)
+
+    assert not missing, (
+        "i18n.t() call sites reference keys missing from en.json:\n"
+        + "\n".join(f"  {k}" for k in missing)
+    )

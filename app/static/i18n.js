@@ -72,14 +72,25 @@
   async function setLocale(lang) {
     localStorage.setItem(KEY, lang);
     writeCookie(KEY, lang);
-    try {
-      await fetch('/api/me/language', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: lang }),
-      });
-    } catch (_) {
-      // Cookie is already authoritative; the reload will honour it.
+    // The server marks authenticated responses with `<body
+    // data-authenticated="true">`. Anonymous callers skip the PATCH
+    // entirely -- the cookie + localStorage already carry their
+    // preference, and the endpoint would 401 anyway. The attribute is a
+    // rendering hint, not an auth claim; forging it client-side gets a
+    // 401 on the actual endpoint call.
+    if (document.body.dataset.authenticated === 'true') {
+      try {
+        await fetch('/api/me/language', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: lang }),
+        });
+      } catch (_) {
+        // Network failure -- the cookie is authoritative for this tab,
+        // so the reload still picks up the new locale. The server's DB
+        // copy stays stale until the next successful call, which will
+        // fire on any future picker change.
+      }
     }
     window.location.reload();
   }

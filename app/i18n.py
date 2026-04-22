@@ -34,6 +34,16 @@ from fastapi import Request
 SUPPORTED: tuple[str, ...] = ("en", "ja", "pt-BR", "es", "zh-CN", "zh-TW")
 DEFAULT: str = "en"
 
+# Subset of SUPPORTED that the picker advertises. Translation catalogs ship
+# empty for the non-English members until a translator fills them in, so
+# shipping the picker with all six would surface locales that resolve cleanly
+# (lang attribute, Accept-Language negotiation, cookie round-trip) but render
+# every string in English anyway -- a picker that lies about what it delivers.
+# Resolution-layer code always uses SUPPORTED; only the picker reads LAUNCHED.
+# When `ja` lands, move it from SUPPORTED-only to LAUNCHED and the picker
+# starts rendering the option without any other wiring.
+LAUNCHED: tuple[str, ...] = ("en",)
+
 # BCP-47 (web wire format) -> POSIX (on-disk catalog directory).
 POSIX_MAP: dict[str, str] = {
     "en": "en",
@@ -201,27 +211,42 @@ def template_context(request: Request) -> dict:
     """Base context dict for every Jinja2 TemplateResponse. Provides
     `request` (required by FastAPI's Jinja2 integration), the current
     `locale` (for the <html lang=""> attribute and conditional rendering),
-    and `_` (a gettext callable bound to the request's locale so
-    `{{ _("...") }}` in templates resolves correctly). Route handlers
-    merge any page-specific keys on top of this.
+    `_` (a gettext callable bound to the request's locale so
+    `{{ _("...") }}` in templates resolves correctly), and
+    `is_authenticated` (exposed as a body data-attribute so client-side JS
+    can decide whether to hit authed-only endpoints without a probe round-
+    trip). Route handlers merge any page-specific keys on top of this.
 
     js_catalog and js_fallback are inlined into the page <head> so the
     shim resolves t() calls without a second fetch (skips the flash of
     untranslated strings that an async JSON fetch would create)."""
+    # Lazy import mirrors resolve_locale() -- keeps app.i18n importable from
+    # low layers without pulling the dependencies graph at import time.
+    from .dependencies import current_user_id
+
     locale = getattr(request.state, "locale", DEFAULT)
     return {
         "request": request,
         "locale": locale,
         "_": gettext_for(locale),
+        # `launched` drives the picker; `supported` is the resolution surface
+        # (still queryable via ?lang=, cookie, DB pref). The picker hides
+        # entirely at render time when launched has <2 members.
+        "launched": LAUNCHED,
         "supported": SUPPORTED,
         "language_labels": LANGUAGE_LABELS,
         "js_catalog": js_catalog(locale),
         "js_fallback": js_catalog(DEFAULT),
+        # Not an auth surface -- just a rendering hint for JS. The server's
+        # real auth happens at endpoint-level dependencies. A forged
+        # data-authenticated attribute gets a 401 on the next write call.
+        "is_authenticated": current_user_id(request) is not None,
     }
 
 
 __all__ = [
     "SUPPORTED",
+    "LAUNCHED",
     "DEFAULT",
     "POSIX_MAP",
     "LANGUAGE_LABELS",

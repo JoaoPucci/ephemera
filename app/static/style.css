@@ -355,10 +355,20 @@ button.copy-error:hover {
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 0.4rem 2rem 0.4rem 0.9rem;
+  padding: 0.4rem 1.8rem 0.4rem 0.85rem;
+  /* min-width keeps the picker's width steady across locales. Without it,
+     the pill visibly jitters as the selected-option text varies between
+     "English" (7 chars) and "日本語" (3 CJK-wide chars) or "Português
+     (Brasil)" (18 chars). 7.5rem fits the longest endonym at 0.8rem font. */
+  min-width: 7.5rem;
   font-size: 0.8rem;
   font-weight: 500;
   letter-spacing: 0.03em;
+  /* Explicit CJK fallbacks so "日本語" / "简体中文" / "繁體中文" render
+     with proper glyphs on Linux where the base sans-serif stack lacks CJK
+     coverage. macOS + Windows already resolve via system fallback. */
+  font-family: inherit, "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans CJK SC",
+               "Noto Sans CJK TC", "Microsoft YaHei", sans-serif;
   min-height: auto;
   margin: 0;
   box-shadow: var(--shadow-sm);
@@ -404,14 +414,18 @@ button.copy-error:hover {
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 0.4rem 0.9rem;
+  /* Glyph-only pill. The ::before half-circle is the entire visible
+     affordance; no text to pad around. Padding tuned to match the
+     lang-picker's vertical rhythm so both pills sit at the same height
+     when displayed side-by-side. */
+  padding: 0.4rem 0.7rem;
   font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.03em;
   min-height: auto;
   margin: 0;
+  display: inline-flex;
+  align-items: center;
   box-shadow: var(--shadow-sm);
-  text-transform: lowercase;
+  cursor: pointer;
   transition: all 150ms ease;
 }
 
@@ -424,17 +438,18 @@ button.copy-error:hover {
 }
 
 /* Half-filled circle glyph -- the universal "theme" signifier. The filled
-   half flips based on the current theme, hinting at the dual state. */
+   half flips based on the current theme, hinting at the dual state. No
+   margin-right: the button carries no trailing text now that theme.js
+   stopped writing "dark"/"light" into the DOM (that label wasn't
+   localized and read as an English wart next to the lang-picker). */
 .theme-toggle::before {
   content: "";
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border: 1.25px solid currentColor;
   border-radius: 50%;
   background: linear-gradient(to right, currentColor 0 50%, transparent 50% 100%);
-  margin-right: 0.5rem;
-  vertical-align: -1px;
   transition: background 150ms ease;
 }
 [data-theme="dark"] .theme-toggle::before {
@@ -1082,7 +1097,7 @@ button.copy-error:hover {
   .top-chrome-right { right: 0.5rem; }
 
   .theme-toggle {
-    padding: 0.3rem 0.7rem;
+    padding: 0.3rem 0.55rem;
     font-size: 0.75rem;
   }
 
