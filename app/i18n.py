@@ -31,7 +31,18 @@ from babel.support import LazyProxy, Translations
 from fastapi import Request
 
 
-SUPPORTED: tuple[str, ...] = ("en", "ja", "pt-BR", "es", "zh-CN", "zh-TW")
+SUPPORTED: tuple[str, ...] = (
+    "en",
+    "ja",
+    "pt-BR",
+    "es",
+    "zh-CN",
+    "zh-TW",
+    "fr",
+    "de",
+    "ru",
+    "ko",
+)
 DEFAULT: str = "en"
 
 # Subset of SUPPORTED that the picker advertises. Translation catalogs ship
@@ -52,6 +63,10 @@ POSIX_MAP: dict[str, str] = {
     "es": "es",
     "zh-CN": "zh_Hans",
     "zh-TW": "zh_Hant",
+    "fr": "fr",
+    "de": "de",
+    "ru": "ru",
+    "ko": "ko",
 }
 
 # Labels rendered inside the picker widget. Each language is named in its
@@ -64,6 +79,10 @@ LANGUAGE_LABELS: dict[str, str] = {
     "es": "Español",
     "zh-CN": "简体中文",
     "zh-TW": "繁體中文",
+    "fr": "Français",
+    "de": "Deutsch",
+    "ru": "Русский",
+    "ko": "한국어",
 }
 
 # Set by the i18n middleware per request; read by lazy_gettext at str()-coerce

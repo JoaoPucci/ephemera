@@ -77,7 +77,10 @@ def test_negotiate_honours_browser_order():
     # Browsers list the preferred locale first; first match wins regardless
     # of q-values (which we don't parse).
     assert negotiate("ja,en;q=0.9") == "ja"
-    assert negotiate("fr,ja;q=0.5,en;q=0.4") == "ja"
+    # `hi` (Hindi) is deliberately NOT in SUPPORTED -- picked for this test
+    # so it stays stable even as SUPPORTED grows; swap for another untaken
+    # tag if Hindi is ever added.
+    assert negotiate("hi,ja;q=0.5,en;q=0.4") == "ja"
 
 
 def test_negotiate_primary_subtag_fallback():
@@ -89,8 +92,10 @@ def test_negotiate_primary_subtag_fallback():
 
 
 def test_negotiate_unknown_returns_default():
-    assert negotiate("de,fr") == DEFAULT
-    assert negotiate("de-DE") == DEFAULT
+    # `it` (Italian) and `hi` (Hindi) are intentionally outside SUPPORTED.
+    # If either gets added later, pick different unused tags here.
+    assert negotiate("it,hi") == DEFAULT
+    assert negotiate("it-IT") == DEFAULT
 
 
 def test_negotiate_empty_and_none():
