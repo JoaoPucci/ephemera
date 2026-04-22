@@ -330,13 +330,76 @@ button.copy-error:hover {
 }
 
 /* ===================================================================
-   Theme toggle (fixed top-right)
+   Top-right chrome: language picker + theme toggle, fixed pair
    =================================================================== */
 
-.theme-toggle {
+.top-chrome {
   position: fixed;
   top: 1rem;
-  right: 1rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.top-chrome-right { right: 1rem; }
+
+/* Language picker pill. Native <select> with appearance stripped so we can
+   match the theme-toggle pill aesthetic; a custom SVG chevron replaces the
+   browser's dropdown arrow. The popup itself (the option menu) stays OS-
+   native -- that's not reliably styleable across browsers and the rest of
+   the app has the same "don't fight the platform" posture (file picker,
+   date picker, etc.). */
+.lang-picker {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.4rem 2rem 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  min-height: auto;
+  margin: 0;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  /* Chevron. Zinc-500 (muted in light theme); dark-theme rule below swaps
+     to zinc-400 so it stays visible against the dark surface. Inline SVG
+     keeps the CSS self-contained and avoids a round-trip for a 200-byte
+     asset. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1 L5 5 L9 1' stroke='%2371717a' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  transition: color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+[data-theme="dark"] .lang-picker {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1 L5 5 L9 1' stroke='%23a1a1aa' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+.lang-picker:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.lang-picker:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Options: light styling for the OS-native popup. Browsers vary on how
+   much they honour this, but the base color + background pair is widely
+   respected and keeps the menu readable in dark theme. */
+.lang-picker option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.theme-toggle {
   background: var(--surface);
   color: var(--muted);
   border: 1px solid var(--border);
@@ -350,7 +413,6 @@ button.copy-error:hover {
   box-shadow: var(--shadow-sm);
   text-transform: lowercase;
   transition: all 150ms ease;
-  z-index: 10;
 }
 
 .theme-toggle:hover {
@@ -1013,11 +1075,21 @@ button.copy-error:hover {
 
   .wordmark { font-size: 0.85rem; margin-bottom: 1rem; }
 
-  .theme-toggle {
+  .top-chrome {
     top: 0.5rem;
-    right: 0.5rem;
+    gap: 0.35rem;
+  }
+  .top-chrome-right { right: 0.5rem; }
+
+  .theme-toggle {
     padding: 0.3rem 0.7rem;
     font-size: 0.75rem;
+  }
+
+  .lang-picker {
+    padding: 0.3rem 1.6rem 0.3rem 0.7rem;
+    font-size: 0.75rem;
+    background-position: right 0.55rem center;
   }
 
   .user-btn {

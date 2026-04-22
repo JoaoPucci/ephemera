@@ -16,12 +16,14 @@
   {% block head_extra %}{% endblock %}
 </head>
 <body>
-  <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}">dark</button>
-  <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
-    {% for tag in supported %}
-    <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
-    {% endfor %}
-  </select>
+  <div class="top-chrome top-chrome-right">
+    <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
+      {% for tag in supported %}
+      <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
+      {% endfor %}
+    </select>
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}">dark</button>
+  </div>
   {% block chrome %}{% endblock %}
   <div class="wordmark">ephemera</div>
   {% block body %}{% endblock %}
