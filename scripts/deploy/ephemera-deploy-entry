@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Root-owned forced-command entry stub for the `deploy` SSH user.
+#
+# This is the target of the `command="..."` directive in
+# /home/deploy/.ssh/authorized_keys. It is the immutable trust boundary
+# between SSH input and the rest of the deploy pipeline: the repo-tracked
+# script at /opt/ephemera/scripts/deploy/deploy.sh is writable by the
+# `ephemera` user (it lives in the ephemera-owned repo checkout), so
+# sudoers cannot trust that path directly. This stub, owned by root:root
+# 0755 and installed from scripts/deploy/ephemera-deploy-entry, is the
+# thing sudoers actually references.
+#
+# Install on the server (run as root, once):
+#
+#     install -o root -g root -m 0755 /opt/ephemera/scripts/deploy/ephemera-deploy-entry /usr/local/sbin/ephemera-deploy-entry
+#
+# See docs/deployment.md section on automated deploys for the full
+# one-time setup (deploy user, authorized_keys, sudoers fragment, UFW).
+
+set -euo pipefail
+set +x
+
+# The forced-command has no arguments; the client's `ssh deploy@host "<TAG>"`
+# arrives as $SSH_ORIGINAL_COMMAND.
+TAG="${SSH_ORIGINAL_COMMAND:-}"
+
+if [[ -z "$TAG" ]]; then
+  echo "deploy entry: missing tag (SSH_ORIGINAL_COMMAND empty)" >&2
+  exit 2
+fi
+if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "deploy entry: tag '$TAG' does not match vMAJOR.MINOR.PATCH" >&2
+  exit 2
+fi
+
+# Serialise against manual invocations and against a second CI job that
+# somehow got past the workflow concurrency gate.
+exec flock -n /var/lock/ephemera-deploy.lock sudo -u ephemera /opt/ephemera/scripts/deploy/deploy.sh "$TAG"
