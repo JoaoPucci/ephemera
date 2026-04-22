@@ -9,10 +9,11 @@ login state.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel
 
 from ..dependencies import current_user_id, verify_same_origin
+from ..errors import http_error
 from ..i18n import SUPPORTED
 from ..models import users as users_model
 
@@ -35,7 +36,7 @@ def patch_language(
     default. Anonymous users get a silent 204 -- their preference is
     already in cookie + localStorage from the picker widget."""
     if body.language is not None and body.language not in SUPPORTED:
-        raise HTTPException(status_code=400, detail="unsupported language")
+        raise http_error(400, "unsupported_language")
     uid = current_user_id(request)
     if uid is not None:
         users_model.set_preferred_language(uid, body.language)
