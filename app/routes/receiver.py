@@ -1,14 +1,13 @@
 """Receiver routes: landing, metadata, reveal."""
 import base64
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
 
 from .. import crypto, models, security_log
 from ..config import Settings, get_settings
 from ..dependencies import verify_same_origin
 from ..errors import http_error
+from ..i18n import template_context
 from ..limiter import read_rate_limit, reveal_rate_limit
 from ..schemas import (
     LandingMetaResponse,
@@ -20,8 +19,6 @@ from ..schemas import (
 
 
 router = APIRouter()
-
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 def _gone() -> HTTPException:
@@ -40,8 +37,10 @@ def _load_live_row(token: str):
 
 
 @router.get("/s/{token}")
-def landing_page(token: str):
-    return FileResponse(STATIC_DIR / "landing.html")
+def landing_page(token: str, request: Request):
+    from .. import TEMPLATES
+
+    return TEMPLATES.TemplateResponse(request, "landing.html", template_context(request))
 
 
 @router.get(

@@ -1,5 +1,4 @@
 """Sender routes: login, logout, secret creation, status lookup."""
-from pathlib import Path
 from typing import Optional
 
 import bcrypt
@@ -10,7 +9,6 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import FileResponse
 
 from .. import auth as auth_mod
 from .. import crypto, models, security_log, validation
@@ -23,6 +21,7 @@ from ..dependencies import (
     verify_same_origin,
 )
 from ..errors import http_error
+from ..i18n import template_context
 from ..limiter import create_rate_limit, login_rate_limit, read_rate_limit
 from ..schemas import (
     ApiMeResponse,
@@ -38,8 +37,6 @@ from ..schemas import (
 
 
 router = APIRouter()
-
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # Caps on untyped Form(...) fields. Caddy already limits the body to ~11MB,
 # but these save us from spending bcrypt/multipart parsing on obviously
@@ -74,8 +71,10 @@ def _build_url(token: str, client_half: bytes) -> str:
 
 @router.get("/send")
 def send_page(request: Request):
+    from .. import TEMPLATES
+
     page = "sender.html" if is_logged_in(request) else "login.html"
-    return FileResponse(STATIC_DIR / page)
+    return TEMPLATES.TemplateResponse(request, page, template_context(request))
 
 
 # ---------------------------------------------------------------------------

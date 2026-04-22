@@ -5,8 +5,9 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from .config import get_settings
 from . import cleanup, models
@@ -16,6 +17,14 @@ from .routes import prefs, receiver, sender
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
+# Single shared Jinja2 environment. The i18n extension enables {% trans %}
+# blocks (we use {{ _("...") }} instead, but the extension also tells the
+# pybabel extractor to treat the template as translation-aware). Route
+# handlers build their context through app.i18n.template_context(request).
+TEMPLATES = Jinja2Templates(directory=str(TEMPLATES_DIR))
+TEMPLATES.env.add_extension("jinja2.ext.i18n")
 
 # CSP: deny-by-default then explicitly enumerate what ephemera actually uses.
 # Nothing is fetched cross-origin (no CDN, no web fonts, no analytics). The
