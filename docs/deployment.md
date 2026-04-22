@@ -275,6 +275,147 @@ the env, and make sure every user has at least one unused recovery code
 on hand first (`python -m app.admin regen-recovery-codes` will mint a
 fresh set).
 
+## Automated deploy from GitHub Actions
+
+Optional. The manual `fetch → checkout → pip install → restart` recipe
+above stays as the break-glass fallback. Once the one-time setup below
+is done, `git push origin vX.Y.Z` from the operator laptop (the `scripts/
+release.sh` invocation) is enough to ship — the workflow at
+`.github/workflows/deploy.yml` fires on any semver tag landing on
+`origin`, joins the server's Tailscale tailnet, SSHes in as a dedicated
+`deploy` user, verifies that the latest daily SQLite backup is fresh
+(≤36h old) and passes `PRAGMA integrity_check`, checks out the tag,
+`pip install --require-hashes`es, restarts the service, and polls
+`/healthz` for up to 20 seconds before declaring success. If the latest
+backup is older than 36h or fails integrity, the deploy aborts before
+touching code — a broken backup posture should stop the pipeline, not
+ride along silently. The daily backup cron itself is left untouched;
+the deploy reads what's there rather than writing a new file.
+
+The server-side sequence lives at `scripts/deploy/deploy.sh` (version-
+controlled, readable by anyone). The trust boundary between SSH input
+and the pipeline is a small root-owned entry stub installed from
+`scripts/deploy/ephemera-deploy-entry`. Pre-release tags (anything with
+a dash, e.g. `v1.2.3-rc1`) are deliberately excluded — the tag glob is
+`'v*.*.*'` minus `'v*.*.*-*'`, and the entry stub re-validates against
+`^v[0-9]+\.[0-9]+\.[0-9]+$`.
+
+### One-time server setup
+
+Run as root on the server.
+
+1. **Install Tailscale.** SSH is bound to the tailnet so there is no
+   public port 22 exposure at all:
+
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   tailscale up --authkey=tskey-auth-... --hostname=ephemera --ssh=false
+   ```
+
+   `--ssh=false` keeps OpenSSH as the SSH authority. Record the
+   MagicDNS name the tailnet assigns (e.g. `ephemera.tail1234.ts.net`);
+   it goes in `DEPLOY_SSH_HOST` below.
+
+2. **Create the `deploy` user.** System account, bash shell so forced-
+   command can run, no password, no login apart from the forced-command
+   key:
+
+   ```bash
+   useradd --system --shell /bin/bash --create-home deploy
+   install -o deploy -g deploy -m 0700 -d /home/deploy/.ssh
+   ```
+
+3. **Install the entry stub.** Root-owned trust boundary:
+
+   ```bash
+   install -o root -g root -m 0755 /opt/ephemera/scripts/deploy/ephemera-deploy-entry /usr/local/sbin/ephemera-deploy-entry
+   ```
+
+   Reinstall after every release (the source-of-truth lives in the
+   repo; changes to it ship with the tag that contains them).
+
+4. **Register the Actions public key** at
+   `/home/deploy/.ssh/authorized_keys` (`deploy:deploy 0600`):
+
+   ```
+   restrict,command="/usr/local/sbin/ephemera-deploy-entry" ssh-ed25519 AAAA... ephemera-gha-deploy
+   ```
+
+   `restrict` disables port / agent / X11 forwarding and pty
+   allocation. The key's private half lives in the repo secret
+   `DEPLOY_SSH_KEY`. No `from=` clause is needed because SSH is
+   already tailnet-bound.
+
+5. **Sudoers fragment.** Validate with `visudo -c -f /etc/sudoers.d/ephemera-deploy`:
+
+   ```
+   deploy ALL=(ephemera) NOPASSWD: /opt/ephemera/scripts/deploy/deploy.sh
+   deploy ALL=(root) NOPASSWD: /bin/systemctl restart ephemera, /bin/systemctl is-active ephemera
+   ```
+
+   Exact forms, no wildcards — a trailing `...` would let a future
+   caller slip extra argv in.
+
+6. **Lock SSH to the tailnet.** Remove the laptop-IP allow from UFW
+   and replace it with a tailnet-interface rule:
+
+   ```bash
+   ufw delete allow from <laptop-ip> to any port 22 proto tcp
+   ufw allow in on tailscale0 to any port 22 proto tcp
+   ufw reload
+   ```
+
+   Operator SSH now also rides the tailnet. No functional change;
+   same workflow, different route.
+
+7. **GitHub repo secrets.** Set via `gh secret set` or the web UI:
+
+   | Name | Value |
+   |---|---|
+   | `TAILSCALE_OAUTH_CLIENT_ID` | OAuth client ID for an ephemeral-auth client, scope `auth_keys`, tagged `tag:ci` |
+   | `TAILSCALE_OAUTH_SECRET` | OAuth client secret paired with the ID above |
+   | `DEPLOY_SSH_KEY` | ed25519 private key (PEM); public half is in `authorized_keys` at step 4 |
+   | `DEPLOY_SSH_HOST` | MagicDNS name from step 1 (`ephemera.tail1234.ts.net`). Never the public DNS or IP. |
+   | `DEPLOY_SSH_KNOWN_HOSTS` | Output of `ssh-keyscan ephemera.tail1234.ts.net` run from a host already on the tailnet |
+
+8. **Tag protection rule** (GitHub → Settings → Rules → New tag
+   ruleset). Pattern `v*.*.*`, restrict tag creation to repository
+   admins. Blocks a compromised token from pushing a malicious tag
+   that would trigger a deploy.
+
+### Smoke-test the setup
+
+From a host already on the tailnet (e.g. your laptop), before the
+first real Actions-triggered deploy:
+
+```bash
+ssh deploy@ephemera.tail1234.ts.net v0.0.0
+```
+
+Expect `deploy entry: tag 'v0.0.0' does not match vMAJOR.MINOR.PATCH`
+followed by `exit 2` — the regex is right but `v0.0.0` is a tag
+that doesn't exist. Positive-path smoke test: use the currently-
+deployed tag (the command is idempotent; `git checkout` on a tag
+already checked out is a no-op, but `pip install` and `restart`
+will still run).
+
+### Failure & rollback
+
+Any step failing in `deploy.sh` exits nonzero with `DEPLOY FAILED: <step>`
+on stderr. The CI job fails; the service stays on whatever state the
+previous successful deploy left it in (if pip aborted mid-install, the
+venv may be half-updated — rebuild with the second recipe in
+`## Operations` above).
+
+No automatic rollback. Roll back manually:
+
+```bash
+sudo -u ephemera git -C /opt/ephemera checkout vX.Y.Z-PREVIOUS
+sudo -u ephemera /opt/ephemera/venv/bin/pip install \
+    --require-hashes -r /opt/ephemera/requirements.txt
+sudo systemctl restart ephemera
+```
+
 ## Operator runbook (per-instance)
 
 Operators typically keep a private `DEPLOYMENT.md` at the repo root,

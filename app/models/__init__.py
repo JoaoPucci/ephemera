@@ -14,7 +14,7 @@ code is free to import from a specific submodule directly:
 
 Both styles are supported.
 """
-from ._core import INDICES_SCRIPT, TABLES_SCRIPT, init_db
+from ._core import INDICES_SCRIPT, TABLES_SCRIPT, init_db, ping
 from .api_tokens import (
     create_token,
     get_active_token_by_hash,
@@ -59,6 +59,7 @@ __all__ = [
     "INDICES_SCRIPT",
     "TABLES_SCRIPT",
     "init_db",
+    "ping",
     # secrets
     "burn",
     "cancel",

@@ -1,0 +1,69 @@
+name: deploy
+
+# Fires on a semver tag landing on origin. Pre-release tags (anything with
+# a dash, e.g. `v1.2.3-rc1`) are deliberately excluded: deploying those
+# should be an explicit, hand-driven act, not something that happens
+# because the pattern glob was loose.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - '!v*.*.*-*'
+
+# Serialise deploys. `cancel-in-progress: false` lets an in-flight deploy
+# finish cleanly before the next one starts. A job that gets cancelled
+# mid-deploy leaves the server in an ambiguous state (new code checked
+# out, service maybe restarted, maybe not).
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Tag-triggered deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Environment hook. If the repo later configures required-reviewer
+    # gating under Settings -> Environments -> production, that gate
+    # fires here without a workflow change. Without protection rules
+    # configured, this is just a label.
+    environment: production
+    steps:
+      - name: Join tailnet
+        # Ephemeral OAuth-based join; the device disappears when the job
+        # ends. `tags: tag:ci` lets the tailnet's ACL pin what these
+        # ephemeral clients are allowed to reach.
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Configure SSH
+        # Key + pinned known_hosts. The known_hosts entry guards against
+        # a tailnet-side MITM; secrets are redacted from logs, and the
+        # shell keeps +x off so nothing leaks even on error.
+        run: |
+          set +x
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy
+        # `GITHUB_REF_NAME` is the tag (e.g. v0.6.0) on a tag-push event.
+        # The forced-command on the server reads it from SSH_ORIGINAL_COMMAND,
+        # re-validates the regex, acquires a flock, and invokes deploy.sh.
+        # stdout from the server-side script is streamed back here, so a
+        # failure at any deploy step surfaces as a failing CI step.
+        env:
+          TAG: ${{ github.ref_name }}
+          SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+        run: |
+          set +x
+          ssh -o BatchMode=yes -i ~/.ssh/id_ed25519 "deploy@${SSH_HOST}" "${TAG}"
