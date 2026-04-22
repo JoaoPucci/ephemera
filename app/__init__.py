@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import get_settings
 from . import cleanup, models
 from .dependencies import verify_api_token_or_session
+from .i18n import current_locale, resolve_locale
 from .routes import receiver, sender
 
 
@@ -105,6 +106,25 @@ def create_app() -> FastAPI:
         for k, v in SECURITY_HEADERS.items():
             response.headers[k] = v
         return response
+
+    @app.middleware("http")
+    async def set_request_locale(request: Request, call_next):
+        # Static assets never render localized content; skip the resolver
+        # (which would otherwise do a cookie parse + DB lookup on every
+        # image/css/js fetch) for the hot path.
+        if request.url.path.startswith("/static"):
+            return await call_next(request)
+        locale = resolve_locale(request)
+        request.state.locale = locale
+        # ContextVar gives lazy_gettext a reliable per-request locale without
+        # threading Request through every module-level string. reset() in
+        # finally is mandatory -- a leaked token silently bleeds one
+        # request's locale into the next handler on the same worker.
+        token = current_locale.set(locale)
+        try:
+            return await call_next(request)
+        finally:
+            current_locale.reset(token)
 
     # ---- Auth-gated API docs ---------------------------------------------
     # Swagger UI assets live under app/static/swagger/ (pinned versions;
