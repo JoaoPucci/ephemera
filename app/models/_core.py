@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS users (
     failed_attempts       INTEGER NOT NULL DEFAULT 0,
     lockout_until         TEXT,
     session_generation    INTEGER NOT NULL DEFAULT 0,    -- bumped to invalidate live sessions
+    preferred_language    TEXT,                           -- BCP-47 tag (e.g. 'ja', 'pt-BR'); NULL = fall back to request signals
     created_at            TEXT NOT NULL,
     updated_at            TEXT NOT NULL
 );
@@ -153,12 +154,20 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 # the first boot after upgrade; fresh DBs are stamped to CURRENT on creation.
 # -----------------------------------------------------------------------------
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
+
+
+def _migrate_to_v2(conn: sqlite3.Connection) -> None:
+    """Add users.preferred_language for localized UI. Idempotent: fresh DBs
+    already have the column from TABLES_SCRIPT, so this only fires on legacy
+    v1 DBs (or on a boot that was interrupted between this ALTER and the
+    version-stamp)."""
+    if "preferred_language" not in _cols(conn, "users"):
+        conn.execute("ALTER TABLE users ADD COLUMN preferred_language TEXT")
+
 
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
-    # 2: _migrate_to_v2,
-    # 3: _migrate_to_v3,
-    # ...
+    2: _migrate_to_v2,
 }
 
 
