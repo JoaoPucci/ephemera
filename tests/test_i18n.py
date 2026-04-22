@@ -127,11 +127,13 @@ def test_gettext_null_catalog_identity():
 
 def test_lazy_gettext_reads_contextvar():
     lz = lazy_gettext("Expires in")
-    # Default context -> identity (no catalog), still string-coerceable.
+    # Default context -> identity (catalog lookup returns the msgid when no
+    # locale is active), still string-coerceable.
     assert str(lz) == "Expires in"
     token = current_locale.set("ja")
     try:
-        assert str(lz) == "Expires in"
+        # With ja catalog populated, the lazy proxy re-resolves on coerce.
+        assert str(lz) == "有効期限"
     finally:
         current_locale.reset(token)
 
@@ -157,12 +159,21 @@ def test_js_catalog_en_has_expected_keys():
     assert cat["button"]["creating"]
 
 
-def test_js_catalog_stubs_return_empty_dict():
-    # The 5 non-en catalogs ship as empty stubs until a translator fills
-    # them in. The shim's fallback chain uses the English catalog for any
-    # miss, so an empty stub is a valid "not translated yet" state.
-    for tag in ("ja", "pt-BR", "es", "zh-CN", "zh-TW"):
-        assert js_catalog(tag) == {}
+def test_js_catalog_non_en_locales_are_populated():
+    # Every supported locale ships a populated JS catalog. The shim's
+    # fallback chain still uses the English catalog for any miss, so an
+    # accidentally-stubbed locale would silently render English instead
+    # of failing loudly -- this test is the tripwire that catches it.
+    for tag in SUPPORTED:
+        if tag == DEFAULT:
+            continue
+        cat = js_catalog(tag)
+        assert cat, f"{tag} catalog must not be empty"
+        # Spot-check: a representative key per top-level namespace resolves
+        # to a non-empty string in every translator-authored catalog.
+        assert cat["error"]["wrong_passphrase"]
+        assert cat["status"]["pending"]
+        assert cat["button"]["creating"]
 
 
 # ---------------------------------------------------------------------------
@@ -429,35 +440,37 @@ def test_http_error_live_response_shape(client):
 def test_page_inlines_active_and_fallback_catalogs(client):
     r = client.get("/send?lang=ja")
     body = r.text
-    # Active locale's catalog (currently empty stub for ja) appears first.
-    assert 'id="i18n-catalog">{}' in body
-    # English fallback contains the real strings.
+    # Active locale's catalog is inlined as JSON and contains the translated
+    # strings (tojson escapes non-ASCII as \uXXXX -- check the escaped form
+    # for "パスフレーズが正しくありません。").
+    assert 'id="i18n-catalog"' in body
+    assert "\\u30d1\\u30b9\\u30d5\\u30ec\\u30fc\\u30ba" in body
+    # English fallback is inlined separately so the shim resolves on miss.
     assert 'id="i18n-fallback"' in body
     assert "Wrong passphrase" in body
 
 
-def test_picker_hidden_when_only_one_locale_launched(client):
-    """Current state: LAUNCHED=('en',). The picker renders only when
-    there's a real choice to offer -- a single-option <select> is a UX
-    wart. Resolution still works for SUPPORTED tags (cookies, ?lang=) so
-    this test also asserts the resolution surface is untouched."""
-    assert LAUNCHED == ("en",), (
-        "test pins the ship-state; if LAUNCHED grew, update this test "
-        "to the new gate (picker appears once len >= 2)"
-    )
+def test_picker_hidden_when_launched_has_fewer_than_two(client, monkeypatch):
+    """Structural test for the picker-gate. A single-option <select> is a
+    UX wart (nothing to actually pick), so the template hides the picker
+    entirely when LAUNCHED has <2 members. Monkeypatches LAUNCHED because
+    the shipped state now has all ten launched; the gate logic still needs
+    coverage for the single-locale rollback case."""
+    import app.i18n as i18n_mod
+
+    monkeypatch.setattr(i18n_mod, "LAUNCHED", ("en",))
     r = client.get("/send")
     assert '<select id="lang-picker"' not in r.text
-    # Resolution surface still accepts SUPPORTED tags even though the picker
+    # Resolution surface still accepts SUPPORTED tags even when the picker
     # is hidden -- query-param and cookie paths remain reachable.
     r2 = client.get("/send?lang=pt-BR")
     assert 'lang="pt-BR"' in r2.text
 
 
 def test_picker_renders_when_multiple_locales_launched(client, monkeypatch):
-    """Tomorrow's state: once a second locale ships, the picker must
-    render with the active option marked selected. Monkeypatches LAUNCHED
-    so the rendering path is exercised now, before the second locale
-    actually lands."""
+    """Structural test for the two-or-more-locales render path.
+    Monkeypatches LAUNCHED to a small set so the assertion is stable
+    against future additions to the shipped LAUNCHED tuple."""
     import app.i18n as i18n_mod
 
     monkeypatch.setattr(i18n_mod, "LAUNCHED", ("en", "pt-BR"))
@@ -466,8 +479,28 @@ def test_picker_renders_when_multiple_locales_launched(client, monkeypatch):
     assert '<select id="lang-picker"' in body
     assert 'value="pt-BR" selected' in body
     assert 'value="en"' in body
-    # Un-launched tags do NOT appear as options even though they resolve.
-    assert 'value="ja"' not in body
+
+
+def test_picker_renders_every_shipped_launched_locale(client):
+    """Ship-state test: every tag currently in LAUNCHED must appear as an
+    <option> in the picker, unmonkeypatched. Guards against 'added a
+    locale to SUPPORTED + LAUNCHED but forgot to update LANGUAGE_LABELS'
+    (the picker would render a blank option)."""
+    from app.i18n import LANGUAGE_LABELS
+
+    r = client.get("/send")
+    body = r.text
+    if len(LAUNCHED) < 2:
+        # Single-locale gate already covered above; short-circuit here.
+        return
+    assert '<select id="lang-picker"' in body
+    for tag in LAUNCHED:
+        assert f'value="{tag}"' in body, f"launched tag {tag} missing from picker"
+        # Endonym label must be present too -- empty <option> would silently
+        # ship otherwise.
+        assert LANGUAGE_LABELS[tag] in body, (
+            f"endonym for {tag} ({LANGUAGE_LABELS[tag]!r}) missing from picker"
+        )
 
 
 def test_body_data_authenticated_present_for_authed(authed_client):

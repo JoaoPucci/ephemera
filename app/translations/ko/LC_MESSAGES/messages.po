@@ -20,230 +20,232 @@ msgstr ""
 
 #: app/templates/_layout.html:21
 msgid "Language"
-msgstr ""
+msgstr "언어"
 
 #: app/templates/_layout.html:27
 msgid "toggle theme"
-msgstr ""
+msgstr "테마 전환"
 
 #: app/templates/landing.html:6
 msgid "Loading…"
-msgstr ""
+msgstr "불러오는 중…"
 
 #: app/templates/landing.html:10
 msgid "Someone shared a secret with you."
-msgstr ""
+msgstr "누군가 당신에게 비밀을 공유했습니다."
 
 #: app/templates/landing.html:11
 msgid ""
 "This message can only be viewed once. After you reveal it, it will be "
 "permanently destroyed."
 msgstr ""
+"이 메시지는 한 번만 볼 수 있습니다. 확인하면 영구적으로 삭제됩니다."
 
 #: app/templates/landing.html:13
 msgid "Passphrase"
-msgstr ""
+msgstr "패스프레이즈"
 
 #: app/templates/landing.html:17 app/templates/sender.html:79
 msgid "show passphrase"
-msgstr ""
+msgstr "패스프레이즈 표시"
 
 #: app/templates/landing.html:17 app/templates/login.html:14
 #: app/templates/login.html:22 app/templates/sender.html:79
 msgid "show"
-msgstr ""
+msgstr "표시"
 
 #: app/templates/landing.html:20
 msgid "Reveal Secret"
-msgstr ""
+msgstr "비밀 확인"
 
 #: app/templates/landing.html:26
 msgid "Copy to clipboard"
-msgstr ""
+msgstr "클립보드에 복사"
 
 #: app/templates/landing.html:27
 msgid "This secret has been destroyed."
-msgstr ""
+msgstr "이 비밀은 삭제되었습니다."
 
 #: app/templates/landing.html:32
 msgid "Click to view full size"
-msgstr ""
+msgstr "클릭하여 원본 크기로 보기"
 
 #: app/templates/landing.html:33
 msgid "Click the image for full size · this secret has been destroyed."
-msgstr ""
+msgstr "이미지를 클릭하여 원본 크기로 보기 · 이 비밀은 삭제되었습니다."
 
 #: app/templates/landing.html:37
 msgid "This secret is no longer available."
-msgstr ""
+msgstr "이 비밀은 더 이상 이용할 수 없습니다."
 
 #: app/templates/landing.html:38
 msgid "It may have already been viewed or has expired."
-msgstr ""
+msgstr "이미 확인되었거나 만료되었을 수 있습니다."
 
 #: app/templates/landing.html:42
 msgid "Full-size image"
-msgstr ""
+msgstr "원본 크기 이미지"
 
 #: app/templates/landing.html:44
 msgid "Close full-size view"
-msgstr ""
+msgstr "원본 크기 보기 닫기"
 
 #: app/templates/landing.html:44
 msgid "close"
-msgstr ""
+msgstr "닫기"
 
 #: app/templates/login.html:2
 msgid "ephemera — sign in"
-msgstr ""
+msgstr "ephemera — 로그인"
 
 #: app/templates/login.html:6
 msgid "Username"
-msgstr ""
+msgstr "사용자 이름"
 
 #: app/templates/login.html:10
 msgid "Password"
-msgstr ""
+msgstr "비밀번호"
 
 #: app/templates/login.html:14
 msgid "show password"
-msgstr ""
+msgstr "비밀번호 표시"
 
 #: app/templates/login.html:17
 msgid "6-digit code"
-msgstr ""
+msgstr "6자리 코드"
 
 #: app/templates/login.html:22
 msgid "show code"
-msgstr ""
+msgstr "코드 표시"
 
 #: app/templates/login.html:25
 msgid "Sign in"
-msgstr ""
+msgstr "로그인"
 
 #: app/templates/login.html:29
 msgid "Use a recovery code"
-msgstr ""
+msgstr "복구 코드 사용"
 
 #: app/templates/sender.html:2
 msgid "ephemera — create secret"
-msgstr ""
+msgstr "ephemera — 비밀 만들기"
 
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
-msgstr ""
+msgstr "로그아웃"
 
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
-msgstr ""
+msgstr "추적 중인 비밀"
 
 #: app/templates/sender.html:23
 msgid "Remove every row that is no longer pending — pending secrets are kept"
-msgstr ""
+msgstr "대기 중이 아닌 모든 항목을 제거 — 대기 중인 비밀은 유지됩니다"
 
 #: app/templates/sender.html:32
 msgid "Clear past entries"
-msgstr ""
+msgstr "지난 항목 지우기"
 
 #: app/templates/sender.html:41
 msgid "Text"
-msgstr ""
+msgstr "텍스트"
 
 #: app/templates/sender.html:42 app/templates/sender.html:52
 msgid "Image"
-msgstr ""
+msgstr "이미지"
 
 #: app/templates/sender.html:47
 msgid "Enter your secret"
-msgstr ""
+msgstr "비밀을 입력하세요"
 
 #: app/templates/sender.html:48
 msgid "Type your message..."
-msgstr ""
+msgstr "메시지를 입력하세요..."
 
 #: app/templates/sender.html:54
 msgid "Drop image here or click to browse"
-msgstr ""
+msgstr "이미지를 여기에 놓거나 클릭하여 찾아보세요"
 
 #: app/templates/sender.html:58
 msgid "clear"
-msgstr ""
+msgstr "지우기"
 
 #: app/templates/sender.html:63
 msgid "Expires in"
-msgstr ""
+msgstr "만료 기한"
 
 #: app/templates/sender.html:65
 msgid "5 minutes"
-msgstr ""
+msgstr "5분"
 
 #: app/templates/sender.html:66
 msgid "30 minutes"
-msgstr ""
+msgstr "30분"
 
 #: app/templates/sender.html:67
 msgid "1 hour"
-msgstr ""
+msgstr "1시간"
 
 #: app/templates/sender.html:68
 msgid "4 hours"
-msgstr ""
+msgstr "4시간"
 
 #: app/templates/sender.html:69
 msgid "12 hours"
-msgstr ""
+msgstr "12시간"
 
 #: app/templates/sender.html:70
 msgid "24 hours"
-msgstr ""
+msgstr "24시간"
 
 #: app/templates/sender.html:71
 msgid "3 days"
-msgstr ""
+msgstr "3일"
 
 #: app/templates/sender.html:72
 msgid "7 days"
-msgstr ""
+msgstr "7일"
 
 #: app/templates/sender.html:75
 msgid "Passphrase (optional)"
-msgstr ""
+msgstr "패스프레이즈 (선택)"
 
 #: app/templates/sender.html:85
 msgid "Track viewing status"
-msgstr ""
+msgstr "열람 상태 추적"
 
 #: app/templates/sender.html:89
 msgid "Label (for your tracked list)"
-msgstr ""
+msgstr "레이블 (추적 목록용)"
 
 #: app/templates/sender.html:90
 msgid "e.g. API key for Acme"
-msgstr ""
+msgstr "예: Acme API 키"
 
 #: app/templates/sender.html:94
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
 msgstr ""
+"만든 후에는 본인도 내용을 다시 읽을 수 없습니다. 필요할 경우 다른 곳에 "
+"복사본을 보관하세요."
 
 #: app/templates/sender.html:96
 msgid "Create Secret"
-msgstr ""
+msgstr "비밀 만들기"
 
 #: app/templates/sender.html:102
 msgid "Secret created."
-msgstr ""
+msgstr "비밀이 생성되었습니다."
 
 #: app/templates/sender.html:104
 msgid "Copy URL"
-msgstr ""
+msgstr "URL 복사"
 
 #: app/templates/sender.html:107
 msgid "Status"
-msgstr ""
+msgstr "상태"
 
 #: app/templates/sender.html:111
 msgid "Create another"
-msgstr ""
-
+msgstr "하나 더 만들기"

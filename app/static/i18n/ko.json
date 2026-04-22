@@ -1,1 +1,61 @@
-{}
+{
+  "error": {
+    "network": "네트워크 오류입니다. 다시 시도해 주세요.",
+    "locked_with_until": "실패 횟수가 너무 많습니다. {{until}}까지 잠겼습니다.",
+    "locked": "실패 횟수가 너무 많습니다. 계정이 잠겼습니다.",
+    "too_many_attempts": "시도 횟수가 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+    "form_stale": "양식이 오래되었습니다 — 페이지를 강제 새로고침(Ctrl+Shift+R)한 뒤 다시 시도해 주세요.",
+    "invalid_credentials": "인증 정보가 올바르지 않습니다.",
+    "unexpected_http": "예기치 못한 오류(HTTP {{status}})입니다. 서버 로그를 확인하세요.",
+    "missing_key": "이 링크에는 복호화 키가 없습니다.",
+    "wrong_passphrase": "패스프레이즈가 올바르지 않습니다.",
+    "reveal_failed": "비밀을 표시하지 못했습니다.",
+    "request_failed": "요청이 실패했습니다({{status}}).",
+    "generic": "문제가 발생했습니다.",
+    "please_enter_message": "메시지를 입력해 주세요.",
+    "please_select_image": "이미지를 선택해 주세요."
+  },
+  "button": {
+    "signing_in": "로그인 중…",
+    "revealing": "표시 중…",
+    "creating": "생성 중…",
+    "copied": "복사됨",
+    "copy_failed": "복사 실패",
+    "cancel": "취소",
+    "confirm": "확인?",
+    "canceling": "취소 중…",
+    "clear_past": {
+      "other": "지난 항목 {{n}}개 지우기"
+    },
+    "clearing": "지우는 중…"
+  },
+  "status": {
+    "pending": "대기 중",
+    "viewed": "확인됨",
+    "burned": "삭제됨",
+    "canceled": "취소됨",
+    "expired": "만료됨",
+    "gone": "추적 중단"
+  },
+  "sender": {
+    "expires_prefix": "만료: ",
+    "viewed_at_prefix": "시각: "
+  },
+  "tracked": {
+    "image_secret": "이미지 비밀",
+    "text_secret": "텍스트 비밀",
+    "copy_ok": "클립보드에 복사했습니다",
+    "copy_fail": "복사에 실패했습니다",
+    "orphan_hint": "다른 곳에서 생성됨",
+    "aria_remove": "목록에서 제거",
+    "aria_cancel": "이 비밀 취소",
+    "tooltip_cancel": "URL을 폐기하여 수신자가 더 이상 볼 수 없게 합니다",
+    "tooltip_copy": "클릭하여 링크를 복사",
+    "tooltip_orphan": "이 URL에는 비밀이 생성된 브라우저에만 저장된 암호화 키가 포함되어 있습니다. 해당 브라우저에서 ephemera를 열어 링크를 복사하세요.",
+    "time_created": "{{when}} 생성",
+    "time_viewed": "{{when}} 확인",
+    "time_burned": "{{when}} 삭제",
+    "time_canceled": "{{when}} 취소",
+    "time_expired": "{{when}} 만료"
+  }
+}

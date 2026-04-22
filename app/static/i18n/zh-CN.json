@@ -1,1 +1,61 @@
-{}
+{
+  "error": {
+    "network": "网络错误。请再试一次。",
+    "locked_with_until": "失败次数过多。已锁定至 {{until}}。",
+    "locked": "失败次数过多。账号已锁定。",
+    "too_many_attempts": "尝试次数过多。请稍候再试。",
+    "form_stale": "表单字段已过期 — 请强制刷新页面（Ctrl+Shift+R）后再试。",
+    "invalid_credentials": "凭据无效。",
+    "unexpected_http": "意外错误（HTTP {{status}}）。请检查服务器日志。",
+    "missing_key": "此链接缺少解密密钥。",
+    "wrong_passphrase": "密码短语错误。",
+    "reveal_failed": "无法查看秘密。",
+    "request_failed": "请求失败（{{status}}）。",
+    "generic": "出了点问题。",
+    "please_enter_message": "请输入一条消息。",
+    "please_select_image": "请选择一张图片。"
+  },
+  "button": {
+    "signing_in": "登录中…",
+    "revealing": "查看中…",
+    "creating": "创建中…",
+    "copied": "已复制",
+    "copy_failed": "复制失败",
+    "cancel": "撤销",
+    "confirm": "确认？",
+    "canceling": "撤销中…",
+    "clear_past": {
+      "other": "清除 {{n}} 条历史条目"
+    },
+    "clearing": "清除中…"
+  },
+  "status": {
+    "pending": "待查看",
+    "viewed": "已查看",
+    "burned": "已销毁",
+    "canceled": "已撤销",
+    "expired": "已过期",
+    "gone": "不再跟踪"
+  },
+  "sender": {
+    "expires_prefix": "过期时间: ",
+    "viewed_at_prefix": "于 "
+  },
+  "tracked": {
+    "image_secret": "图片秘密",
+    "text_secret": "文本秘密",
+    "copy_ok": "已复制到剪贴板",
+    "copy_fail": "复制失败",
+    "orphan_hint": "在其他处创建",
+    "aria_remove": "从列表中移除",
+    "aria_cancel": "撤销此秘密",
+    "tooltip_cancel": "撤销该 URL，使接收者无法再查看此秘密",
+    "tooltip_copy": "点击复制链接",
+    "tooltip_orphan": "该 URL 包含仅存储在创建此秘密的浏览器中的加密密钥。请在该浏览器中打开 ephemera 以复制链接。",
+    "time_created": "{{when}}创建",
+    "time_viewed": "{{when}}查看",
+    "time_burned": "{{when}}销毁",
+    "time_canceled": "{{when}}撤销",
+    "time_expired": "{{when}}过期"
+  }
+}

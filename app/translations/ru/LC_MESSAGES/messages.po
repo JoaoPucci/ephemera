@@ -21,230 +21,233 @@ msgstr ""
 
 #: app/templates/_layout.html:21
 msgid "Language"
-msgstr ""
+msgstr "Язык"
 
 #: app/templates/_layout.html:27
 msgid "toggle theme"
-msgstr ""
+msgstr "сменить тему"
 
 #: app/templates/landing.html:6
 msgid "Loading…"
-msgstr ""
+msgstr "Загрузка…"
 
 #: app/templates/landing.html:10
 msgid "Someone shared a secret with you."
-msgstr ""
+msgstr "Кто-то поделился с вами секретом."
 
 #: app/templates/landing.html:11
 msgid ""
 "This message can only be viewed once. After you reveal it, it will be "
 "permanently destroyed."
 msgstr ""
+"Это сообщение можно прочитать только один раз. После раскрытия оно будет "
+"безвозвратно уничтожено."
 
 #: app/templates/landing.html:13
 msgid "Passphrase"
-msgstr ""
+msgstr "Кодовая фраза"
 
 #: app/templates/landing.html:17 app/templates/sender.html:79
 msgid "show passphrase"
-msgstr ""
+msgstr "показать кодовую фразу"
 
 #: app/templates/landing.html:17 app/templates/login.html:14
 #: app/templates/login.html:22 app/templates/sender.html:79
 msgid "show"
-msgstr ""
+msgstr "показать"
 
 #: app/templates/landing.html:20
 msgid "Reveal Secret"
-msgstr ""
+msgstr "Раскрыть секрет"
 
 #: app/templates/landing.html:26
 msgid "Copy to clipboard"
-msgstr ""
+msgstr "Скопировать в буфер обмена"
 
 #: app/templates/landing.html:27
 msgid "This secret has been destroyed."
-msgstr ""
+msgstr "Этот секрет уничтожен."
 
 #: app/templates/landing.html:32
 msgid "Click to view full size"
-msgstr ""
+msgstr "Нажмите, чтобы посмотреть в оригинальном размере"
 
 #: app/templates/landing.html:33
 msgid "Click the image for full size · this secret has been destroyed."
-msgstr ""
+msgstr "Нажмите на изображение для просмотра в оригинальном размере · этот секрет уничтожен."
 
 #: app/templates/landing.html:37
 msgid "This secret is no longer available."
-msgstr ""
+msgstr "Этот секрет больше недоступен."
 
 #: app/templates/landing.html:38
 msgid "It may have already been viewed or has expired."
-msgstr ""
+msgstr "Возможно, он уже был просмотрен или истёк его срок."
 
 #: app/templates/landing.html:42
 msgid "Full-size image"
-msgstr ""
+msgstr "Изображение в оригинальном размере"
 
 #: app/templates/landing.html:44
 msgid "Close full-size view"
-msgstr ""
+msgstr "Закрыть просмотр в оригинальном размере"
 
 #: app/templates/landing.html:44
 msgid "close"
-msgstr ""
+msgstr "закрыть"
 
 #: app/templates/login.html:2
 msgid "ephemera — sign in"
-msgstr ""
+msgstr "ephemera — вход"
 
 #: app/templates/login.html:6
 msgid "Username"
-msgstr ""
+msgstr "Имя пользователя"
 
 #: app/templates/login.html:10
 msgid "Password"
-msgstr ""
+msgstr "Пароль"
 
 #: app/templates/login.html:14
 msgid "show password"
-msgstr ""
+msgstr "показать пароль"
 
 #: app/templates/login.html:17
 msgid "6-digit code"
-msgstr ""
+msgstr "6-значный код"
 
 #: app/templates/login.html:22
 msgid "show code"
-msgstr ""
+msgstr "показать код"
 
 #: app/templates/login.html:25
 msgid "Sign in"
-msgstr ""
+msgstr "Войти"
 
 #: app/templates/login.html:29
 msgid "Use a recovery code"
-msgstr ""
+msgstr "Использовать код восстановления"
 
 #: app/templates/sender.html:2
 msgid "ephemera — create secret"
-msgstr ""
+msgstr "ephemera — создать секрет"
 
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
-msgstr ""
+msgstr "выйти"
 
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
-msgstr ""
+msgstr "Отслеживаемые секреты"
 
 #: app/templates/sender.html:23
 msgid "Remove every row that is no longer pending — pending secrets are kept"
-msgstr ""
+msgstr "Удалить все строки, которые больше не ожидают просмотра — ожидающие секреты сохраняются"
 
 #: app/templates/sender.html:32
 msgid "Clear past entries"
-msgstr ""
+msgstr "Очистить прошлые записи"
 
 #: app/templates/sender.html:41
 msgid "Text"
-msgstr ""
+msgstr "Текст"
 
 #: app/templates/sender.html:42 app/templates/sender.html:52
 msgid "Image"
-msgstr ""
+msgstr "Изображение"
 
 #: app/templates/sender.html:47
 msgid "Enter your secret"
-msgstr ""
+msgstr "Введите ваш секрет"
 
 #: app/templates/sender.html:48
 msgid "Type your message..."
-msgstr ""
+msgstr "Введите сообщение..."
 
 #: app/templates/sender.html:54
 msgid "Drop image here or click to browse"
-msgstr ""
+msgstr "Перетащите изображение сюда или нажмите для выбора"
 
 #: app/templates/sender.html:58
 msgid "clear"
-msgstr ""
+msgstr "очистить"
 
 #: app/templates/sender.html:63
 msgid "Expires in"
-msgstr ""
+msgstr "Истекает через"
 
 #: app/templates/sender.html:65
 msgid "5 minutes"
-msgstr ""
+msgstr "5 минут"
 
 #: app/templates/sender.html:66
 msgid "30 minutes"
-msgstr ""
+msgstr "30 минут"
 
 #: app/templates/sender.html:67
 msgid "1 hour"
-msgstr ""
+msgstr "1 час"
 
 #: app/templates/sender.html:68
 msgid "4 hours"
-msgstr ""
+msgstr "4 часа"
 
 #: app/templates/sender.html:69
 msgid "12 hours"
-msgstr ""
+msgstr "12 часов"
 
 #: app/templates/sender.html:70
 msgid "24 hours"
-msgstr ""
+msgstr "24 часа"
 
 #: app/templates/sender.html:71
 msgid "3 days"
-msgstr ""
+msgstr "3 дня"
 
 #: app/templates/sender.html:72
 msgid "7 days"
-msgstr ""
+msgstr "7 дней"
 
 #: app/templates/sender.html:75
 msgid "Passphrase (optional)"
-msgstr ""
+msgstr "Кодовая фраза (необязательно)"
 
 #: app/templates/sender.html:85
 msgid "Track viewing status"
-msgstr ""
+msgstr "Отслеживать статус просмотра"
 
 #: app/templates/sender.html:89
 msgid "Label (for your tracked list)"
-msgstr ""
+msgstr "Метка (для списка отслеживания)"
 
 #: app/templates/sender.html:90
 msgid "e.g. API key for Acme"
-msgstr ""
+msgstr "напр. API-ключ для Acme"
 
 #: app/templates/sender.html:94
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
 msgstr ""
+"После создания вы больше не сможете прочитать содержимое — даже со своей "
+"стороны. Сохраните копию в другом месте, если она вам понадобится."
 
 #: app/templates/sender.html:96
 msgid "Create Secret"
-msgstr ""
+msgstr "Создать секрет"
 
 #: app/templates/sender.html:102
 msgid "Secret created."
-msgstr ""
+msgstr "Секрет создан."
 
 #: app/templates/sender.html:104
 msgid "Copy URL"
-msgstr ""
+msgstr "Скопировать URL"
 
 #: app/templates/sender.html:107
 msgid "Status"
-msgstr ""
+msgstr "Статус"
 
 #: app/templates/sender.html:111
 msgid "Create another"
-msgstr ""
-
+msgstr "Создать ещё"

@@ -1,1 +1,63 @@
-{}
+{
+  "error": {
+    "network": "Erreur réseau. Veuillez réessayer.",
+    "locked_with_until": "Trop de tentatives infructueuses. Verrouillé jusqu'à {{until}}.",
+    "locked": "Trop de tentatives infructueuses. Compte verrouillé.",
+    "too_many_attempts": "Trop de tentatives. Veuillez patienter un instant.",
+    "form_stale": "Les champs du formulaire sont obsolètes — rechargez la page (Ctrl+Maj+R) et réessayez.",
+    "invalid_credentials": "Identifiants non valides.",
+    "unexpected_http": "Erreur inattendue (HTTP {{status}}). Vérifiez les journaux du serveur.",
+    "missing_key": "Il manque la clé de déchiffrement à ce lien.",
+    "wrong_passphrase": "Phrase secrète incorrecte.",
+    "reveal_failed": "Impossible de révéler le secret.",
+    "request_failed": "La requête a échoué ({{status}}).",
+    "generic": "Une erreur est survenue.",
+    "please_enter_message": "Veuillez saisir un message.",
+    "please_select_image": "Veuillez sélectionner une image."
+  },
+  "button": {
+    "signing_in": "Connexion…",
+    "revealing": "Révélation…",
+    "creating": "Création…",
+    "copied": "Copié",
+    "copy_failed": "Échec de la copie",
+    "cancel": "annuler",
+    "confirm": "confirmer ?",
+    "canceling": "annulation…",
+    "clear_past": {
+      "one": "Effacer {{n}} entrée passée",
+      "many": "Effacer {{n}} entrées passées",
+      "other": "Effacer {{n}} entrées passées"
+    },
+    "clearing": "effacement…"
+  },
+  "status": {
+    "pending": "en attente",
+    "viewed": "consulté",
+    "burned": "détruit",
+    "canceled": "annulé",
+    "expired": "expiré",
+    "gone": "plus suivi"
+  },
+  "sender": {
+    "expires_prefix": "Expire : ",
+    "viewed_at_prefix": "à "
+  },
+  "tracked": {
+    "image_secret": "Secret image",
+    "text_secret": "Secret texte",
+    "copy_ok": "copié dans le presse-papiers",
+    "copy_fail": "échec de la copie",
+    "orphan_hint": "créé ailleurs",
+    "aria_remove": "retirer de la liste",
+    "aria_cancel": "annuler ce secret",
+    "tooltip_cancel": "Révoquer l'URL pour que le destinataire ne puisse plus la consulter",
+    "tooltip_copy": "Cliquer pour copier le lien",
+    "tooltip_orphan": "L'URL contient une clé de chiffrement stockée uniquement dans le navigateur où ce secret a été créé. Ouvrez ephemera dans ce navigateur pour copier le lien.",
+    "time_created": "créé {{when}}",
+    "time_viewed": "consulté {{when}}",
+    "time_burned": "détruit {{when}}",
+    "time_canceled": "annulé {{when}}",
+    "time_expired": "expiré {{when}}"
+  }
+}

@@ -1,1 +1,61 @@
-{}
+{
+  "error": {
+    "network": "網路錯誤。請再試一次。",
+    "locked_with_until": "失敗次數過多。已鎖定至 {{until}}。",
+    "locked": "失敗次數過多。帳號已鎖定。",
+    "too_many_attempts": "嘗試次數過多。請稍候再試。",
+    "form_stale": "表單欄位已過期 — 請強制重新整理頁面（Ctrl+Shift+R）後再試。",
+    "invalid_credentials": "憑證無效。",
+    "unexpected_http": "非預期的錯誤（HTTP {{status}}）。請檢查伺服器紀錄。",
+    "missing_key": "此連結缺少解密金鑰。",
+    "wrong_passphrase": "密語錯誤。",
+    "reveal_failed": "無法檢視祕密。",
+    "request_failed": "要求失敗（{{status}}）。",
+    "generic": "發生了一些問題。",
+    "please_enter_message": "請輸入訊息。",
+    "please_select_image": "請選擇圖片。"
+  },
+  "button": {
+    "signing_in": "登入中…",
+    "revealing": "檢視中…",
+    "creating": "建立中…",
+    "copied": "已複製",
+    "copy_failed": "複製失敗",
+    "cancel": "撤銷",
+    "confirm": "確認？",
+    "canceling": "撤銷中…",
+    "clear_past": {
+      "other": "清除 {{n}} 則歷史項目"
+    },
+    "clearing": "清除中…"
+  },
+  "status": {
+    "pending": "待檢視",
+    "viewed": "已檢視",
+    "burned": "已銷毀",
+    "canceled": "已撤銷",
+    "expired": "已過期",
+    "gone": "不再追蹤"
+  },
+  "sender": {
+    "expires_prefix": "有效期限: ",
+    "viewed_at_prefix": "於 "
+  },
+  "tracked": {
+    "image_secret": "圖片祕密",
+    "text_secret": "文字祕密",
+    "copy_ok": "已複製到剪貼簿",
+    "copy_fail": "複製失敗",
+    "orphan_hint": "在其他處建立",
+    "aria_remove": "從清單移除",
+    "aria_cancel": "撤銷此祕密",
+    "tooltip_cancel": "撤銷此 URL，使接收者無法再檢視此祕密",
+    "tooltip_copy": "點擊複製連結",
+    "tooltip_orphan": "此 URL 包含僅存放在建立此祕密的瀏覽器中的加密金鑰。請在該瀏覽器中開啟 ephemera 以複製連結。",
+    "time_created": "{{when}}建立",
+    "time_viewed": "{{when}}檢視",
+    "time_burned": "{{when}}銷毀",
+    "time_canceled": "{{when}}撤銷",
+    "time_expired": "{{when}}過期"
+  }
+}
