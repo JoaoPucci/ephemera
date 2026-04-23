@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"POT-Creation-Date: 2026-04-24 04:11+0900\n"
 "PO-Revision-Date: 2026-04-23 21:11+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: ar\n"
@@ -19,11 +19,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:21
+#: app/templates/_layout.html:49 app/templates/_layout.html:50
+msgid "open menu"
+msgstr "فتح القائمة"
+
+#: app/templates/_layout.html:51
+msgid "close menu"
+msgstr "إغلاق القائمة"
+
+#: app/templates/_layout.html:70
+msgid "signed in as"
+msgstr "تم تسجيل الدخول باسم"
+
+#: app/templates/_layout.html:77
+msgid "settings"
+msgstr "الإعدادات"
+
+#: app/templates/_layout.html:89 app/templates/_layout.html:94
+msgid "language"
+msgstr "اللغة"
+
+#: app/templates/_layout.html:121
+msgid "dark mode"
+msgstr "الوضع الداكن"
+
+#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr "تسجيل الخروج"
+
+#: app/templates/_layout.html:151
 msgid "Language"
 msgstr "اللغة"
 
-#: app/templates/_layout.html:27
+#: app/templates/_layout.html:157
 msgid "toggle theme"
 msgstr "تبديل السمة"
 
@@ -39,8 +68,7 @@ msgstr "شارك أحدهم سرًّا معك."
 msgid ""
 "This message can only be viewed once. After you reveal it, it will be "
 "permanently destroyed."
-msgstr ""
-"لا يمكن عرض هذه الرسالة إلا مرة واحدة. بعد كشفها سيتم إتلافها نهائيًا."
+msgstr "لا يمكن عرض هذه الرسالة إلا مرة واحدة. بعد كشفها سيتم إتلافها نهائيًا."
 
 #: app/templates/landing.html:13
 msgid "Passphrase"
@@ -130,10 +158,6 @@ msgstr "استخدام رمز الاسترداد"
 #: app/templates/sender.html:2
 msgid "ephemera — create secret"
 msgstr "ephemera — إنشاء سر"
-
-#: app/templates/sender.html:4 app/templates/sender.html:7
-msgid "sign out"
-msgstr "تسجيل الخروج"
 
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
@@ -228,8 +252,8 @@ msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
 msgstr ""
-"بعد إنشاء هذا السر، لن تتمكن من قراءة محتواه مرة أخرى — ولا حتى من جانبك. "
-"احتفظ بنسخة في مكان آخر إذا كنت ستحتاج إليها."
+"بعد إنشاء هذا السر، لن تتمكن من قراءة محتواه مرة أخرى — ولا حتى من جانبك."
+" احتفظ بنسخة في مكان آخر إذا كنت ستحتاج إليها."
 
 #: app/templates/sender.html:96
 msgid "Create Secret"
@@ -250,3 +274,4 @@ msgstr "الحالة"
 #: app/templates/sender.html:111
 msgid "Create another"
 msgstr "إنشاء سر آخر"
+

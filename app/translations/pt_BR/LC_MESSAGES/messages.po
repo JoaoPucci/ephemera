@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"POT-Creation-Date: 2026-04-24 04:11+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: pt_BR\n"
@@ -18,11 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:21
+#: app/templates/_layout.html:49 app/templates/_layout.html:50
+msgid "open menu"
+msgstr "abrir menu"
+
+#: app/templates/_layout.html:51
+msgid "close menu"
+msgstr "fechar menu"
+
+#: app/templates/_layout.html:70
+msgid "signed in as"
+msgstr "conectado como"
+
+#: app/templates/_layout.html:77
+msgid "settings"
+msgstr "configurações"
+
+#: app/templates/_layout.html:89 app/templates/_layout.html:94
+msgid "language"
+msgstr "idioma"
+
+#: app/templates/_layout.html:121
+msgid "dark mode"
+msgstr "modo escuro"
+
+#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr "sair"
+
+#: app/templates/_layout.html:151
 msgid "Language"
 msgstr "Idioma"
 
-#: app/templates/_layout.html:27
+#: app/templates/_layout.html:157
 msgid "toggle theme"
 msgstr "alternar tema"
 
@@ -131,17 +160,15 @@ msgstr "Usar código de recuperação"
 msgid "ephemera — create secret"
 msgstr "ephemera — criar segredo"
 
-#: app/templates/sender.html:4 app/templates/sender.html:7
-msgid "sign out"
-msgstr "sair"
-
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
 msgstr "Segredos que você está acompanhando"
 
 #: app/templates/sender.html:23
 msgid "Remove every row that is no longer pending — pending secrets are kept"
-msgstr "Remover todas as linhas que não estão mais pendentes — segredos pendentes são mantidos"
+msgstr ""
+"Remover todas as linhas que não estão mais pendentes — segredos pendentes"
+" são mantidos"
 
 #: app/templates/sender.html:32
 msgid "Clear past entries"
@@ -250,3 +277,4 @@ msgstr "Status"
 #: app/templates/sender.html:111
 msgid "Create another"
 msgstr "Criar outro"
+

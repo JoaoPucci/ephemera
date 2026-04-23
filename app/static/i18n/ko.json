@@ -31,7 +31,7 @@
     "clearing": "지우는 중…"
   },
   "menu": {
-    "sign_out_confirm": "really sign out?"
+    "sign_out_confirm": "정말 로그아웃할까요?"
   },
   "status": {
     "pending": "대기 중",

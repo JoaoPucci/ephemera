@@ -31,7 +31,7 @@
     "clearing": "清除中…"
   },
   "menu": {
-    "sign_out_confirm": "really sign out?"
+    "sign_out_confirm": "确定要退出登录？"
   },
   "status": {
     "pending": "待查看",

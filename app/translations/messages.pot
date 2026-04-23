@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"POT-Creation-Date: 2026-04-24 04:11+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,11 +17,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:21
+#: app/templates/_layout.html:49 app/templates/_layout.html:50
+msgid "open menu"
+msgstr ""
+
+#: app/templates/_layout.html:51
+msgid "close menu"
+msgstr ""
+
+#: app/templates/_layout.html:70
+msgid "signed in as"
+msgstr ""
+
+#: app/templates/_layout.html:77
+msgid "settings"
+msgstr ""
+
+#: app/templates/_layout.html:89 app/templates/_layout.html:94
+msgid "language"
+msgstr ""
+
+#: app/templates/_layout.html:121
+msgid "dark mode"
+msgstr ""
+
+#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr ""
+
+#: app/templates/_layout.html:151
 msgid "Language"
 msgstr ""
 
-#: app/templates/_layout.html:27
+#: app/templates/_layout.html:157
 msgid "toggle theme"
 msgstr ""
 
@@ -126,10 +155,6 @@ msgstr ""
 
 #: app/templates/sender.html:2
 msgid "ephemera — create secret"
-msgstr ""
-
-#: app/templates/sender.html:4 app/templates/sender.html:7
-msgid "sign out"
 msgstr ""
 
 #: app/templates/sender.html:14
