@@ -31,6 +31,9 @@
     },
     "clearing": "clearing…"
   },
+  "menu": {
+    "sign_out_confirm": "really sign out?"
+  },
   "status": {
     "pending": "pending",
     "viewed": "viewed",

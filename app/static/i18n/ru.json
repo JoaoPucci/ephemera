@@ -33,6 +33,9 @@
     },
     "clearing": "очистка…"
   },
+  "menu": {
+    "sign_out_confirm": "really sign out?"
+  },
   "status": {
     "pending": "ожидает",
     "viewed": "просмотрен",

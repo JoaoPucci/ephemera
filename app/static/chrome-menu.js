@@ -37,6 +37,12 @@
     if (open) root.dataset.chromeMenuOpen = 'true';
     else delete root.dataset.chromeMenuOpen;
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // aria-label swaps to match the action a tap would take (SR users
+    // hear "close menu" while the drawer is open, "open menu" when
+    // closed). Template stashes both strings in data attributes so the
+    // locale is resolved at render time, not JS time.
+    const nextLabel = open ? btn.dataset.labelOpen : btn.dataset.labelClosed;
+    if (nextLabel) btn.setAttribute('aria-label', nextLabel);
     if (panel) panel.setAttribute('aria-hidden', open ? 'false' : 'true');
     if (scrim) scrim.setAttribute('aria-hidden', open ? 'false' : 'true');
     if (open) {
@@ -158,9 +164,14 @@
       if (!armed) {
         armed = true;
         signoutBtn.classList.add('armed');
+        // Drawer-scoped confirm key (menu.sign_out_confirm). Distinct
+        // from the desktop pill's button.sign_out_confirm because the
+        // drawer row has full width -- the pill is width-constrained to
+        // avoid colliding with the language picker. Splitting the keys
+        // lets each surface have register-appropriate copy.
         const confirmText = (window.i18n && window.i18n.t)
-          ? window.i18n.t('button.sign_out_confirm')
-          : 'sure?';
+          ? window.i18n.t('menu.sign_out_confirm')
+          : 'really sign out?';
         signoutLabel.textContent = confirmText;
         armTimer = setTimeout(disarm, 3000);
         return;

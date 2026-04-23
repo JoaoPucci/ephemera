@@ -46,7 +46,9 @@
     <header class="chrome-bar">
       <button type="button" class="chrome-menu-btn" id="chrome-menu-btn"
               aria-expanded="false" aria-controls="chrome-menu-panel"
-              aria-label="{{ _('menu') }}">
+              aria-label="{{ _('open menu') }}"
+              data-label-closed="{{ _('open menu') }}"
+              data-label-open="{{ _('close menu') }}">
         <span class="chrome-menu-btn-icon" aria-hidden="true">
           <span class="chrome-menu-btn-icon-line"></span>
           <span class="chrome-menu-btn-icon-line"></span>
@@ -58,33 +60,38 @@
     <div class="chrome-menu-scrim" id="chrome-menu-scrim" aria-hidden="true"></div>
 
     <div class="chrome-menu-panel" id="chrome-menu-panel" role="menu" aria-hidden="true">
-      {# First section (when authenticated) -- the user name + "signed in"
-         self-announces without a header; the between-sections border
-         does the grouping work. #}
+      {# First section (when authenticated). Label-above-name order so the
+         "signed in as" prefix reads as the sentence-opener the name
+         completes, not as a redundant status stamped underneath. Matches
+         the label-first reading of every other row. #}
       {% if is_authenticated %}
       <section class="chrome-menu-section" style="--stagger-i: 0;">
         <div class="chrome-menu-user" role="none">
+          <span class="chrome-menu-user-sub">{{ _("signed in as") }}</span>
           <span class="chrome-menu-user-name" id="chrome-menu-user-name">&hellip;</span>
-          <span class="chrome-menu-user-sub">{{ _("signed in") }}</span>
         </div>
       </section>
       {% endif %}
 
       <section class="chrome-menu-section" style="--stagger-i: 1;">
-        <h2 class="chrome-menu-section-label">{{ _("preferences") }}</h2>
+        <h2 class="chrome-menu-section-label">{{ _("settings") }}</h2>
 
         {% if launched|length > 1 %}
+        {# Drawer row uses the lowercase `language` msgid for internal
+           consistency with the other lowercase rows; the desktop
+           <select>'s aria-label below the bar uses the title-cased
+           `Language` msgid (form-control field-label context). #}
         <label class="chrome-menu-row chrome-menu-row-select" role="menuitem">
           <svg class="chrome-menu-row-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
             <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
             <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" fill="none" stroke="currentColor" stroke-width="1.6"/>
           </svg>
-          <span class="chrome-menu-row-label">{{ _("Language") }}</span>
+          <span class="chrome-menu-row-label">{{ _("language") }}</span>
           <span class="chrome-menu-row-value" id="chrome-menu-lang-label">{{ language_labels[locale] }}</span>
           <svg class="chrome-menu-row-chevron" viewBox="0 0 24 24" aria-hidden="true" width="14" height="14">
             <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <select class="chrome-menu-row-native" id="chrome-menu-lang" aria-label="{{ _('Language') }}">
+          <select class="chrome-menu-row-native" id="chrome-menu-lang" aria-label="{{ _('language') }}">
             {% for tag in launched %}
             <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
             {% endfor %}
@@ -111,7 +118,7 @@
           <svg class="chrome-menu-row-icon chrome-menu-row-icon-moon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
             <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z" fill="currentColor"/>
           </svg>
-          <span class="chrome-menu-row-label">{{ _("theme") }}</span>
+          <span class="chrome-menu-row-label">{{ _("dark mode") }}</span>
           <span class="chrome-menu-switch" aria-hidden="true">
             <span class="chrome-menu-switch-thumb"></span>
           </span>

@@ -35,6 +35,9 @@
     },
     "clearing": "جارٍ المحو…"
   },
+  "menu": {
+    "sign_out_confirm": "really sign out?"
+  },
   "status": {
     "pending": "قيد الانتظار",
     "viewed": "تمت المشاهدة",

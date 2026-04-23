@@ -30,6 +30,9 @@
     },
     "clearing": "消去中…"
   },
+  "menu": {
+    "sign_out_confirm": "really sign out?"
+  },
   "status": {
     "pending": "保留中",
     "viewed": "閲覧済み",
