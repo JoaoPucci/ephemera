@@ -23,7 +23,7 @@
     "copy_failed": "コピー失敗",
     "cancel": "取り消す",
     "confirm": "よろしいですか？",
-    "sign_out_confirm": "サインアウト？",
+    "sign_out_confirm": "本当にサインアウトしますか？",
     "canceling": "取り消し中…",
     "clear_past": {
       "other": "過去のエントリー {{n}} 件を消去"

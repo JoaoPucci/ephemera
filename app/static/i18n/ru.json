@@ -23,7 +23,7 @@
     "copy_failed": "Не удалось скопировать",
     "cancel": "отменить",
     "confirm": "подтвердить?",
-    "sign_out_confirm": "точно?",
+    "sign_out_confirm": "подтвердить выход?",
     "canceling": "отмена…",
     "clear_past": {
       "one": "Очистить {{n}} прошлую запись",
