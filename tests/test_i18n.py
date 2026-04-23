@@ -127,10 +127,14 @@ def test_label_falls_back_to_cldr_endonym():
 # ---------------------------------------------------------------------------
 
 
-def test_direction_is_ltr_for_default_and_currently_launched_locales():
-    """Every locale we ship today is LTR. If a future addition of
-    Arabic/Hebrew/Farsi/Urdu changes this, the tripwire is explicit."""
+def test_direction_is_ltr_for_ltr_launched_locales():
+    """Every LTR locale we ship renders dir='ltr'. Arabic is the first
+    RTL locale in LAUNCHED; skip it (and any future RTL addition) so this
+    assertion pins the contract for the LTR surface without double-covering
+    what `test_direction_is_rtl_for_known_rtl_scripts` already asserts."""
     for tag in LAUNCHED:
+        if direction_for(tag) == "rtl":
+            continue
         assert direction_for(tag) == "ltr", f"{tag} unexpectedly RTL"
 
 
@@ -156,17 +160,14 @@ def test_html_dir_attribute_reflects_ltr_locale(client):
 
 def test_html_dir_attribute_reflects_rtl_locale(client):
     """Resolution accepts any SUPPORTED tag; direction follows. Arabic
-    isn't in SUPPORTED today, but the machinery is ready -- this test
-    monkeypatches SUPPORTED to include 'ar' and verifies the layout
-    renders dir='rtl'. When an Arabic catalog ships, this test starts
-    passing without a monkeypatch."""
-    # Use ?lang=ar which validates against SUPPORTED; monkeypatch to
-    # include 'ar' temporarily so resolution accepts it.
-    import app.i18n as i18n_mod
-    from unittest.mock import patch
-
-    with patch.object(i18n_mod, "SUPPORTED", i18n_mod.SUPPORTED + ("ar",)):
-        r = client.get("/send?lang=ar")
+    is the first real RTL locale to ship -- `ar` is auto-discovered from
+    the filesystem catalog, so this test checks the live behavior with
+    no monkeypatching."""
+    assert "ar" in SUPPORTED, (
+        "ar must be discovered from the filesystem catalog for this "
+        "test to exercise the RTL render path"
+    )
+    r = client.get("/send?lang=ar")
     assert 'dir="rtl"' in r.text
     assert 'lang="ar"' in r.text
 
