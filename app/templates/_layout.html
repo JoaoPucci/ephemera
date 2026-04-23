@@ -29,22 +29,87 @@
   {% block head_extra %}{% endblock %}
 </head>
 <body{% if is_authenticated %} data-authenticated="true"{% endif %}>
-  {# Prototype hamburger trigger -- only visible when <html> has
-     data-chrome-mode="hamburger" AND the viewport is below the mobile
-     breakpoint. Toggles data-chrome-menu-open on <html> so the CSS can
-     re-show the stacked chrome items as a drawer. #}
-  <button type="button" id="chrome-menu-btn" class="chrome-menu-btn"
-          aria-expanded="false" aria-controls="chrome-menu-panel"
-          aria-label="{{ _('menu') }}">
-    <span class="chrome-menu-btn-icon" aria-hidden="true"></span>
-  </button>
+  {# Prototype: unified hamburger menu component. Only visible when
+     <html data-chrome-mode="hamburger"> and the viewport is below the
+     mobile breakpoint. Button + panel share the same container so the
+     panel visually expands from the button; no stranded chrome items.
+     The panel contents are purpose-built rows adapted for a vertical
+     menu -- not reused copies of the desktop pills. #}
+  <div class="chrome-menu" id="chrome-menu">
+    <button type="button" class="chrome-menu-btn" id="chrome-menu-btn"
+            aria-expanded="false" aria-controls="chrome-menu-panel"
+            aria-label="{{ _('menu') }}">
+      <span class="chrome-menu-btn-icon" aria-hidden="true"></span>
+    </button>
+    <div class="chrome-menu-panel" id="chrome-menu-panel" role="menu" aria-hidden="true">
+      {% if is_authenticated %}
+      <div class="chrome-menu-user" role="none">
+        <span class="chrome-menu-user-name" id="chrome-menu-user-name">&hellip;</span>
+        <span class="chrome-menu-user-sub">{{ _("signed in") }}</span>
+      </div>
+      <hr class="chrome-menu-sep" role="none">
+      {% endif %}
+
+      {% if launched|length > 1 %}
+      <label class="chrome-menu-row chrome-menu-row-select" role="menuitem">
+        <svg class="chrome-menu-row-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        </svg>
+        <span class="chrome-menu-row-label">{{ _("Language") }}</span>
+        <span class="chrome-menu-row-value" id="chrome-menu-lang-label">{{ language_labels[locale] }}</span>
+        <select class="chrome-menu-row-native" id="chrome-menu-lang" aria-label="{{ _('Language') }}">
+          {% for tag in launched %}
+          <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+
+      <button type="button" class="chrome-menu-row" id="chrome-menu-theme" role="menuitem">
+        <svg class="chrome-menu-row-icon chrome-menu-row-icon-sun" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+          <circle cx="12" cy="12" r="4" fill="currentColor"/>
+          <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <line x1="12" y1="2.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="21.5"/>
+            <line x1="2.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="21.5" y2="12"/>
+            <line x1="5.2" y1="5.2" x2="7" y2="7"/><line x1="17" y1="17" x2="18.8" y2="18.8"/>
+            <line x1="5.2" y1="18.8" x2="7" y2="17"/><line x1="17" y1="7" x2="18.8" y2="5.2"/>
+          </g>
+        </svg>
+        <svg class="chrome-menu-row-icon chrome-menu-row-icon-moon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+          <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z" fill="currentColor"/>
+        </svg>
+        <span class="chrome-menu-row-label">{{ _("theme") }}</span>
+        <span class="chrome-menu-row-value" id="chrome-menu-theme-label"
+              data-light="{{ _('light') }}" data-dark="{{ _('dark') }}"></span>
+      </button>
+
+      {% if is_authenticated %}
+      <hr class="chrome-menu-sep" role="none">
+      <button type="button" class="chrome-menu-row chrome-menu-row-danger" id="chrome-menu-signout" role="menuitem">
+        <svg class="chrome-menu-row-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+          <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M10 8l-4 4 4 4M6 12h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="chrome-menu-row-label">{{ _("sign out") }}</span>
+      </button>
+      {% endif %}
+    </div>
+  </div>
   <div class="top-chrome top-chrome-right">
     {% if launched|length > 1 %}
-    <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
-      {% for tag in launched %}
-      <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
-      {% endfor %}
-    </select>
+    <span class="lang-picker-wrap">
+      <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
+        {% for tag in launched %}
+        <option value="{{ tag }}" data-code="{{ language_codes[tag] }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
+        {% endfor %}
+      </select>
+      {# Shrink-variant overlay: shows the 2-letter code of the selected
+         option. The <select> itself gets color:transparent in shrink mode
+         so only this overlay is visible; native popup still shows full
+         endonyms. Populated by chrome-mode.js from the <option data-code>. #}
+      <span class="lang-picker-code" id="lang-picker-code" aria-hidden="true">{{ language_codes[locale] }}</span>
+    </span>
     {% endif %}
     <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}"></button>
   </div>

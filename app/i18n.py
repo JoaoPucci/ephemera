@@ -158,6 +158,15 @@ LAUNCHED: tuple[str, ...] = tuple(
     tag for tag in SUPPORTED if tag not in _LAUNCH_OPT_OUT
 )
 
+# Short 2-3 letter display codes for the compact language picker variant.
+# Language-only tags use the ISO 639-1 code uppercased (en→EN, de→DE);
+# tags with a region collapse to the region (pt-BR→BR, zh-CN→CN, zh-TW→TW).
+# Keeps each code distinguishable without requiring a hand-curated map.
+LANGUAGE_CODES: dict[str, str] = {
+    tag: (tag.split("-")[-1] if "-" in tag else tag).upper()
+    for tag in SUPPORTED
+}
+
 # Set by the i18n middleware per request; read by lazy_gettext at str()-coerce
 # time. Default covers direct-imports in tests, the admin CLI, and any other
 # path where no middleware runs -- lazy strings render as English instead of
@@ -368,6 +377,7 @@ def template_context(request: Request) -> dict:
         "launched": LAUNCHED,
         "supported": SUPPORTED,
         "language_labels": LANGUAGE_LABELS,
+        "language_codes": LANGUAGE_CODES,
         "js_catalog": js_catalog(locale),
         "js_fallback": js_catalog(DEFAULT),
         # Not an auth surface -- just a rendering hint for JS. The server's
@@ -388,6 +398,7 @@ __all__ = [
     "DEFAULT",
     "POSIX_MAP",
     "LANGUAGE_LABELS",
+    "LANGUAGE_CODES",
     "current_locale",
     "direction_for",
     "negotiate",
