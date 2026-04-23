@@ -23,7 +23,7 @@
     "copy_failed": "Error al copiar",
     "cancel": "cancelar",
     "confirm": "¿confirmar?",
-    "sign_out_confirm": "¿cerrar sesión de verdad?",
+    "sign_out_confirm": "¿seguro?",
     "canceling": "cancelando…",
     "clear_past": {
       "one": "Borrar {{n}} entrada anterior",

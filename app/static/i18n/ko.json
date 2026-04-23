@@ -23,7 +23,7 @@
     "copy_failed": "복사 실패",
     "cancel": "취소",
     "confirm": "확인?",
-    "sign_out_confirm": "로그아웃할까요?",
+    "sign_out_confirm": "로그아웃?",
     "canceling": "취소 중…",
     "clear_past": {
       "other": "지난 항목 {{n}}개 지우기"
