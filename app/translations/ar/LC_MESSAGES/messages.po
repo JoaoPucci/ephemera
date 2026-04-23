@@ -1,0 +1,252 @@
+# Arabic translations for PROJECT.
+# Copyright (C) 2026 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"PO-Revision-Date: 2026-04-23 21:11+0900\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: ar\n"
+"Language-Team: ar <LL@li.org>\n"
+"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : "
+"n%100>=3 && n%100<=10 ? 3 : n%100>=0 && n%100<=2 ? 4 : 5);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: app/templates/_layout.html:21
+msgid "Language"
+msgstr "اللغة"
+
+#: app/templates/_layout.html:27
+msgid "toggle theme"
+msgstr "تبديل السمة"
+
+#: app/templates/landing.html:6
+msgid "Loading…"
+msgstr "جارٍ التحميل…"
+
+#: app/templates/landing.html:10
+msgid "Someone shared a secret with you."
+msgstr "شارك أحدهم سرًّا معك."
+
+#: app/templates/landing.html:11
+msgid ""
+"This message can only be viewed once. After you reveal it, it will be "
+"permanently destroyed."
+msgstr ""
+"لا يمكن عرض هذه الرسالة إلا مرة واحدة. بعد كشفها سيتم إتلافها نهائيًا."
+
+#: app/templates/landing.html:13
+msgid "Passphrase"
+msgstr "عبارة المرور"
+
+#: app/templates/landing.html:17 app/templates/sender.html:79
+msgid "show passphrase"
+msgstr "إظهار عبارة المرور"
+
+#: app/templates/landing.html:17 app/templates/login.html:14
+#: app/templates/login.html:22 app/templates/sender.html:79
+msgid "show"
+msgstr "إظهار"
+
+#: app/templates/landing.html:20
+msgid "Reveal Secret"
+msgstr "كشف السر"
+
+#: app/templates/landing.html:26
+msgid "Copy to clipboard"
+msgstr "نسخ إلى الحافظة"
+
+#: app/templates/landing.html:27
+msgid "This secret has been destroyed."
+msgstr "تم إتلاف هذا السر."
+
+#: app/templates/landing.html:32
+msgid "Click to view full size"
+msgstr "انقر لعرض الحجم الكامل"
+
+#: app/templates/landing.html:33
+msgid "Click the image for full size · this secret has been destroyed."
+msgstr "انقر على الصورة لعرض الحجم الكامل · تم إتلاف هذا السر."
+
+#: app/templates/landing.html:37
+msgid "This secret is no longer available."
+msgstr "هذا السر لم يعد متاحًا."
+
+#: app/templates/landing.html:38
+msgid "It may have already been viewed or has expired."
+msgstr "ربما تمت مشاهدته بالفعل أو انتهت صلاحيته."
+
+#: app/templates/landing.html:42
+msgid "Full-size image"
+msgstr "الصورة بالحجم الكامل"
+
+#: app/templates/landing.html:44
+msgid "Close full-size view"
+msgstr "إغلاق العرض بالحجم الكامل"
+
+#: app/templates/landing.html:44
+msgid "close"
+msgstr "إغلاق"
+
+#: app/templates/login.html:2
+msgid "ephemera — sign in"
+msgstr "ephemera — تسجيل الدخول"
+
+#: app/templates/login.html:6
+msgid "Username"
+msgstr "اسم المستخدم"
+
+#: app/templates/login.html:10
+msgid "Password"
+msgstr "كلمة المرور"
+
+#: app/templates/login.html:14
+msgid "show password"
+msgstr "إظهار كلمة المرور"
+
+#: app/templates/login.html:17
+msgid "6-digit code"
+msgstr "رمز مكوَّن من 6 أرقام"
+
+#: app/templates/login.html:22
+msgid "show code"
+msgstr "إظهار الرمز"
+
+#: app/templates/login.html:25
+msgid "Sign in"
+msgstr "تسجيل الدخول"
+
+#: app/templates/login.html:29
+msgid "Use a recovery code"
+msgstr "استخدام رمز الاسترداد"
+
+#: app/templates/sender.html:2
+msgid "ephemera — create secret"
+msgstr "ephemera — إنشاء سر"
+
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr "تسجيل الخروج"
+
+#: app/templates/sender.html:14
+msgid "Secrets you're tracking"
+msgstr "الأسرار التي تتتبَّعها"
+
+#: app/templates/sender.html:23
+msgid "Remove every row that is no longer pending — pending secrets are kept"
+msgstr "إزالة كل صف لم يعد قيد الانتظار — يتم الاحتفاظ بالأسرار قيد الانتظار"
+
+#: app/templates/sender.html:32
+msgid "Clear past entries"
+msgstr "محو الإدخالات السابقة"
+
+#: app/templates/sender.html:41
+msgid "Text"
+msgstr "نص"
+
+#: app/templates/sender.html:42 app/templates/sender.html:52
+msgid "Image"
+msgstr "صورة"
+
+#: app/templates/sender.html:47
+msgid "Enter your secret"
+msgstr "أدخل سرك"
+
+#: app/templates/sender.html:48
+msgid "Type your message..."
+msgstr "اكتب رسالتك..."
+
+#: app/templates/sender.html:54
+msgid "Drop image here or click to browse"
+msgstr "أفلت صورة هنا أو انقر للاستعراض"
+
+#: app/templates/sender.html:58
+msgid "clear"
+msgstr "مسح"
+
+#: app/templates/sender.html:63
+msgid "Expires in"
+msgstr "تنتهي الصلاحية بعد"
+
+#: app/templates/sender.html:65
+msgid "5 minutes"
+msgstr "5 دقائق"
+
+#: app/templates/sender.html:66
+msgid "30 minutes"
+msgstr "30 دقيقة"
+
+#: app/templates/sender.html:67
+msgid "1 hour"
+msgstr "ساعة واحدة"
+
+#: app/templates/sender.html:68
+msgid "4 hours"
+msgstr "4 ساعات"
+
+#: app/templates/sender.html:69
+msgid "12 hours"
+msgstr "12 ساعة"
+
+#: app/templates/sender.html:70
+msgid "24 hours"
+msgstr "24 ساعة"
+
+#: app/templates/sender.html:71
+msgid "3 days"
+msgstr "3 أيام"
+
+#: app/templates/sender.html:72
+msgid "7 days"
+msgstr "7 أيام"
+
+#: app/templates/sender.html:75
+msgid "Passphrase (optional)"
+msgstr "عبارة المرور (اختيارية)"
+
+#: app/templates/sender.html:85
+msgid "Track viewing status"
+msgstr "تتبُّع حالة المشاهدة"
+
+#: app/templates/sender.html:89
+msgid "Label (for your tracked list)"
+msgstr "تسمية (لقائمة التتبُّع الخاصة بك)"
+
+#: app/templates/sender.html:90
+msgid "e.g. API key for Acme"
+msgstr "مثلاً: مفتاح API لشركة Acme"
+
+#: app/templates/sender.html:94
+msgid ""
+"After you create this, you won't be able to read the content again — not "
+"even from your own side. Save a copy elsewhere if you'll want one."
+msgstr ""
+"بعد إنشاء هذا السر، لن تتمكن من قراءة محتواه مرة أخرى — ولا حتى من جانبك. "
+"احتفظ بنسخة في مكان آخر إذا كنت ستحتاج إليها."
+
+#: app/templates/sender.html:96
+msgid "Create Secret"
+msgstr "إنشاء السر"
+
+#: app/templates/sender.html:102
+msgid "Secret created."
+msgstr "تم إنشاء السر."
+
+#: app/templates/sender.html:104
+msgid "Copy URL"
+msgstr "نسخ الرابط"
+
+#: app/templates/sender.html:107
+msgid "Status"
+msgstr "الحالة"
+
+#: app/templates/sender.html:111
+msgid "Create another"
+msgstr "إنشاء سر آخر"

@@ -1,0 +1,66 @@
+{
+  "error": {
+    "network": "خطأ في الشبكة. يُرجى المحاولة مرة أخرى.",
+    "locked_with_until": "عدد كبير من المحاولات الفاشلة. مُقفل حتى {{until}}.",
+    "locked": "عدد كبير من المحاولات الفاشلة. تم قفل الحساب.",
+    "too_many_attempts": "عدد كبير من المحاولات. يُرجى الانتظار قليلاً.",
+    "form_stale": "حقول النموذج قديمة — أعد تحميل الصفحة تحميلاً كاملاً (Ctrl+Shift+R) ثم أعد المحاولة.",
+    "invalid_credentials": "بيانات اعتماد غير صالحة.",
+    "unexpected_http": "خطأ غير متوقع (HTTP {{status}}). راجع سجلات الخادم.",
+    "missing_key": "هذا الرابط يفتقد مفتاح فك التشفير.",
+    "wrong_passphrase": "عبارة مرور خاطئة.",
+    "reveal_failed": "تعذَّر كشف السر.",
+    "request_failed": "فشل الطلب ({{status}}).",
+    "generic": "حدث خطأ ما.",
+    "please_enter_message": "يُرجى إدخال رسالة.",
+    "please_select_image": "يُرجى اختيار صورة."
+  },
+  "button": {
+    "signing_in": "جارٍ تسجيل الدخول…",
+    "revealing": "جارٍ الكشف…",
+    "creating": "جارٍ الإنشاء…",
+    "copied": "تم النسخ",
+    "copy_failed": "فشل النسخ",
+    "cancel": "إلغاء",
+    "confirm": "تأكيد؟",
+    "canceling": "جارٍ الإلغاء…",
+    "clear_past": {
+      "zero": "محو {{n}} إدخال سابق",
+      "one": "محو {{n}} إدخال سابق",
+      "two": "محو {{n}} إدخالين سابقين",
+      "few": "محو {{n}} إدخالات سابقة",
+      "many": "محو {{n}} إدخالًا سابقًا",
+      "other": "محو {{n}} إدخال سابق"
+    },
+    "clearing": "جارٍ المحو…"
+  },
+  "status": {
+    "pending": "قيد الانتظار",
+    "viewed": "تمت المشاهدة",
+    "burned": "أُتلف",
+    "canceled": "أُلغي",
+    "expired": "منتهي الصلاحية",
+    "gone": "لم يعد متتبَّعًا"
+  },
+  "sender": {
+    "expires_prefix": "تنتهي الصلاحية: ",
+    "viewed_at_prefix": "في "
+  },
+  "tracked": {
+    "image_secret": "سر صورة",
+    "text_secret": "سر نصي",
+    "copy_ok": "تم النسخ إلى الحافظة",
+    "copy_fail": "فشل النسخ",
+    "orphan_hint": "أُنشئ في مكان آخر",
+    "aria_remove": "إزالة من القائمة",
+    "aria_cancel": "إلغاء هذا السر",
+    "tooltip_cancel": "إبطال الرابط حتى لا يتمكن المستلم من مشاهدته بعد الآن",
+    "tooltip_copy": "انقر لنسخ الرابط",
+    "tooltip_orphan": "يتضمن الرابط مفتاح تشفير مُخزَّنًا فقط في المتصفح الذي أُنشئ فيه هذا السر. افتح ephemera في ذلك المتصفح لنسخ الرابط.",
+    "time_created": "أُنشئ {{when}}",
+    "time_viewed": "شوهد {{when}}",
+    "time_burned": "أُتلف {{when}}",
+    "time_canceled": "أُلغي {{when}}",
+    "time_expired": "انتهت صلاحيته {{when}}"
+  }
+}
