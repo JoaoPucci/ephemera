@@ -1291,30 +1291,31 @@ button.copy-error:hover {
             appearance: none;
     transition: background 0.15s, color 0.15s;
   }
-  /* Scope :hover to mouse-pointer devices. On touch browsers (Brave /
-     Chrome on Android in particular) :hover persists after a tap, which
-     kept a visible circular pill painted under the X while the drawer
-     was open. (hover: hover) keeps the desktop hover affordance while
-     touch devices never paint that pill. */
+  /* Nuke all interaction-state styling inherited from the global
+     `button:hover` / `button:focus-visible` rules (above, around
+     lines 311 / 317). Those rules paint an accent background + lift +
+     shadow on every <button> and on touch browsers they fire on tap,
+     which is what reads as a ghost circle around the hamburger's X
+     after opening the drawer. The class+pseudo specificity here (20)
+     beats the global element+pseudo (11), so the nuke sticks even on
+     touch where our own hover-scoped rules don't match. */
+  .chrome-menu-btn:hover,
+  .chrome-menu-btn:active,
+  .chrome-menu-btn:focus,
+  .chrome-menu-btn:focus-visible {
+    background: transparent;
+    transform: none;
+    box-shadow: none;
+    outline: none;
+  }
+  /* Re-apply hover + focus-visible affordances only on hover-capable
+     devices, where they're expected (mouse, laptops with keyboards).
+     Touch-only devices (phones, tablets) never paint either one. */
   @media (hover: hover) {
     .chrome-menu-btn:hover {
       background: color-mix(in srgb, var(--muted) 12%, transparent);
     }
-  }
-  /* Suppress the UA focus outline on all focus states; Chromium's
-     default outline follows the button's border-radius, which reads
-     as a persistent circle around the X after a tap. */
-  .chrome-menu-btn:focus {
-    outline: none;
-  }
-  /* The accent-color focus ring is keyboard-for-a11y, not touch. Scope
-     the ring to hover-capable devices (mice + laptops with keyboards);
-     touch-only devices (phones, tablets) never paint it, because some
-     Chromium versions fire :focus-visible for tap too and the ring
-     reads as a persistent ghost circle around the X. */
-  @media (hover: hover) {
     .chrome-menu-btn:focus-visible {
-      outline: none;
       box-shadow: var(--focus-ring);
     }
   }
