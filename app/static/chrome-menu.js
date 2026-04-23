@@ -33,6 +33,14 @@
     )).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
   }
 
+  // Touch devices: blurring the tapped target immediately removes the
+  // native focus indicator that Android Chromium paints as a persistent
+  // subtle halo (independent of CSS :focus overrides). Skipped on
+  // pointer: fine (keyboard / desktop) so the focus-trap + visible
+  // focus-ring behaviour for a11y isn't lost.
+  const isTouchOnly = typeof window.matchMedia === 'function'
+    && window.matchMedia('(hover: none)').matches;
+
   function setOpen(open) {
     if (open) root.dataset.chromeMenuOpen = 'true';
     else delete root.dataset.chromeMenuOpen;
@@ -45,9 +53,11 @@
     if (nextLabel) btn.setAttribute('aria-label', nextLabel);
     if (panel) panel.setAttribute('aria-hidden', open ? 'false' : 'true');
     if (scrim) scrim.setAttribute('aria-hidden', open ? 'false' : 'true');
-    if (open) {
+    if (open && !isTouchOnly) {
       // Move focus into the panel so screen readers start there and Esc
-      // works without the user having to tab in first.
+      // works without the user having to tab in first. Skipped on touch
+      // because moving focus to a hidden <select> overlay would paint
+      // the same halo on that row, not clear it.
       const first = focusableInPanel()[0];
       if (first) setTimeout(() => first.focus(), 50);
     }
@@ -56,6 +66,10 @@
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     setOpen(root.dataset.chromeMenuOpen !== 'true');
+    // On touch devices the hamburger keeps focus after the tap, which
+    // paints Android Chromium's native focus halo. Blur explicitly so
+    // no element holds focus unless the user actually keyboard-tabbed.
+    if (isTouchOnly && typeof btn.blur === 'function') btn.blur();
   });
 
   if (scrim) {
@@ -143,6 +157,7 @@
       e.preventDefault();
       const desktop = document.getElementById('theme-toggle');
       if (desktop) desktop.click();
+      if (isTouchOnly && typeof themeBtn.blur === 'function') themeBtn.blur();
       // syncThemeState fires via the MutationObserver when the data-theme
       // attribute flips, no need to call it manually here.
     });
