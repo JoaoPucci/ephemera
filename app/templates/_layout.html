@@ -17,9 +17,6 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js"></script>
-  {# Prototype: responsive chrome variants ("?chrome=hamburger" | "?chrome=shrink").
-     Runs early so the data-chrome-mode attribute is set before first paint. #}
-  <script src="/static/chrome-mode.js"></script>
   {# CSP is script-src 'self' -- inline <script> with code is blocked, but
      <script type="application/json"> embeds as data (no execution) and is
      CSP-safe. i18n.js reads both nodes from the DOM at init. #}
@@ -29,20 +26,20 @@
   {% block head_extra %}{% endblock %}
 </head>
 <body{% if is_authenticated %} data-authenticated="true"{% endif %}>
-  {# Prototype: mobile chrome. Only visible when <html data-chrome-mode=
-     "hamburger"> AND the viewport is below the mobile breakpoint. Three
-     parts: a fixed top bar (brand + hamburger), a backdrop scrim that
-     fades in with the drawer, and the drawer itself (slides down from
-     under the bar). Rows are purpose-built for a vertical menu, grouped
-     into sections with uppercase muted labels, and the drawer traps
-     focus while open. #}
+  {# Mobile chrome. Only renders below the mobile breakpoint (the
+     desktop top-chrome + user pill stand in above it). Three parts: a
+     fixed top bar that holds the hamburger button, a backdrop scrim
+     that fades in with the drawer, and the drawer itself (slides down
+     from under the bar). Rows are purpose-built for a vertical menu,
+     grouped into sections with uppercase muted labels, and the drawer
+     traps focus while open. #}
   <div class="chrome-menu" id="chrome-menu">
     {# Bar is intentionally invisible: it's only an anchor slot for the
        hamburger button and a notional top edge for the drawer to slide
        from. The wordmark + version keep their default position (above
-       the card, in document flow) so the page's own H1 owns the top
-       of the mobile view and the brand keeps its paired-baseline
-       signature treatment across breakpoints. #}
+       the card, in document flow) so the page's own H1 owns the top of
+       the mobile view and the brand keeps its paired-baseline signature
+       treatment across breakpoints. #}
     <header class="chrome-bar">
       <button type="button" class="chrome-menu-btn" id="chrome-menu-btn"
               aria-expanded="false" aria-controls="chrome-menu-panel"

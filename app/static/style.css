@@ -1218,36 +1218,34 @@ button.copy-error:hover {
 /* ===================================================================
    Mobile chrome: hamburger menu
 
-   Activated via `?chrome=hamburger` (chrome-mode.js sets
-   html[data-chrome-mode] at head-parse time). Engages only below the
-   mobile breakpoint; desktop renders unchanged.
-
-   Anatomy: a fixed top bar (brand + hamburger) + a backdrop scrim +
-   a drawer that slides down from under the bar. Rows are purpose-built
-   for a vertical menu, grouped into sections, with a switch-style
-   toggle for theme and a two-click confirm for sign-out.
+   Replaces the desktop top-chrome + user pill below the mobile
+   breakpoint. Anatomy: a fixed (invisible) top bar that anchors the
+   hamburger button, a backdrop scrim that fades in with the drawer,
+   and a drawer that slides down from under the bar. Rows are
+   purpose-built for a vertical menu, grouped into sections, with a
+   switch-style toggle for theme and a two-click confirm for sign-out.
    =================================================================== */
 
-/* The whole component is display:none off-mobile; the variant rule
-   inside the @media block below is the single opt-in. */
+/* Hidden above the mobile breakpoint; the @media block below is the
+   single opt-in. */
 .chrome-menu { display: none; }
 
 @media (max-width: 480px) {
 
-  /* In hamburger mode the desktop top-chrome + user-btn step aside --
-     the drawer replaces them. The bottom wordmark + .app-version STAY
+  /* The desktop top-chrome + user-btn step aside at mobile -- the
+     drawer replaces them. The bottom wordmark + .app-version STAY
      visible: they're the brand signature and belong in their paired-
-     baseline position under the card, not squeezed into a toolbar. */
-  html[data-chrome-mode="hamburger"] .top-chrome,
-  html[data-chrome-mode="hamburger"] .user-btn { display: none; }
+     baseline position above the card, not squeezed into a toolbar. */
+  .top-chrome,
+  .user-btn { display: none; }
 
-  html[data-chrome-mode="hamburger"] body {
+  body {
     /* Reserve room for the hamburger button's fixed slot; content begins
        below the notional bar line even though the bar itself is invisible. */
     padding-top: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
   }
 
-  html[data-chrome-mode="hamburger"] .chrome-menu { display: block; }
+  .chrome-menu { display: block; }
 
   /* ----- Top bar -----
      Intentionally invisible. The bar is a structural slot -- a landing
