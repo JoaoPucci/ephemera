@@ -17,6 +17,9 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js"></script>
+  {# Prototype: responsive chrome variants ("?chrome=hamburger" | "?chrome=shrink").
+     Runs early so the data-chrome-mode attribute is set before first paint. #}
+  <script src="/static/chrome-mode.js"></script>
   {# CSP is script-src 'self' -- inline <script> with code is blocked, but
      <script type="application/json"> embeds as data (no execution) and is
      CSP-safe. i18n.js reads both nodes from the DOM at init. #}
@@ -26,6 +29,15 @@
   {% block head_extra %}{% endblock %}
 </head>
 <body{% if is_authenticated %} data-authenticated="true"{% endif %}>
+  {# Prototype hamburger trigger -- only visible when <html> has
+     data-chrome-mode="hamburger" AND the viewport is below the mobile
+     breakpoint. Toggles data-chrome-menu-open on <html> so the CSS can
+     re-show the stacked chrome items as a drawer. #}
+  <button type="button" id="chrome-menu-btn" class="chrome-menu-btn"
+          aria-expanded="false" aria-controls="chrome-menu-panel"
+          aria-label="{{ _('menu') }}">
+    <span class="chrome-menu-btn-icon" aria-hidden="true"></span>
+  </button>
   <div class="top-chrome top-chrome-right">
     {% if launched|length > 1 %}
     <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
@@ -47,5 +59,6 @@
   <small class="app-version">{{ version }}</small>
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
+  <script src="/static/chrome-menu.js"></script>
 </body>
 </html>

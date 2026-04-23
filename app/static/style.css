@@ -1214,3 +1214,130 @@ button.copy-error:hover {
   #user-name { max-width: 4rem; }
   .wordmark { font-size: 0.8rem; }
 }
+
+/* ===================================================================
+   Prototype: responsive chrome variants (temporary)
+
+   Activated via `?chrome=hamburger` or `?chrome=shrink` in the URL.
+   The query param is captured by chrome-mode.js and mirrored to
+   html[data-chrome-mode]. Both variants only engage below the mobile
+   breakpoint; desktop renders the default chrome either way.
+
+   Keep this block self-contained so the losing variant can be ripped
+   out cleanly once we pick a direction.
+   =================================================================== */
+
+/* Hamburger button is present in the DOM on every page but hidden by
+   default; only the hamburger variant at mobile width reveals it. */
+.chrome-menu-btn { display: none; }
+
+@media (max-width: 480px) {
+  /* ---------- Variant: hamburger ----------
+     Default (drawer closed): hide the chrome row + user pill, show only
+     the hamburger button at the top-right.
+     Open (html[data-chrome-menu-open]): flip the hamburger to an X and
+     re-show the chrome items stacked below it as a faux-drawer. */
+
+  html[data-chrome-mode="hamburger"] .top-chrome,
+  html[data-chrome-mode="hamburger"] .user-btn {
+    display: none;
+  }
+  html[data-chrome-mode="hamburger"] .chrome-menu-btn {
+    display: flex;
+    position: fixed;
+    top: 0.5rem;
+    inset-inline-end: 0.5rem;
+    z-index: 11;
+    align-items: center;
+    justify-content: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    padding: 0;
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  /* Icon: unicode hamburger glyph when closed, X when open. CSS-swapped
+     via the pseudo's content string. */
+  html[data-chrome-mode="hamburger"] .chrome-menu-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+  html[data-chrome-mode="hamburger"] .chrome-menu-btn-icon::before {
+    content: "\2630";  /* ☰ */
+  }
+  html[data-chrome-mode="hamburger"][data-chrome-menu-open] .chrome-menu-btn-icon::before {
+    content: "\2715";  /* ✕ */
+  }
+
+  /* Drawer open: stack the items vertically under the hamburger. They
+     keep their original pill styling; we just reposition and flex-column
+     the container. */
+  html[data-chrome-mode="hamburger"][data-chrome-menu-open] .top-chrome {
+    display: flex;
+    top: 3.2rem;
+    inset-inline-end: 0.5rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+    padding: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    z-index: 11;
+  }
+  html[data-chrome-mode="hamburger"][data-chrome-menu-open] .user-btn {
+    display: inline-flex;
+    position: fixed;
+    top: auto;
+    bottom: auto;
+    inset-inline-start: auto;
+    inset-inline-end: 0.5rem;
+    /* Placed below the .top-chrome drawer; rough offset based on picker
+       + toggle heights at this breakpoint. Good enough for prototype. */
+    top: calc(3.2rem + 3.8rem + 0.35rem);
+    z-index: 11;
+  }
+
+  /* ---------- Variant: shrink-in-place ----------
+     Keep everything horizontal but compact each item. User pill becomes
+     dot-only; language picker reduced to its chevron plus a narrow
+     display. Theme toggle unchanged (already icon-only). */
+
+  html[data-chrome-mode="shrink"] .user-btn {
+    padding: 0.35rem;
+    gap: 0;
+  }
+  html[data-chrome-mode="shrink"] .user-btn #user-name,
+  html[data-chrome-mode="shrink"] .user-btn .user-sep,
+  html[data-chrome-mode="shrink"] .user-btn .user-action {
+    display: none;
+  }
+  /* In the armed state, show just the action text (e.g. "sure?") next to
+     the dot; user-name + sep remain hidden so the pill stays compact. */
+  html[data-chrome-mode="shrink"] .user-btn.armed .user-action {
+    display: inline;
+    margin-inline-start: 0.35rem;
+  }
+
+  html[data-chrome-mode="shrink"] .lang-picker {
+    /* Clip the endonym down to ~2.5rem so only the first glyph(s) show.
+       Prototype shortcut -- keeps all locale options in the native popup
+       while the pill stays compact. */
+    min-width: 0;
+    max-width: 3rem;
+    padding-inline: 0.5rem 1.3rem;
+    background-position: right 0.35rem center;
+  }
+  [dir="rtl"] html[data-chrome-mode="shrink"] .lang-picker {
+    background-position: left 0.35rem center;
+  }
+}
