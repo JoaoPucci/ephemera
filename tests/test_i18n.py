@@ -13,6 +13,7 @@ from app.i18n import (
     SUPPORTED,
     _validate,
     current_locale,
+    direction_for,
     gettext_for,
     js_catalog,
     lazy_gettext,
@@ -115,6 +116,59 @@ def test_label_falls_back_to_cldr_endonym():
     assert _label_for("de") == "Deutsch"
     assert _label_for("ja") == "日本語"
     assert _label_for("ko") == "한국어"
+
+
+# ---------------------------------------------------------------------------
+# Text direction (LTR vs RTL)
+#
+# The template renders <html dir="..."> using the value returned by
+# direction_for(); CSS logical properties then flip layout automatically.
+# Sourced from CLDR via Babel -- no hand-maintained RTL tag list.
+# ---------------------------------------------------------------------------
+
+
+def test_direction_is_ltr_for_default_and_currently_launched_locales():
+    """Every locale we ship today is LTR. If a future addition of
+    Arabic/Hebrew/Farsi/Urdu changes this, the tripwire is explicit."""
+    for tag in LAUNCHED:
+        assert direction_for(tag) == "ltr", f"{tag} unexpectedly RTL"
+
+
+def test_direction_is_rtl_for_known_rtl_scripts():
+    """Babel's CLDR data assigns 'rtl' to Arabic, Hebrew, Farsi, and Urdu.
+    Pin the contract -- if Babel ever ships a CLDR update that changes
+    this, we want to know."""
+    for tag in ("ar", "he", "fa", "ur"):
+        assert direction_for(tag) == "rtl", f"{tag} unexpectedly LTR"
+
+
+def test_direction_falls_back_to_ltr_on_unknown_tag():
+    """A bogus tag is treated as LTR rather than crashing. Matches the
+    rest of resolve_locale's tolerance -- bad locale hints are UX
+    degrades, not errors."""
+    assert direction_for("xyz-nonsense") == "ltr"
+
+
+def test_html_dir_attribute_reflects_ltr_locale(client):
+    r = client.get("/send")
+    assert 'dir="ltr"' in r.text
+
+
+def test_html_dir_attribute_reflects_rtl_locale(client):
+    """Resolution accepts any SUPPORTED tag; direction follows. Arabic
+    isn't in SUPPORTED today, but the machinery is ready -- this test
+    monkeypatches SUPPORTED to include 'ar' and verifies the layout
+    renders dir='rtl'. When an Arabic catalog ships, this test starts
+    passing without a monkeypatch."""
+    # Use ?lang=ar which validates against SUPPORTED; monkeypatch to
+    # include 'ar' temporarily so resolution accepts it.
+    import app.i18n as i18n_mod
+    from unittest.mock import patch
+
+    with patch.object(i18n_mod, "SUPPORTED", i18n_mod.SUPPORTED + ("ar",)):
+        r = client.get("/send?lang=ar")
+    assert 'dir="rtl"' in r.text
+    assert 'lang="ar"' in r.text
 
 
 def test_discover_requires_po_for_non_default_locales(tmp_path, monkeypatch):
@@ -329,31 +383,31 @@ def test_js_catalog_non_en_locales_are_populated():
 def test_locale_default_is_english_with_no_hints(client):
     r = client.get("/send")
     assert r.status_code == 200
-    assert '<html lang="en">' in r.text
+    assert 'lang="en"' in r.text
 
 
 def test_locale_query_param_wins(client):
     r = client.get("/send?lang=ja")
-    assert '<html lang="ja">' in r.text
+    assert 'lang="ja"' in r.text
     r = client.get("/send?lang=zh-TW")
-    assert '<html lang="zh-TW">' in r.text
+    assert 'lang="zh-TW"' in r.text
 
 
 def test_locale_cookie_wins_over_accept_language(client):
     client.cookies.set("ephemera_lang_v1", "es")
     r = client.get("/send", headers={"Accept-Language": "ja"})
-    assert '<html lang="es">' in r.text
+    assert 'lang="es"' in r.text
 
 
 def test_locale_query_param_wins_over_cookie(client):
     client.cookies.set("ephemera_lang_v1", "es")
     r = client.get("/send?lang=pt-BR", headers={"Accept-Language": "ja"})
-    assert '<html lang="pt-BR">' in r.text
+    assert 'lang="pt-BR"' in r.text
 
 
 def test_locale_accept_language_negotiation(client):
     r = client.get("/send", headers={"Accept-Language": "pt-BR,en;q=0.9"})
-    assert '<html lang="pt-BR">' in r.text
+    assert 'lang="pt-BR"' in r.text
 
 
 def test_locale_unknown_falls_through_silently(client):
@@ -362,7 +416,7 @@ def test_locale_unknown_falls_through_silently(client):
     # precedence chain (Accept-Language, then DEFAULT).
     r = client.get("/send?lang=xx", headers={"Accept-Language": "ja"})
     assert r.status_code == 200
-    assert '<html lang="ja">' in r.text
+    assert 'lang="ja"' in r.text
 
 
 def test_locale_authed_user_preference_wins_over_header(authed_client, provisioned_user):
@@ -372,7 +426,7 @@ def test_locale_authed_user_preference_wins_over_header(authed_client, provision
 
     users_model.set_preferred_language(provisioned_user["id"], "zh-CN")
     r = authed_client.get("/send", headers={"Accept-Language": "ja"})
-    assert '<html lang="zh-CN">' in r.text
+    assert 'lang="zh-CN"' in r.text
 
 
 def test_locale_cookie_beats_user_preference(authed_client, provisioned_user):
@@ -383,7 +437,7 @@ def test_locale_cookie_beats_user_preference(authed_client, provisioned_user):
     users_model.set_preferred_language(provisioned_user["id"], "zh-CN")
     authed_client.cookies.set("ephemera_lang_v1", "ja")
     r = authed_client.get("/send")
-    assert '<html lang="ja">' in r.text
+    assert 'lang="ja"' in r.text
 
 
 # ---------------------------------------------------------------------------
