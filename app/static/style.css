@@ -1230,6 +1230,17 @@ button.copy-error:hover {
    single opt-in. */
 .chrome-menu { display: none; }
 
+/* Kill Android Chromium's tap-highlight overlay on every interactive
+   element in the drawer. Chrome / Brave / Samsung Internet on Android
+   paint a subtle semi-transparent rectangle/circle over tapped elements
+   by default; on round/full-width interactive surfaces that reads as a
+   ghost halo after tap. Scoped to .chrome-menu so it doesn't blanket
+   the whole app. */
+.chrome-menu *,
+.chrome-menu {
+  -webkit-tap-highlight-color: transparent;
+}
+
 @media (max-width: 480px) {
 
   /* The desktop top-chrome + user-btn step aside at mobile -- the
