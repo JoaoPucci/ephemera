@@ -41,6 +41,18 @@
     "expires_prefix": "만료: ",
     "viewed_at_prefix": "시각: "
   },
+  "login": {
+    "code_label_totp": "6자리 코드",
+    "code_label_recovery": "복구 코드",
+    "toggle_to_recovery": "복구 코드 사용",
+    "toggle_to_totp": "6자리 코드 사용",
+    "show": "표시",
+    "hide": "숨김",
+    "aria_show_password": "비밀번호 표시",
+    "aria_hide_password": "비밀번호 숨김",
+    "aria_show_code": "코드 표시",
+    "aria_hide_code": "코드 숨김"
+  },
   "tracked": {
     "image_secret": "이미지 비밀",
     "text_secret": "텍스트 비밀",

@@ -44,6 +44,18 @@
     "expires_prefix": "Истекает: ",
     "viewed_at_prefix": "в "
   },
+  "login": {
+    "code_label_totp": "6-значный код",
+    "code_label_recovery": "Код восстановления",
+    "toggle_to_recovery": "Использовать код восстановления",
+    "toggle_to_totp": "Использовать 6-значный код",
+    "show": "показать",
+    "hide": "скрыть",
+    "aria_show_password": "показать пароль",
+    "aria_hide_password": "скрыть пароль",
+    "aria_show_code": "показать код",
+    "aria_hide_code": "скрыть код"
+  },
   "tracked": {
     "image_secret": "Секрет-изображение",
     "text_secret": "Секрет-текст",

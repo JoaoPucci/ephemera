@@ -41,6 +41,18 @@
     "expires_prefix": "过期时间: ",
     "viewed_at_prefix": "于 "
   },
+  "login": {
+    "code_label_totp": "6 位数字验证码",
+    "code_label_recovery": "恢复码",
+    "toggle_to_recovery": "使用恢复码",
+    "toggle_to_totp": "使用 6 位数字验证码",
+    "show": "显示",
+    "hide": "隐藏",
+    "aria_show_password": "显示密码",
+    "aria_hide_password": "隐藏密码",
+    "aria_show_code": "显示验证码",
+    "aria_hide_code": "隐藏验证码"
+  },
   "tracked": {
     "image_secret": "图片秘密",
     "text_secret": "文本秘密",
