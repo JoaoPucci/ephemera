@@ -37,11 +37,12 @@
      into sections with uppercase muted labels, and the drawer traps
      focus while open. #}
   <div class="chrome-menu" id="chrome-menu">
-    {# Bar is intentionally invisible: it's only a landing edge for the
-       drawer and an anchor for the hamburger button. The wordmark and
-       version stay in their desktop position (bottom-centered, under
-       the card) so the page's own H1 owns the top of the mobile view
-       and the brand keeps its paired-baseline signature treatment. #}
+    {# Bar is intentionally invisible: it's only an anchor slot for the
+       hamburger button and a notional top edge for the drawer to slide
+       from. The wordmark + version keep their default position (above
+       the card, in document flow) so the page's own H1 owns the top
+       of the mobile view and the brand keeps its paired-baseline
+       signature treatment across breakpoints. #}
     <header class="chrome-bar">
       <button type="button" class="chrome-menu-btn" id="chrome-menu-btn"
               aria-expanded="false" aria-controls="chrome-menu-panel"

@@ -1270,13 +1270,17 @@ button.copy-error:hover {
     z-index: 12;
   }
 
-  /* ----- Hamburger button ----- */
+  /* ----- Hamburger button -----
+     44px (2.75rem) hit target: Apple HIG minimum; Material recommends
+     48px but 44px clears both WCAG 2.5.8 and platform guidance. The
+     glyph inside stays small (18x14) so visual weight doesn't change,
+     only the touchable area. */
   .chrome-menu-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2.15rem;
-    height: 2.15rem;
+    width: 2.75rem;
+    height: 2.75rem;
     padding: 0;
     border: 0;
     border-radius: 999px;
