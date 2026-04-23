@@ -1294,13 +1294,20 @@ button.copy-error:hover {
   /* Scope :hover to mouse-pointer devices. On touch browsers (Brave /
      Chrome on Android in particular) :hover persists after a tap, which
      kept a visible circular pill painted under the X while the drawer
-     was open -- and the pill's bottom edge looked like it overlapped
-     the drawer. (hover: hover) keeps the desktop hover affordance while
+     was open. (hover: hover) keeps the desktop hover affordance while
      touch devices never paint that pill. */
   @media (hover: hover) {
     .chrome-menu-btn:hover {
       background: color-mix(in srgb, var(--muted) 12%, transparent);
     }
+  }
+  /* Suppress the UA focus outline for mouse/touch focus -- Chromium
+     follows the button's border-radius, so the default outline reads
+     as a persistent circle around the X after tapping. :focus-visible
+     below still paints the accent ring for keyboard users so a11y
+     isn't lost. */
+  .chrome-menu-btn:focus {
+    outline: none;
   }
   .chrome-menu-btn:focus-visible {
     outline: none;
