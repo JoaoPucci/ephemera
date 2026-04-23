@@ -1301,17 +1301,22 @@ button.copy-error:hover {
       background: color-mix(in srgb, var(--muted) 12%, transparent);
     }
   }
-  /* Suppress the UA focus outline for mouse/touch focus -- Chromium
-     follows the button's border-radius, so the default outline reads
-     as a persistent circle around the X after tapping. :focus-visible
-     below still paints the accent ring for keyboard users so a11y
-     isn't lost. */
+  /* Suppress the UA focus outline on all focus states; Chromium's
+     default outline follows the button's border-radius, which reads
+     as a persistent circle around the X after a tap. */
   .chrome-menu-btn:focus {
     outline: none;
   }
-  .chrome-menu-btn:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
+  /* The accent-color focus ring is keyboard-for-a11y, not touch. Scope
+     the ring to hover-capable devices (mice + laptops with keyboards);
+     touch-only devices (phones, tablets) never paint it, because some
+     Chromium versions fire :focus-visible for tap too and the ring
+     reads as a persistent ghost circle around the X. */
+  @media (hover: hover) {
+    .chrome-menu-btn:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
+    }
   }
 
   /* Icon: 3 lines built from spans, no SVG. Top and bottom rotate into
