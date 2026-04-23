@@ -1234,55 +1234,40 @@ button.copy-error:hover {
 
 @media (max-width: 480px) {
 
-  /* When hamburger mode is active at mobile, the desktop chrome items
-     step aside entirely -- the bar + drawer replace them -- and the
-     bottom wordmark + version hide because the bar carries the brand. */
+  /* In hamburger mode the desktop top-chrome + user-btn step aside --
+     the drawer replaces them. The bottom wordmark + .app-version STAY
+     visible: they're the brand signature and belong in their paired-
+     baseline position under the card, not squeezed into a toolbar. */
   html[data-chrome-mode="hamburger"] .top-chrome,
-  html[data-chrome-mode="hamburger"] .user-btn,
-  html[data-chrome-mode="hamburger"] .wordmark,
-  html[data-chrome-mode="hamburger"] .app-version { display: none; }
+  html[data-chrome-mode="hamburger"] .user-btn { display: none; }
 
   html[data-chrome-mode="hamburger"] body {
-    /* Reserve room for the fixed top bar. */
+    /* Reserve room for the hamburger button's fixed slot; content begins
+       below the notional bar line even though the bar itself is invisible. */
     padding-top: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
   }
 
   html[data-chrome-mode="hamburger"] .chrome-menu { display: block; }
 
-  /* ----- Top bar ----- */
+  /* ----- Top bar -----
+     Intentionally invisible. The bar is a structural slot -- a landing
+     edge for the drawer to slide from, and an anchor point for the
+     hamburger button -- not a visible surface. pointer-events skip the
+     empty area so taps reach the page underneath; the button itself
+     opts back in. */
   .chrome-bar {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     height: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
-    padding: max(0.5rem, env(safe-area-inset-top)) 1rem 0;
+    padding: max(0.5rem, env(safe-area-inset-top)) 0.75rem 0;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
-    backdrop-filter: saturate(180%) blur(14px);
-    -webkit-backdrop-filter: saturate(180%) blur(14px);
-    border-bottom: 1px solid var(--border);
+    justify-content: flex-end;
+    background: transparent;
+    pointer-events: none;
     z-index: 12;
-  }
-  .chrome-bar-brand {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    min-width: 0;
-  }
-  .chrome-bar-brand-mark {
-    font-size: 1rem;
-    font-weight: 500;
-    color: var(--text);
-    letter-spacing: -0.01em;
-  }
-  .chrome-bar-brand-version {
-    font-size: 0.7rem;
-    color: var(--muted);
-    letter-spacing: 0.02em;
-    font-variant-numeric: tabular-nums;
   }
 
   /* ----- Hamburger button ----- */
@@ -1298,6 +1283,7 @@ button.copy-error:hover {
     background: transparent;
     color: var(--text);
     cursor: pointer;
+    pointer-events: auto;
     transition: background 0.15s, color 0.15s;
   }
   .chrome-menu-btn:hover {

@@ -37,17 +37,15 @@
      into sections with uppercase muted labels, and the drawer traps
      focus while open. #}
   <div class="chrome-menu" id="chrome-menu">
+    {# Bar is intentionally invisible: it's only a landing edge for the
+       drawer and an anchor for the hamburger button. The wordmark and
+       version stay in their desktop position (bottom-centered, under
+       the card) so the page's own H1 owns the top of the mobile view
+       and the brand keeps its paired-baseline signature treatment. #}
     <header class="chrome-bar">
-      <span class="chrome-bar-brand">
-        <span class="chrome-bar-brand-mark">ephemera</span>
-        <small class="chrome-bar-brand-version">{{ version }}</small>
-      </span>
       <button type="button" class="chrome-menu-btn" id="chrome-menu-btn"
               aria-expanded="false" aria-controls="chrome-menu-panel"
               aria-label="{{ _('menu') }}">
-        {# Three-line hamburger that morphs into an X: top + bottom lines
-           rotate to form the X arms; middle line fades out. Pure CSS on
-           transform. #}
         <span class="chrome-menu-btn-icon" aria-hidden="true">
           <span class="chrome-menu-btn-icon-line"></span>
           <span class="chrome-menu-btn-icon-line"></span>
@@ -59,9 +57,11 @@
     <div class="chrome-menu-scrim" id="chrome-menu-scrim" aria-hidden="true"></div>
 
     <div class="chrome-menu-panel" id="chrome-menu-panel" role="menu" aria-hidden="true">
+      {# First section (when authenticated) -- the user name + "signed in"
+         self-announces without a header; the between-sections border
+         does the grouping work. #}
       {% if is_authenticated %}
       <section class="chrome-menu-section" style="--stagger-i: 0;">
-        <h2 class="chrome-menu-section-label">{{ _("account") }}</h2>
         <div class="chrome-menu-user" role="none">
           <span class="chrome-menu-user-name" id="chrome-menu-user-name">&hellip;</span>
           <span class="chrome-menu-user-sub">{{ _("signed in") }}</span>
