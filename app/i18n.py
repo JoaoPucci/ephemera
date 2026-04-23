@@ -98,6 +98,21 @@ def _label_for(tag: str) -> str:
     return loc.get_display_name(locale=loc)
 
 
+def direction_for(tag: str) -> str:
+    """Return 'rtl' for right-to-left scripts (Arabic, Hebrew, Farsi, Urdu,
+    etc.), 'ltr' for everything else. Sourced from CLDR via Babel -- no
+    hand-maintained RTL tag list. Rendered into <html dir="..."> so the
+    browser picks up direction and CSS logical properties flip the layout
+    correctly.
+
+    Falls back to 'ltr' on an unknown tag (same tolerance as resolve_locale:
+    a bad tag is a UX degrade, not an error)."""
+    try:
+        return Locale.parse(tag.replace("-", "_")).text_direction
+    except UnknownLocaleError:
+        return "ltr"
+
+
 @lru_cache(maxsize=1)
 def _discover() -> tuple[tuple[str, ...], dict[str, str], dict[str, str]]:
     """Walk app/static/i18n/*.json for candidate BCP-47 tags; for each,
@@ -302,6 +317,11 @@ def template_context(request: Request) -> dict:
     return {
         "request": request,
         "locale": locale,
+        # Rendered into <html dir="..."> so CSS logical properties
+        # (margin-inline-start, inset-inline-start, etc.) flip for RTL
+        # scripts (ar/he/fa/ur). Sourced from CLDR via Babel; zero hand-
+        # maintained RTL set.
+        "dir": direction_for(locale),
         "_": gettext_for(locale),
         # `launched` drives the picker; `supported` is the resolution surface
         # (still queryable via ?lang=, cookie, DB pref). The picker hides
@@ -325,6 +345,7 @@ __all__ = [
     "POSIX_MAP",
     "LANGUAGE_LABELS",
     "current_locale",
+    "direction_for",
     "negotiate",
     "resolve_locale",
     "get_locale",
