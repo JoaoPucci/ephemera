@@ -23,7 +23,7 @@
     "copy_failed": "复制失败",
     "cancel": "撤销",
     "confirm": "确认？",
-    "sign_out_confirm": "确定？",
+    "sign_out_confirm": "确定退出？",
     "canceling": "撤销中…",
     "clear_past": {
       "other": "清除 {{n}} 条历史条目"

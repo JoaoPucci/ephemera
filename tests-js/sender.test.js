@@ -252,7 +252,7 @@ describe('sender.js — user button sign-out two-click confirm', () => {
     await flushAsync();
 
     expect(userBtn().classList.contains('armed')).toBe(true);
-    expect(actionLabel()).toBe('sure?');
+    expect(actionLabel()).toBe('sign out?');
     // aria-label flips so screen readers get the re-prompt
     expect(userBtn().getAttribute('aria-label')).toContain('confirm');
     // No /send/logout POST yet
@@ -285,7 +285,7 @@ describe('sender.js — user button sign-out two-click confirm', () => {
 
     userBtn().click();  // arm
     expect(userBtn().classList.contains('armed')).toBe(true);
-    expect(actionLabel()).toBe('sure?');
+    expect(actionLabel()).toBe('sign out?');
 
     vi.advanceTimersByTime(3000);
 

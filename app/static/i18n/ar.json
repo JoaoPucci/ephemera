@@ -23,7 +23,7 @@
     "copy_failed": "فشل النسخ",
     "cancel": "إلغاء",
     "confirm": "تأكيد؟",
-    "sign_out_confirm": "تأكيد؟",
+    "sign_out_confirm": "تأكيد الخروج؟",
     "canceling": "جارٍ الإلغاء…",
     "clear_past": {
       "zero": "محو {{n}} إدخال سابق",
