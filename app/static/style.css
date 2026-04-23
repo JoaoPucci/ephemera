@@ -565,6 +565,22 @@ button.copy-error:hover {
 }
 .user-btn:hover .user-dot { background: var(--danger); }
 
+/* Armed state: first click prepares the sign-out, second click commits
+   (see sender.js). Visually stronger than :hover -- same danger-colour
+   family, but with a deliberate background tint so users can tell at a
+   glance that the button is "armed" rather than just being moused-over. */
+.user-btn.armed {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.user-btn.armed #user-name,
+.user-btn.armed .user-sep,
+.user-btn.armed .user-action {
+  color: var(--danger);
+}
+.user-btn.armed .user-dot { background: var(--danger); }
+
 .user-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
