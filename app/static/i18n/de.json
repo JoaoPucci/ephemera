@@ -23,6 +23,7 @@
     "copy_failed": "Kopieren fehlgeschlagen",
     "cancel": "abbrechen",
     "confirm": "bestätigen?",
+    "sign_out_confirm": "sicher?",
     "canceling": "Abbrechen…",
     "clear_past": {
       "one": "{{n}} vergangenen Eintrag löschen",

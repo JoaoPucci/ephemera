@@ -16,8 +16,8 @@ document.getElementById('copy-url').addEventListener('click', (e) => {
 // Top-left user pill: shows the signed-in username. Two-click confirm
 // for sign-out so accidental clicks don't blow away the session. Same
 // shape as the tracked-list cancel button: first click arms (adds
-// .armed class, swaps the action label to `button.confirm`, 3s auto-
-// disarm timeout); second click while armed fires the logout.
+// .armed class, swaps the action label to `button.sign_out_confirm`,
+// 3s auto-disarm timeout); second click while armed fires the logout.
 const userBtn = document.getElementById('user-btn');
 const userNameEl = document.getElementById('user-name');
 if (userBtn) {
@@ -38,7 +38,7 @@ if (userBtn) {
   userBtn.addEventListener('click', async () => {
     if (!userBtn.classList.contains('armed')) {
       userBtn.classList.add('armed');
-      if (actionEl) actionEl.textContent = window.i18n.t('button.confirm');
+      if (actionEl) actionEl.textContent = window.i18n.t('button.sign_out_confirm');
       userBtn.setAttribute('aria-label', 'Click again to confirm sign out');
       armTimer = setTimeout(disarm, 3000);
       return;
