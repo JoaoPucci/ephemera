@@ -6,7 +6,12 @@ import { flushAsync, jsonResponse, loadModule } from './helpers.js';
 // the IIFE guards against missing elements where it matters.
 function mountSender() {
   document.body.innerHTML = `
-    <button type="button" id="user-btn"><span id="user-name">…</span></button>
+    <button type="button" id="user-btn" class="user-btn" aria-label="Signed in as admin. Click to sign out.">
+      <span class="user-dot"></span>
+      <span id="user-name">…</span>
+      <span class="user-sep">·</span>
+      <span class="user-action">sign out</span>
+    </button>
     <section id="tracked-section" hidden>
       <button type="button" id="tracked-header" aria-expanded="false"></button>
       <span id="tracked-count">0</span>
@@ -204,5 +209,92 @@ describe('sender.js — create-secret in-flight guard', () => {
     const createCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/secrets');
     expect(createCalls.length).toBe(0);
     expect(document.getElementById('sender-error').hidden).toBe(false);
+  });
+});
+
+
+describe('sender.js — user button sign-out two-click confirm', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  // Extend the default sender stub with a /send/logout handler. We hang the
+  // logout promise so the handler's trailing window.location.reload() is
+  // never reached -- jsdom's reload is non-configurable and can't be spied
+  // on cleanly, and we only need to verify the fetch was fired. Hanging the
+  // promise is the same trick tracked-cancel's existing tests would use.
+  function stubSenderFetchWithLogout(createHandler) {
+    return vi.fn((url, opts) => {
+      if (url === '/send/logout') return new Promise(() => {});  // hang
+      if (url === '/api/me') {
+        return Promise.resolve(jsonResponse({ id: 1, username: 'admin', email: null }));
+      }
+      if (url === '/api/secrets/tracked') {
+        return Promise.resolve(jsonResponse({ items: [] }));
+      }
+      if (url === '/api/secrets') {
+        return createHandler ? createHandler(opts) : new Promise(() => {});
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+  }
+
+  function userBtn() { return document.getElementById('user-btn'); }
+  function actionLabel() { return userBtn().querySelector('.user-action').textContent; }
+
+  it('first click arms the button without firing logout', async () => {
+    const fetchMock = stubSenderFetchWithLogout();
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    userBtn().click();
+    await flushAsync();
+
+    expect(userBtn().classList.contains('armed')).toBe(true);
+    expect(actionLabel()).toBe('sure?');
+    // aria-label flips so screen readers get the re-prompt
+    expect(userBtn().getAttribute('aria-label')).toContain('confirm');
+    // No /send/logout POST yet
+    const logoutCalls = fetchMock.mock.calls.filter(([url]) => url === '/send/logout');
+    expect(logoutCalls.length).toBe(0);
+  });
+
+  it('second click while armed fires the logout', async () => {
+    const fetchMock = stubSenderFetchWithLogout();
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    userBtn().click();          // arm
+    await flushAsync();
+    userBtn().click();          // confirm
+    await flushAsync();
+
+    const logoutCalls = fetchMock.mock.calls.filter(([url]) => url === '/send/logout');
+    expect(logoutCalls.length).toBe(1);
+    expect(logoutCalls[0][1]?.method).toBe('POST');
+  });
+
+  it('auto-disarms after the 3s timeout and restores the original label', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubSenderFetchWithLogout();
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await vi.runOnlyPendingTimersAsync();
+
+    userBtn().click();  // arm
+    expect(userBtn().classList.contains('armed')).toBe(true);
+    expect(actionLabel()).toBe('sure?');
+
+    vi.advanceTimersByTime(3000);
+
+    expect(userBtn().classList.contains('armed')).toBe(false);
+    expect(actionLabel()).toBe('sign out');
+    // Logout still not fired -- the timeout disarmed, no commit.
+    const logoutCalls = fetchMock.mock.calls.filter(([url]) => url === '/send/logout');
+    expect(logoutCalls.length).toBe(0);
+
+    vi.useRealTimers();
   });
 });
