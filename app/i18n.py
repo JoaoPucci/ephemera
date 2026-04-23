@@ -181,11 +181,45 @@ def _validate(tag: Optional[str]) -> Optional[str]:
     return lowered.get(tag.lower())
 
 
+_CHINESE_ROUTING: dict[str, str] = {
+    # Simplified targets -> zh-CN. Singapore (SG) aligned to PRC Simplified
+    # since 1976; bare `zh` defaults here because the Simplified speaker
+    # base is ~30x larger and a bare `zh` header typically means a
+    # misconfigured client rather than a specific signal.
+    "zh": "zh-CN",
+    "zh-sg": "zh-CN",
+    "zh-hans": "zh-CN",
+    "zh-hans-cn": "zh-CN",
+    "zh-hans-sg": "zh-CN",
+    # Traditional targets -> zh-TW. Hong Kong (HK) and Macao (MO) use
+    # traditional script; we serve them the Taiwan catalog rather than
+    # maintaining a third variant. HK vocabulary differs slightly in the
+    # domains Microsoft/Apple earn their third locale over (network,
+    # software, printer), but ephemera's vocabulary (secret, passphrase,
+    # expired, destroyed) reads identically in both registers -- "Taiwan-
+    # flavored to a HK reader but not served wrong content." Revisit if
+    # ephemera ever scales to end-users at HK/MO scale.
+    "zh-hk": "zh-TW",
+    "zh-mo": "zh-TW",
+    "zh-hant": "zh-TW",
+    "zh-hant-hk": "zh-TW",
+    "zh-hant-mo": "zh-TW",
+    "zh-hant-tw": "zh-TW",
+}
+
+
 def negotiate(accept_language: Optional[str]) -> str:
     """Best-match a SUPPORTED locale from an Accept-Language header. Scans
     entries in order (browsers emit the preferred locale first) and returns
-    the first exact-or-primary-subtag hit. No q-value weighting -- not worth
-    the complexity for a six-locale list."""
+    the first exact-or-aliased-or-primary-subtag hit. No q-value weighting
+    -- not worth the complexity for a ten-locale list.
+
+    Chinese variant routing fires between exact-match and primary-subtag:
+    `zh-SG` / `zh-Hans*` route to `zh-CN`; `zh-HK` / `zh-MO` / `zh-Hant*`
+    route to `zh-TW`; bare `zh` routes to `zh-CN`. The alias only applies
+    when the target catalog is actually in SUPPORTED -- if a future
+    deployment drops zh-CN or zh-TW, the routing silently disables
+    rather than returning a tag that doesn't resolve."""
     if not accept_language:
         return DEFAULT
     lowered = {s.lower(): s for s in SUPPORTED}
@@ -193,10 +227,14 @@ def negotiate(accept_language: Optional[str]) -> str:
         tag = part.split(";", 1)[0].strip()
         if not tag:
             continue
-        hit = lowered.get(tag.lower())
+        canonical = tag.lower()
+        hit = lowered.get(canonical)
         if hit:
             return hit
-        primary = tag.split("-", 1)[0].lower()
+        alias = _CHINESE_ROUTING.get(canonical)
+        if alias and alias in SUPPORTED:
+            return alias
+        primary = canonical.split("-", 1)[0]
         if primary in lowered:
             return lowered[primary]
     return DEFAULT

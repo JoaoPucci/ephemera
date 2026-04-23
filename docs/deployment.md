@@ -485,6 +485,25 @@ they've diverged.
 Unknown tags fall through silently. Locale is advisory, so a bad hint
 never 400s a request.
 
+**Chinese variant routing.** `negotiate()` maps the regional and script
+variants of Chinese to the right catalog between exact-match and
+primary-subtag fallback:
+
+| Accept-Language tag | Routes to |
+|---|---|
+| `zh-SG`, `zh-Hans`, `zh-Hans-CN`, `zh-Hans-SG` | `zh-CN` (Simplified) |
+| `zh-HK`, `zh-MO`, `zh-Hant`, `zh-Hant-HK`, `zh-Hant-MO`, `zh-Hant-TW` | `zh-TW` (Traditional) |
+| `zh` (bare) | `zh-CN` (larger speaker base; default for unspecified) |
+
+Singapore aligned to PRC Simplified in 1976; Hong Kong and Macao use
+Traditional with vocabulary differences from Taiwan that ephemera's
+UI surface (secrets, passphrases, expiries) doesn't materially touch.
+Revisit if ephemera ever scales to end-user volume in HK/MO. The
+routing only fires when the target catalog (`zh-CN` or `zh-TW`) is
+actually in `SUPPORTED` — if a future deployment drops one of those,
+the alias silently disables rather than returning a tag that can't
+resolve.
+
 ### Error-response shape (API contract)
 
 HTTP error responses across the app now use a structured `detail`

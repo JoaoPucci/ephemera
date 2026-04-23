@@ -286,9 +286,13 @@ def test_negotiate_honours_browser_order():
 def test_negotiate_primary_subtag_fallback():
     # Regional variants fall back to their primary if it's supported.
     assert negotiate("es-MX") == "es"
-    # 'zh-HK' primary is 'zh', which we don't list as a bare tag, so it
-    # falls through to the default rather than guessing zh-CN vs zh-TW.
-    assert negotiate("zh-HK") == DEFAULT
+    # `fr-CA` primary is `fr`, which IS in SUPPORTED. Pin the fallback;
+    # swap the example if French ever gets its own Canadian catalog.
+    assert negotiate("fr-CA") == "fr"
+    # `it-IT` primary is `it`, not in SUPPORTED -- falls through to
+    # DEFAULT. Verifies the primary-subtag path still bottoms out
+    # correctly for unsupported languages.
+    assert negotiate("it-IT") == DEFAULT
 
 
 def test_negotiate_unknown_returns_default():
@@ -296,6 +300,96 @@ def test_negotiate_unknown_returns_default():
     # If either gets added later, pick different unused tags here.
     assert negotiate("it,hi") == DEFAULT
     assert negotiate("it-IT") == DEFAULT
+
+
+# ---------------------------------------------------------------------------
+# Chinese variant routing
+#
+# Accept-Language tags from regional/script variants of Chinese route to the
+# right catalog (Simplified vs Traditional) instead of falling through to
+# English. Singapore uses Simplified; Hong Kong and Macao use Traditional.
+# Bare `zh` with no region routes to Simplified as the utilitarian default.
+# ---------------------------------------------------------------------------
+
+
+def test_negotiate_routes_zh_sg_to_simplified():
+    """Singapore aligned to PRC Simplified in 1976; zh-SG gets zh-CN."""
+    assert negotiate("zh-SG") == "zh-CN"
+
+
+def test_negotiate_routes_zh_hk_to_traditional():
+    """Hong Kong uses Traditional. Vocabulary differs from Taiwan in
+    domains ephemera doesn't touch (network, software, printer), so
+    zh-HK -> zh-TW is a defensible mapping at ephemera's tier rather
+    than maintaining a third variant."""
+    assert negotiate("zh-HK") == "zh-TW"
+
+
+def test_negotiate_routes_zh_mo_to_traditional():
+    """Macao, like HK, uses Traditional. Same reasoning as HK routing."""
+    assert negotiate("zh-MO") == "zh-TW"
+
+
+def test_negotiate_routes_zh_hans_variants_to_simplified():
+    """Explicit script tags should be honored: zh-Hans* always Simplified."""
+    assert negotiate("zh-Hans") == "zh-CN"
+    assert negotiate("zh-Hans-CN") == "zh-CN"
+    assert negotiate("zh-Hans-SG") == "zh-CN"
+
+
+def test_negotiate_routes_zh_hant_variants_to_traditional():
+    """zh-Hant* always Traditional, regardless of regional subtag."""
+    assert negotiate("zh-Hant") == "zh-TW"
+    assert negotiate("zh-Hant-HK") == "zh-TW"
+    assert negotiate("zh-Hant-MO") == "zh-TW"
+    assert negotiate("zh-Hant-TW") == "zh-TW"
+
+
+def test_negotiate_routes_bare_zh_to_simplified():
+    """Bare `zh` with no region/script is utilitarian-defaulted to the
+    larger speaker base (Simplified, ~30x Traditional). A bare tag often
+    means a misconfigured client rather than a specific signal."""
+    assert negotiate("zh") == "zh-CN"
+
+
+def test_negotiate_chinese_routing_is_case_insensitive():
+    """Accept-Language tags come in mixed case in the wild (ZH-HK, Zh-Hk
+    etc.); the routing table normalizes before lookup."""
+    assert negotiate("ZH-HK") == "zh-TW"
+    assert negotiate("Zh-Hk") == "zh-TW"
+    assert negotiate("zh-hk") == "zh-TW"
+
+
+def test_negotiate_chinese_exact_match_still_wins():
+    """Exact match beats alias routing -- a client sending zh-CN directly
+    gets zh-CN without going through the alias table."""
+    assert negotiate("zh-CN") == "zh-CN"
+    assert negotiate("zh-TW") == "zh-TW"
+
+
+def test_negotiate_chinese_routing_respects_supported(monkeypatch):
+    """If a future deployment drops zh-CN from SUPPORTED, the zh-SG alias
+    must NOT return a tag that doesn't resolve. Verified by monkeypatching
+    SUPPORTED to exclude zh-CN and confirming the alias silently disables
+    (falls through to DEFAULT since zh-SG has no other match)."""
+    import app.i18n as i18n_mod
+
+    monkeypatch.setattr(
+        i18n_mod, "SUPPORTED", tuple(t for t in i18n_mod.SUPPORTED if t != "zh-CN")
+    )
+    assert i18n_mod.negotiate("zh-SG") == DEFAULT
+
+
+def test_negotiate_chinese_routing_honors_browser_order():
+    """When Accept-Language carries multiple tags, routing fires on the
+    first matchable one. Browsers emit preferred-first, so the alias
+    resolves in that priority order along with the rest of the stack."""
+    # User's primary language is HK traditional; secondary is English.
+    # The alias fires on the first token.
+    assert negotiate("zh-HK,en;q=0.9") == "zh-TW"
+    # Primary is unsupported (hi), secondary is HK. Alias fires on the
+    # second token since the first had no match.
+    assert negotiate("hi,zh-HK;q=0.9,en;q=0.8") == "zh-TW"
 
 
 def test_negotiate_empty_and_none():
