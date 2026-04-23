@@ -4,6 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}ephemera{% endblock %}</title>
+  {# Favicon: lowercase 'e' in Geist Medium centered in a filled circle.
+     Two variants routed via the link's media attribute. Brave / Chrome
+     / Safari honour this and flip with the browser's prefers-color-
+     scheme; Firefox honours it too but evaluates at page-load only
+     (won't re-flip on a live theme change without a reload, and
+     Firefox-specific Website-appearance settings may pin it to one
+     variant). Safari pinned-tab uses the mask-icon fallback. #}
+  <link rel="icon" type="image/svg+xml" href="/static/favicon-light.svg" media="(prefers-color-scheme: light)">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)">
+  <link rel="mask-icon" href="/static/favicon-dark.svg" color="#18181b">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js"></script>
