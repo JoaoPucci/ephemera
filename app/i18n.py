@@ -350,6 +350,7 @@ def template_context(request: Request) -> dict:
     # Lazy import mirrors resolve_locale() -- keeps app.i18n importable from
     # low layers without pulling the dependencies graph at import time.
     from .dependencies import current_user_id
+    from .version import VERSION
 
     locale = getattr(request.state, "locale", DEFAULT)
     return {
@@ -373,6 +374,11 @@ def template_context(request: Request) -> dict:
         # real auth happens at endpoint-level dependencies. A forged
         # data-authenticated attribute gets a 401 on the next write call.
         "is_authenticated": current_user_id(request) is not None,
+        # `git describe` at module-import time; rendered into the bottom-
+        # center footer so operators can see what's deployed without
+        # SSH'ing in. Tag name on a clean production deploy; tag-N-gsha
+        # shape when drift is present.
+        "version": VERSION,
     }
 
 

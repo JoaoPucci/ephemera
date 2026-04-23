@@ -39,8 +39,29 @@ body {
   color: var(--muted);
   font-size: 0.95rem;
   letter-spacing: 0.05em;
-  margin-bottom: 1.5rem;
+  /* Tight against the version tag below; the wordmark + version form
+     one brand block, so most of the breathing room to the card sits on
+     the version's own margin-bottom. */
+  margin-bottom: 0.25rem;
   font-weight: 500;
+}
+
+/* Version tag. Sits directly under the wordmark as a "fine print
+   adjacent to brand" line (<small> element). Monospace so the version
+   reads as code rather than prose. Muted to ~half the wordmark's weight
+   -- visible on close look, invisible on scan. */
+.app-version {
+  display: block;
+  text-align: center;
+  margin: 0 0 1.5rem 0;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+  /* user-select:all means triple-click inside the pill grabs the whole
+     version string -- makes copy-into-a-bug-report a one-gesture action. */
+  user-select: all;
 }
 
 /* ===================================================================
@@ -1120,7 +1141,8 @@ button.copy-error:hover {
     padding: 1.5rem 1rem;
   }
 
-  .wordmark { font-size: 0.85rem; margin-bottom: 1rem; }
+  .wordmark { font-size: 0.85rem; margin-bottom: 0.2rem; }
+  .app-version { font-size: 0.6rem; margin-bottom: 1rem; }
 
   .top-chrome {
     top: 0.5rem;

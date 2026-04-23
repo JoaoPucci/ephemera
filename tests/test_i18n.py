@@ -964,3 +964,57 @@ def test_every_locale_catalog_has_every_en_key():
             for loc, keys in sorted(missing_by_locale.items())
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Version string in the layout footer
+#
+# app.version computes a one-off string via `git describe --tags --always
+# --dirty` at module import. The template_context wires it into every page
+# as `version`, and _layout.html renders it in a <footer class="app-version">.
+# ---------------------------------------------------------------------------
+
+
+def test_version_module_returns_non_empty_string():
+    """The module-level constant is populated at import time. Even in
+    environments where git is missing or the repo is a tarball, the
+    fallback sentinel ('unknown') keeps this non-empty."""
+    from app.version import VERSION
+
+    assert isinstance(VERSION, str)
+    assert VERSION, "VERSION must not be empty -- fallback should be 'unknown'"
+
+
+def test_version_fallback_on_subprocess_failure(monkeypatch):
+    """If `git describe` errors or times out, the function must return
+    'unknown' rather than raising or returning an empty string. Verified
+    by monkeypatching subprocess.run to raise, then re-running the
+    module-level compute."""
+    import subprocess
+
+    import app.version as version_mod
+
+    def _raise(*_a, **_kw):
+        raise FileNotFoundError("git not on PATH")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    assert version_mod._compute_version() == "unknown"
+
+
+def test_version_renders_under_wordmark(client):
+    """The version tag sits as a <small> directly following the wordmark
+    -- 'fine print adjacent to brand' pattern. Proximity to the
+    wordmark makes the context obvious (screen readers read 'ephemera,
+    v0.6.0'), so no aria-label is needed; the layout is the semantic."""
+    import re
+    from app.version import VERSION
+
+    body = client.get("/send").text
+    assert f'<small class="app-version">{VERSION}</small>' in body
+    # Pin the adjacency: version must directly follow the wordmark in
+    # document order, not float elsewhere in the layout.
+    m = re.search(
+        r'<div class="wordmark">[^<]+</div>\s*<small class="app-version">',
+        body,
+    )
+    assert m, "wordmark + app-version are not adjacent siblings in the layout"

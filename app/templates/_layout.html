@@ -28,6 +28,13 @@
   </div>
   {% block chrome %}{% endblock %}
   <div class="wordmark">ephemera</div>
+  {# Ambient version reference, grouped with the wordmark rather than
+     floating at the viewport edge. `git describe` at import time --
+     clean on a tag-pinned deploy (v0.6.0), drift-visible otherwise.
+     <small> is the semantically-right element: side comment / fine
+     print adjacent to the brand. Proximity to the wordmark makes the
+     context obvious to screen readers; no aria-label needed. #}
+  <small class="app-version">{{ version }}</small>
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
 </body>
