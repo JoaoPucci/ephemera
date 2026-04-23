@@ -1230,13 +1230,12 @@ button.copy-error:hover {
    single opt-in. */
 .chrome-menu { display: none; }
 
-/* Suppress Android Chromium's tap feedback across the drawer. The
-   pre-Material tap-highlight (a semi-transparent rectangle over the
-   tapped element) is killed by -webkit-tap-highlight-color; the newer
-   Material-ripple fade (Chrome 121+) ignores that property and needs
-   user-select: none + touch-action: manipulation on the tap target
-   to suppress. Belt-and-braces: set both broadly, then an extra
-   !important safety net on the interactive targets themselves. */
+/* Drawer-wide tap affordance hygiene:
+   - no tap-highlight flash during finger-down,
+   - no text selection or long-press callout on menu rows
+     (they're controls, not content).
+   Interactive targets additionally opt into touch-action: manipulation
+   to skip the 300ms tap delay on mobile browsers. */
 .chrome-menu,
 .chrome-menu * {
   -webkit-tap-highlight-color: transparent;
@@ -1249,7 +1248,6 @@ button.copy-error:hover {
 .chrome-menu-row-native,
 .chrome-menu-scrim {
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent !important;
 }
 
 @media (max-width: 480px) {
@@ -1308,19 +1306,17 @@ button.copy-error:hover {
     color: var(--text);
     cursor: pointer;
     pointer-events: auto;
-    -webkit-tap-highlight-color: transparent;
     -webkit-appearance: none;
             appearance: none;
     transition: background 0.15s, color 0.15s;
   }
-  /* Nuke all interaction-state styling inherited from the global
-     `button:hover` / `button:focus-visible` rules (above, around
-     lines 311 / 317). Those rules paint an accent background + lift +
-     shadow on every <button> and on touch browsers they fire on tap,
-     which is what reads as a ghost circle around the hamburger's X
-     after opening the drawer. The class+pseudo specificity here (20)
-     beats the global element+pseudo (11), so the nuke sticks even on
-     touch where our own hover-scoped rules don't match. */
+  /* Reset the interaction states inherited from the global
+     `button` / `button:hover` / `button:focus-visible` rules defined
+     earlier in this file -- those paint an accent background + lift +
+     focus-ring that's wrong for this transparent chrome button. The
+     class+pseudo specificity here beats element+pseudo, so the reset
+     applies unconditionally; the pointer-aware media block below is
+     the only place we re-opt-in to hover / focus-ring visuals. */
   .chrome-menu-btn:hover,
   .chrome-menu-btn:active,
   .chrome-menu-btn:focus,
