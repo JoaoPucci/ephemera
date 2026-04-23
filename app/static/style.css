@@ -1330,10 +1330,14 @@ button.copy-error:hover {
     box-shadow: none;
     outline: none;
   }
-  /* Re-apply hover + focus-visible affordances only on hover-capable
-     devices, where they're expected (mouse, laptops with keyboards).
-     Touch-only devices (phones, tablets) never paint either one. */
-  @media (hover: hover) {
+  /* Re-apply hover + focus-visible affordances only where the PRIMARY
+     pointer is fine (mouse, trackpad). Gating on (hover: hover) alone
+     isn't enough: Samsung devices with an S Pen report hover-capable
+     even though the user is tapping with a finger, and the focus-ring
+     then paints as a persistent halo around the X after tap.
+     `(pointer: fine)` requires a precise primary pointer, which the
+     S Pen isn't (the device's primary is still the touchscreen). */
+  @media (hover: hover) and (pointer: fine) {
     .chrome-menu-btn:hover {
       background: color-mix(in srgb, var(--muted) 12%, transparent);
     }

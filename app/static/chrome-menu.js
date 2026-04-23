@@ -33,13 +33,14 @@
     )).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
   }
 
-  // Touch devices: blurring the tapped target immediately removes the
-  // native focus indicator that Android Chromium paints as a persistent
-  // subtle halo (independent of CSS :focus overrides). Skipped on
-  // pointer: fine (keyboard / desktop) so the focus-trap + visible
-  // focus-ring behaviour for a11y isn't lost.
-  const isTouchOnly = typeof window.matchMedia === 'function'
-    && window.matchMedia('(hover: none)').matches;
+  // Touch-primary devices: blur the tapped target immediately to clear
+  // Android Chromium's native focus halo (doesn't fully honor CSS
+  // :focus overrides on every version). Use (pointer: coarse) rather
+  // than (hover: none) because Samsung devices with an S Pen report
+  // hover-capable but still have touch as their primary pointer --
+  // (hover: none) misses them and the halo persists after finger taps.
+  const isTouchPrimary = typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches;
 
   function setOpen(open) {
     if (open) root.dataset.chromeMenuOpen = 'true';
@@ -53,7 +54,7 @@
     if (nextLabel) btn.setAttribute('aria-label', nextLabel);
     if (panel) panel.setAttribute('aria-hidden', open ? 'false' : 'true');
     if (scrim) scrim.setAttribute('aria-hidden', open ? 'false' : 'true');
-    if (open && !isTouchOnly) {
+    if (open && !isTouchPrimary) {
       // Move focus into the panel so screen readers start there and Esc
       // works without the user having to tab in first. Skipped on touch
       // because moving focus to a hidden <select> overlay would paint
@@ -69,7 +70,7 @@
     // On touch devices the hamburger keeps focus after the tap, which
     // paints Android Chromium's native focus halo. Blur explicitly so
     // no element holds focus unless the user actually keyboard-tabbed.
-    if (isTouchOnly && typeof btn.blur === 'function') btn.blur();
+    if (isTouchPrimary && typeof btn.blur === 'function') btn.blur();
   });
 
   if (scrim) {
@@ -157,7 +158,7 @@
       e.preventDefault();
       const desktop = document.getElementById('theme-toggle');
       if (desktop) desktop.click();
-      if (isTouchOnly && typeof themeBtn.blur === 'function') themeBtn.blur();
+      if (isTouchPrimary && typeof themeBtn.blur === 'function') themeBtn.blur();
       // syncThemeState fires via the MutationObserver when the data-theme
       // attribute flips, no need to call it manually here.
     });
