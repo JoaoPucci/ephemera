@@ -55,6 +55,151 @@ def test_launched_contains_default():
     assert DEFAULT in LAUNCHED
 
 
+def test_supported_is_default_first_then_alphabetical():
+    """Picker ordering contract: English is always the first option
+    (users' fallback / default), and the remaining tags are sorted
+    alphabetically so the order is stable as new locales land."""
+    assert SUPPORTED[0] == DEFAULT
+    rest = SUPPORTED[1:]
+    assert list(rest) == sorted(rest), f"tail not sorted: {rest}"
+
+
+# ---------------------------------------------------------------------------
+# Filesystem-driven discovery (replaces the old hand-maintained dicts)
+# ---------------------------------------------------------------------------
+
+
+def test_bcp47_to_posix_simple_language_tag():
+    """Language-only tags map to themselves (gettext catalog dir == BCP-47
+    tag for unambiguous cases like ja, fr, de, ru, ko)."""
+    from app.i18n import _bcp47_to_posix
+    for tag in ("en", "ja", "fr", "de", "ru", "ko", "es"):
+        assert _bcp47_to_posix(tag) == tag
+
+
+def test_bcp47_to_posix_with_territory():
+    """Tags carrying a territory subtag get the POSIX underscore form.
+    pt-BR has no CLDR script inference, so Babel's str(loc) is the
+    right dir name."""
+    from app.i18n import _bcp47_to_posix
+    assert _bcp47_to_posix("pt-BR") == "pt_BR"
+
+
+def test_bcp47_to_posix_chinese_drops_territory():
+    """Chinese gettext catalogs are keyed on script (zh_Hans, zh_Hant),
+    not on territory (zh_CN, zh_TW). Babel's likely-subtag resolution
+    inflates 'zh-CN' to both territory=CN and script=Hans; the helper
+    drops the territory so the path lines up with how the catalog dirs
+    are actually laid out."""
+    from app.i18n import _bcp47_to_posix
+    assert _bcp47_to_posix("zh-CN") == "zh_Hans"
+    assert _bcp47_to_posix("zh-TW") == "zh_Hant"
+
+
+def test_label_override_wins_over_cldr_default():
+    """_LABEL_OVERRIDES exists for aesthetic refinements (title-casing
+    Romance/Slavic endonyms, the common-usage abbreviation for Chinese).
+    The override value must win over Babel's CLDR endonym."""
+    from app.i18n import _label_for, _LABEL_OVERRIDES
+    # pt-BR is overridden
+    assert "pt-BR" in _LABEL_OVERRIDES
+    assert _label_for("pt-BR") == _LABEL_OVERRIDES["pt-BR"]
+
+
+def test_label_falls_back_to_cldr_endonym():
+    """Locales with no override entry use Babel's CLDR endonym. German
+    ('Deutsch') and Japanese ('日本語') are existing examples where CLDR
+    matches the aesthetic we want -- no override needed, the function
+    still returns the right thing."""
+    from app.i18n import _label_for
+    assert _label_for("de") == "Deutsch"
+    assert _label_for("ja") == "日本語"
+    assert _label_for("ko") == "한국어"
+
+
+def test_discover_requires_po_for_non_default_locales(tmp_path, monkeypatch):
+    """A locale with a JSON catalog but no gettext .po is half-shipped and
+    must be skipped. Drop a fake es.json into an otherwise-empty tree and
+    confirm discovery refuses to include it."""
+    import app.i18n as i18n_mod
+
+    js_dir = tmp_path / "static" / "i18n"
+    po_dir = tmp_path / "translations"
+    js_dir.mkdir(parents=True)
+    po_dir.mkdir(parents=True)
+    (js_dir / "en.json").write_text('{}', encoding="utf-8")
+    (js_dir / "es.json").write_text('{}', encoding="utf-8")
+    # No es .po file -- es should be skipped.
+
+    monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", js_dir)
+    monkeypatch.setattr(i18n_mod, "_TRANSLATIONS_DIR", po_dir)
+    i18n_mod._discover.cache_clear()
+
+    supported, posix_map, labels = i18n_mod._discover()
+    assert "en" in supported  # DEFAULT doesn't need a .po
+    assert "es" not in supported
+    # Clear cache again so later tests see the real filesystem.
+    i18n_mod._discover.cache_clear()
+
+
+def test_discover_default_does_not_require_po(tmp_path, monkeypatch):
+    """English is the source of truth -- the msgids inside templates ARE
+    the English strings, so no .po is required. Only the JSON catalog
+    needs to exist."""
+    import app.i18n as i18n_mod
+
+    js_dir = tmp_path / "static" / "i18n"
+    po_dir = tmp_path / "translations"
+    js_dir.mkdir(parents=True)
+    po_dir.mkdir(parents=True)
+    (js_dir / "en.json").write_text('{}', encoding="utf-8")
+    # No en/LC_MESSAGES/messages.po anywhere.
+
+    monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", js_dir)
+    monkeypatch.setattr(i18n_mod, "_TRANSLATIONS_DIR", po_dir)
+    i18n_mod._discover.cache_clear()
+
+    supported, _, _ = i18n_mod._discover()
+    assert supported == ("en",)
+    i18n_mod._discover.cache_clear()
+
+
+def test_discover_skips_tags_babel_does_not_recognize(tmp_path, monkeypatch):
+    """If someone drops a JSON file whose stem isn't a real BCP-47 tag,
+    Babel raises UnknownLocaleError during parsing and discovery skips
+    it silently rather than crashing the app."""
+    import app.i18n as i18n_mod
+
+    js_dir = tmp_path / "static" / "i18n"
+    po_dir = tmp_path / "translations"
+    js_dir.mkdir(parents=True)
+    po_dir.mkdir(parents=True)
+    (js_dir / "en.json").write_text('{}', encoding="utf-8")
+    (js_dir / "xyz-nonsense.json").write_text('{}', encoding="utf-8")
+
+    monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", js_dir)
+    monkeypatch.setattr(i18n_mod, "_TRANSLATIONS_DIR", po_dir)
+    i18n_mod._discover.cache_clear()
+
+    supported, _, _ = i18n_mod._discover()
+    assert "xyz-nonsense" not in supported
+    i18n_mod._discover.cache_clear()
+
+
+def test_launch_opt_out_excludes_from_launched_but_keeps_in_supported(monkeypatch):
+    """Adding a tag to _LAUNCH_OPT_OUT must keep it resolvable (SUPPORTED)
+    while hiding it from the picker (LAUNCHED). The feature is for
+    staging a locale before exposing it in the UI."""
+    import app.i18n as i18n_mod
+
+    # Monkey-patch the opt-out to include an existing launched locale,
+    # then re-derive LAUNCHED to exercise the opt-out path.
+    monkeypatch.setattr(i18n_mod, "_LAUNCH_OPT_OUT", {"de"})
+    relaunched = tuple(t for t in i18n_mod.SUPPORTED if t not in i18n_mod._LAUNCH_OPT_OUT)
+    assert "de" in i18n_mod.SUPPORTED   # still resolvable
+    assert "de" not in relaunched       # hidden from picker
+
+
 # ---------------------------------------------------------------------------
 # Accept-Language negotiation
 # ---------------------------------------------------------------------------

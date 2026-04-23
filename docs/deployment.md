@@ -562,31 +562,47 @@ language's, and will render wrong.
 
 ### Adding a new locale
 
-1. Add the BCP-47 tag to `SUPPORTED`, the POSIX code to `POSIX_MAP`,
-   and an endonym label to `LANGUAGE_LABELS` in `app/i18n.py`. Do NOT
-   add it to `LAUNCHED` yet — the picker should not advertise a locale
-   whose catalog is empty.
-2. Bootstrap the gettext catalog:
+No `app/i18n.py` edit needed in the typical case — `SUPPORTED`,
+`POSIX_MAP`, and `LANGUAGE_LABELS` are derived from the filesystem at
+import time. Drop the catalog files on disk and the locale appears.
+
+1. Bootstrap the gettext catalog:
    ```bash
    ./scripts/i18n.sh init <POSIX>      # e.g. fr, pt_PT
    ```
-3. Create an empty JSON stub:
+2. Create an empty JSON stub:
    ```bash
    echo '{}' > app/static/i18n/<BCP47>.json
    ```
-4. Translate the `.po` msgstr entries. Populate the JSON, including
+3. Translate the `.po` msgstr entries. Populate the JSON, including
    every CLDR plural category the locale uses (see above).
-5. Compile the `.mo`. Run the suite — the key-coverage test catches
-   any JS `i18n.t()` call sites you missed in the JSON.
-6. **Only when the catalog is complete**, add the tag to `LAUNCHED` in
-   `app/i18n.py`. Once at least two locales are in `LAUNCHED`, the
-   picker widget starts rendering for every visitor.
+4. Compile the `.mo`:
+   ```bash
+   ./scripts/i18n.sh compile
+   ```
+5. Run the suite. `test_every_js_i18n_key_exists_in_en_catalog`
+   catches any JS `i18n.t()` call sites you missed in the JSON.
+6. (Optional) Check the endonym the picker will render:
+   ```bash
+   ./venv/bin/python -c "from app.i18n import LANGUAGE_LABELS; print(LANGUAGE_LABELS['<BCP47>'])"
+   ```
+   The label comes from `babel.Locale.parse(<tag>).get_display_name(locale=...)`.
+   If it looks wrong — verbose, mis-cased, wrong script — add an
+   entry to `_LABEL_OVERRIDES` in `app/i18n.py`. Most locales won't
+   need this; it's an aesthetic override, not a correctness gate.
 
-Partial translations are safe to *ship*, they're just hidden from the
-picker. Any un-translated msgid renders its English source verbatim
-(gettext's null-catalog fallthrough); any missing JSON key resolves
-through the English fallback catalog the template inlines into every
-page.
+The locale auto-joins `SUPPORTED` and the picker as soon as both the
+JSON and the compiled `.mo` are in place. To ship a locale
+resolution-only (reachable via `?lang=<tag>` and persisted prefs, but
+hidden from the picker — useful when translations are still under
+review), add the BCP-47 tag to `_LAUNCH_OPT_OUT` in `app/i18n.py`.
+
+Half-shipped locales (JSON without `.po` or vice versa) are skipped
+silently by discovery. Within a locale, any un-translated msgid
+renders its English source verbatim (gettext's null-catalog
+fallthrough); any missing JSON key resolves through the English
+fallback catalog the template inlines into every page. Partial
+translations are safe to ship.
 
 ### Deploy impact
 

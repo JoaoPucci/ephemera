@@ -11,8 +11,15 @@ Unknown/unsupported tags fall through silently -- locale is advisory, so a
 bad hint must never 400 a request.
 
 BCP-47 (web wire format) vs POSIX (on-disk catalog directory): web side
-speaks "pt-BR"/"zh-CN", gettext wants "pt_BR"/"zh_Hans". POSIX_MAP is the
-one place the conversion happens -- don't do it inline anywhere else.
+speaks "pt-BR"/"zh-CN", gettext wants "pt_BR"/"zh_Hans". The conversion
+happens once in `_bcp47_to_posix`; callers read the resolved dict in
+`POSIX_MAP` and never inline the conversion.
+
+SUPPORTED, POSIX_MAP, and LANGUAGE_LABELS are all derived from the
+filesystem at import time by `_discover()` -- adding a new locale means
+dropping its catalogs into app/static/i18n/ and app/translations/, not
+editing three constants in lock-step. The only hand-maintained bits are
+DEFAULT, _LAUNCH_OPT_OUT, and _LABEL_OVERRIDES below.
 
 lazy_gettext resolves against a ContextVar the i18n middleware sets per
 request, so module-level constants (validator messages, schema field
@@ -27,63 +34,114 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
+from babel import Locale
+from babel.core import UnknownLocaleError
 from babel.support import LazyProxy, Translations
 from fastapi import Request
 
 
-SUPPORTED: tuple[str, ...] = (
-    "en",
-    "ja",
-    "pt-BR",
-    "es",
-    "zh-CN",
-    "zh-TW",
-    "fr",
-    "de",
-    "ru",
-    "ko",
-)
 DEFAULT: str = "en"
 
-# Subset of SUPPORTED that the picker advertises. Resolution-layer code
-# always uses SUPPORTED (so `?lang=xx`, the cookie, Accept-Language, and
-# users.preferred_language keep working against any tag in SUPPORTED);
-# only the picker reads LAUNCHED. Promoting a locale from SUPPORTED-only
-# into LAUNCHED is a deliberate product decision -- happens when the
-# translations have been reviewed and are ready to advertise in the UI.
-# All nine non-English locales landed in this release; a future locale
-# stays SUPPORTED-only until it gets the same review pass.
-LAUNCHED: tuple[str, ...] = SUPPORTED
+# Tags that have complete catalogs on disk but should stay SUPPORTED-only
+# (reachable via ?lang=, cookie, preferred_language; invisible in the
+# picker). Useful for staging a locale whose translations are still under
+# review. Default: empty -- every discovered locale launches in the picker.
+_LAUNCH_OPT_OUT: set[str] = set()
 
-# BCP-47 (web wire format) -> POSIX (on-disk catalog directory).
-POSIX_MAP: dict[str, str] = {
-    "en": "en",
-    "ja": "ja",
-    "pt-BR": "pt_BR",
-    "es": "es",
-    "zh-CN": "zh_Hans",
-    "zh-TW": "zh_Hant",
-    "fr": "fr",
-    "de": "de",
-    "ru": "ru",
-    "ko": "ko",
-}
-
-# Labels rendered inside the picker widget. Each language is named in its
-# own language (endonym) so a speaker never has to recognize their locale
-# in a language they don't read. Keep in sync with SUPPORTED above.
-LANGUAGE_LABELS: dict[str, str] = {
-    "en": "English",
-    "ja": "日本語",
+# Endonym overrides where Babel's CLDR default isn't what we want to ship.
+# Most locales need no entry here. This table carries aesthetic refinements
+# over CLDR's raw defaults: title-casing the Romance/Slavic endonyms
+# (CLDR ships them lowercase per linguistic convention, but our picker's
+# other entries are title-cased, so visual consistency wins) and the
+# common-usage abbreviation for Chinese (simplified/traditional rather
+# than CLDR's verbose "中文 (简体, 中国)" form). A new locale inherits the
+# CLDR default; add an entry here only if the default renders wrong.
+_LABEL_OVERRIDES: dict[str, str] = {
     "pt-BR": "Português (Brasil)",
     "es": "Español",
     "zh-CN": "简体中文",
     "zh-TW": "繁體中文",
     "fr": "Français",
-    "de": "Deutsch",
     "ru": "Русский",
-    "ko": "한국어",
 }
+
+_MODULE_DIR = Path(__file__).parent
+_TRANSLATIONS_DIR = _MODULE_DIR / "translations"
+_JS_CATALOG_DIR = _MODULE_DIR / "static" / "i18n"
+
+
+# ---------------------------------------------------------------------------
+# Locale discovery
+# ---------------------------------------------------------------------------
+
+
+def _bcp47_to_posix(tag: str) -> str:
+    """Return the gettext on-disk dir name for a BCP-47 tag.
+
+    Babel's Locale.parse resolves 'zh-CN' to a locale carrying both the
+    territory (CN) and the script (Hans, via likely-subtag). Our gettext
+    catalogs for Chinese are keyed on script only (zh_Hans, not
+    zh_Hans_CN), so this drops the territory in that specific case.
+    For everything else, Babel's str(loc) is the right POSIX name
+    ('pt_BR', 'en', 'ja', etc.)."""
+    loc = Locale.parse(tag.replace("-", "_"))
+    if loc.language == "zh" and loc.script:
+        return f"{loc.language}_{loc.script}"
+    return str(loc)
+
+
+def _label_for(tag: str) -> str:
+    """Picker-visible endonym. Overrides win; CLDR default otherwise."""
+    if tag in _LABEL_OVERRIDES:
+        return _LABEL_OVERRIDES[tag]
+    loc = Locale.parse(tag.replace("-", "_"))
+    return loc.get_display_name(locale=loc)
+
+
+@lru_cache(maxsize=1)
+def _discover() -> tuple[tuple[str, ...], dict[str, str], dict[str, str]]:
+    """Walk app/static/i18n/*.json for candidate BCP-47 tags; for each,
+    verify the matching gettext catalog dir exists. Return the triple
+    (supported, posix_map, labels).
+
+    English is the source of truth, so its JSON catalog is required but no
+    .po is needed (the msgids in templates ARE the English source).
+
+    Silent on half-shipped locales (JSON without .po or vice versa) -- the
+    discovery just skips them. That lets a translator iterate on a locale
+    before it becomes visible anywhere. Silent on tags Babel doesn't know
+    (can't resolve a POSIX dir name) -- same rationale.
+
+    Order: DEFAULT first, the rest alphabetical by BCP-47 tag. Keeps the
+    picker's first option stable (English) and the remaining options
+    predictably ordered."""
+    tags: list[str] = []
+    posix_map: dict[str, str] = {}
+    labels: dict[str, str] = {}
+    for json_path in sorted(_JS_CATALOG_DIR.glob("*.json")):
+        tag = json_path.stem
+        try:
+            posix = _bcp47_to_posix(tag)
+        except UnknownLocaleError:
+            continue
+        if tag != DEFAULT:
+            po_path = _TRANSLATIONS_DIR / posix / "LC_MESSAGES" / "messages.po"
+            if not po_path.exists():
+                continue
+        tags.append(tag)
+        posix_map[tag] = posix
+        labels[tag] = _label_for(tag)
+    tags.sort(key=lambda t: (t != DEFAULT, t))
+    return tuple(tags), posix_map, labels
+
+
+SUPPORTED, POSIX_MAP, LANGUAGE_LABELS = _discover()
+
+# Every discovered locale lands in the picker by default. Add a tag to
+# _LAUNCH_OPT_OUT above to keep it SUPPORTED-only.
+LAUNCHED: tuple[str, ...] = tuple(
+    tag for tag in SUPPORTED if tag not in _LAUNCH_OPT_OUT
+)
 
 # Set by the i18n middleware per request; read by lazy_gettext at str()-coerce
 # time. Default covers direct-imports in tests, the admin CLI, and any other
@@ -92,9 +150,6 @@ LANGUAGE_LABELS: dict[str, str] = {
 current_locale: contextvars.ContextVar[str] = contextvars.ContextVar(
     "ephemera_locale", default=DEFAULT
 )
-
-_TRANSLATIONS_DIR = Path(__file__).parent / "translations"
-_JS_CATALOG_DIR = Path(__file__).parent / "static" / "i18n"
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ Two parallel catalog surfaces must stay in sync:
 | **gettext (`.po` → `.mo`)** | Jinja templates `{{ _("...") }}` | `app/translations/<POSIX>/LC_MESSAGES/messages.po` |
 | **JSON** | Client-side `window.i18n.t('dotted.key')` | `app/static/i18n/<BCP47>.json` |
 
-**POSIX ↔ BCP-47 mapping** (canonical source: `app/i18n.py:59` `POSIX_MAP`):
+**POSIX ↔ BCP-47 mapping** — auto-derived via `_bcp47_to_posix()` in `app/i18n.py` (uses `babel.Locale.parse`). Current concrete results:
 
 | BCP-47 (JSON filename, HTTP wire) | POSIX (catalog dir) |
 | --- | --- |
@@ -32,7 +32,12 @@ Two parallel catalog surfaces must stay in sync:
 | `zh-CN` | `zh_Hans` |
 | `zh-TW` | `zh_Hant` |
 
-When adding a locale, append entries to **all three** of `SUPPORTED`, `POSIX_MAP`, and `LANGUAGE_LABELS` in `app/i18n.py`. Optionally add to `LAUNCHED` to expose it in the picker — see "LAUNCHED vs SUPPORTED" below.
+**No code edit to `app/i18n.py` is needed to add a locale.** `SUPPORTED`, `POSIX_MAP`, and `LANGUAGE_LABELS` are derived at import time by `_discover()`, which walks `app/static/i18n/*.json` and `app/translations/*/LC_MESSAGES/messages.po`: any BCP-47 tag with both a populated JSON catalog and a gettext `.po` automatically joins `SUPPORTED` and the picker. English is the exception — its JSON catalog is required but no `.po` is (the msgids inside templates ARE the English source).
+
+The only hand-maintained bits in `app/i18n.py` are:
+- `DEFAULT` — product decision; stays `"en"`.
+- `_LAUNCH_OPT_OUT` — tags that have complete catalogs but should stay SUPPORTED-only (invisible in the picker). Default empty; used to stage a locale under review.
+- `_LABEL_OVERRIDES` — aesthetic refinements over CLDR's raw endonyms (title-casing Romance/Slavic languages whose CLDR defaults ship lowercase; the common-usage abbreviation `简体中文` / `繁體中文` for Chinese rather than CLDR's verbose `中文 (简体, 中国)`). Add an entry here **only** if the CLDR default for a new locale looks wrong in the picker.
 
 `app/translations/messages.pot` is the template. Regenerate with `./scripts/i18n.sh extract` after any source string change; bootstrap a new locale dir with `./scripts/i18n.sh init <POSIX>`.
 
@@ -124,14 +129,14 @@ categories live.
 
 Given a target locale (use BCP-47 form `xx-YY` in user-facing contexts, POSIX form `xx_YY` for gettext paths):
 
-1. **Add the locale to `SUPPORTED`, `POSIX_MAP`, `LANGUAGE_LABELS`** in `app/i18n.py` if not already present. The endonym in `LANGUAGE_LABELS` must be the language's own name (e.g. `"日本語"`, `"한국어"`, `"Deutsch"`).
-2. **Bootstrap the gettext catalog**: `./scripts/i18n.sh init <POSIX>` (creates `app/translations/<POSIX>/LC_MESSAGES/messages.po` from the `.pot`). Skip if the dir already exists.
-3. **Create the JSON catalog**: `cp app/static/i18n/en.json app/static/i18n/<BCP47>.json` — then rewrite values. Keep the **exact** key structure from en.json; never add or remove keys (JS call sites are statically checked against `en.json` by `test_every_js_i18n_key_exists_in_en_catalog`).
-4. **Translate the `.po`**: fill every empty `msgstr ""`. Verify placeholders survive, multi-line blocks use the empty-first-line convention, and the file ends with a trailing newline.
-5. **Translate the JSON**: replace every English value, preserving `{{placeholder}}` tokens. For `button.clear_past`, include the correct CLDR categories for the target language (see above).
-6. **Compile**: `./scripts/i18n.sh compile` — fails loudly on malformed .po.
-7. **Run the test suite**: `./venv/bin/pytest tests/test_i18n.py -v` — must be green.
-8. **Report back**: summarize the files changed, any non-obvious glossary choices, and any tests you had to update (see tripwires below).
+1. **Bootstrap the gettext catalog**: `./scripts/i18n.sh init <POSIX>` (creates `app/translations/<POSIX>/LC_MESSAGES/messages.po` from the `.pot`). Skip if the dir already exists.
+2. **Create the JSON catalog**: `cp app/static/i18n/en.json app/static/i18n/<BCP47>.json` — then rewrite values. Keep the **exact** key structure from en.json; never add or remove keys (JS call sites are statically checked against `en.json` by `test_every_js_i18n_key_exists_in_en_catalog`).
+3. **Translate the `.po`**: fill every empty `msgstr ""`. Verify placeholders survive, multi-line blocks use the empty-first-line convention, and the file ends with a trailing newline.
+4. **Translate the JSON**: replace every English value, preserving `{{placeholder}}` tokens. For `button.clear_past`, include the correct CLDR categories for the target language (see above).
+5. **Compile**: `./scripts/i18n.sh compile` — fails loudly on malformed .po.
+6. **Check the endonym**: import `app.i18n` in a Python shell and print `LANGUAGE_LABELS[<BCP47>]` — the value comes from `babel.Locale.parse(<tag>).get_display_name(locale=...)`. If it doesn't look right (verbose, miscased, wrong script), add an entry to `_LABEL_OVERRIDES` in `app/i18n.py`. Most locales need no override.
+7. **Run the test suite**: `./venv/bin/pytest tests/test_i18n.py -v` — must be green. The locale auto-joins SUPPORTED once both catalog files exist on disk, so the discovery tests should see it on the next import.
+8. **Report back**: summarize the files changed, any non-obvious glossary choices, whether you added a `_LABEL_OVERRIDES` entry, and any tests you had to update (see tripwires below).
 
 ## Known test tripwires
 
@@ -142,17 +147,19 @@ Three tests in `tests/test_i18n.py` encode pre-translation ship-state and must b
 - `test_page_inlines_active_and_fallback_catalogs` — checks a specific Unicode-escaped fragment of the ja catalog appears in the rendered `/send?lang=ja` page. Only touch if you change that exact ja string.
 
 Other invariants that must not break:
-- `test_supported_and_labels_cover_the_same_set` — every `SUPPORTED` tag needs a `LANGUAGE_LABELS` **and** `POSIX_MAP` entry.
+- `test_supported_and_labels_cover_the_same_set` — every `SUPPORTED` tag needs a `LANGUAGE_LABELS` **and** `POSIX_MAP` entry. True by construction now (all three come from `_discover()` in the same pass), but kept as defense against a future bug that decouples them.
+- `test_supported_is_default_first_then_alphabetical` — picker ordering contract: English first, remaining tags alphabetical. New locales slot into their alphabetical position automatically.
+- `test_bcp47_to_posix_chinese_drops_territory` — pin the one POSIX edge case (Chinese script-keyed catalog dirs). If a future maintainer tries to match Babel's raw `str(loc)` output, this test catches the regression.
 - `test_gettext_null_catalog_identity` — uses the synthetic msgid `"Hello, world."` which is not in any catalog; don't add it.
 - `test_every_js_i18n_key_exists_in_en_catalog` — scans all `.js` files for `i18n.t('...')` calls and fails if the key is missing from `en.json`. Never remove keys from `en.json`; when mirroring structure to a new locale, preserve every path.
 
 ## LAUNCHED vs SUPPORTED
 
-`SUPPORTED` (in `app/i18n.py`) is the resolution surface — it governs which tags are accepted via `?lang=`, the `ephemera_lang_v1` cookie, `users.preferred_language`, and `Accept-Language` negotiation. A locale in `SUPPORTED` works end-to-end as soon as its catalogs ship.
+`SUPPORTED` (in `app/i18n.py`) is the resolution surface — it governs which tags are accepted via `?lang=`, the `ephemera_lang_v1` cookie, `users.preferred_language`, and `Accept-Language` negotiation. A locale joins `SUPPORTED` automatically as soon as its JSON + gettext catalogs both exist on disk.
 
-`LAUNCHED` is the **picker-visible** subset. It exists so locales can be resolution-ready without forcing them into the UI before a human has reviewed the translations. A locale only in `SUPPORTED` is reachable but invisible in the dropdown; `?lang=<tag>` links and persisted prefs still work.
+`LAUNCHED` is the **picker-visible** subset, derived from `SUPPORTED` minus `_LAUNCH_OPT_OUT`. It exists so locales can be resolution-ready without forcing them into the UI before a human has reviewed the translations.
 
-When translations land, moving the new locale from `SUPPORTED`-only to `LAUNCHED` is a **product decision, not a mechanical one**. Do not flip it without the user's explicit go-ahead. The test `test_picker_hidden_when_only_one_locale_launched` pins `LAUNCHED == ('en',)`; if the user approves multiple launched locales, update that test (or replace it with `test_picker_renders_when_multiple_locales_launched`'s assertions applied to the new real `LAUNCHED`).
+Default behaviour is **launch everything discovered** — every completed locale advertises itself in the picker as soon as its catalogs ship. To stage a locale (reachable via `?lang=<tag>` and persisted prefs, but invisible in the picker), add its BCP-47 tag to `_LAUNCH_OPT_OUT` in `app/i18n.py`. That add is a **product decision, not a mechanical one**. Do not add a tag to `_LAUNCH_OPT_OUT` (nor remove one from it) without the user's explicit go-ahead — the default of "launch on discovery" is intentional.
 
 ## Resolving doubt
 
@@ -168,4 +175,4 @@ In priority order:
 - Do not change `Plural-Forms:` headers in existing `.po` files — they're set by `pybabel init`.
 - Do not compile `.mo` files by hand; always use `./scripts/i18n.sh compile`.
 - Do not commit changes unless the user explicitly asks. Report what changed and wait.
-- Do not flip `LAUNCHED` without explicit user approval, even if all translations are complete.
+- Do not edit `_LAUNCH_OPT_OUT` without explicit user approval. The default (every discovered locale launches) is intentional; adding a tag to stage it SUPPORTED-only is a product decision.
