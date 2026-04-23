@@ -1,1 +1,62 @@
-{}
+{
+  "error": {
+    "network": "Netzwerkfehler. Bitte versuche es erneut.",
+    "locked_with_until": "Zu viele fehlgeschlagene Versuche. Gesperrt bis {{until}}.",
+    "locked": "Zu viele fehlgeschlagene Versuche. Konto gesperrt.",
+    "too_many_attempts": "Zu viele Versuche. Bitte warte einen Moment.",
+    "form_stale": "Formularfelder sind veraltet — lade die Seite neu (Strg+Umschalt+R) und versuche es erneut.",
+    "invalid_credentials": "Ungültige Zugangsdaten.",
+    "unexpected_http": "Unerwarteter Fehler (HTTP {{status}}). Prüfe die Server-Logs.",
+    "missing_key": "Diesem Link fehlt der Entschlüsselungsschlüssel.",
+    "wrong_passphrase": "Falsche Passphrase.",
+    "reveal_failed": "Geheimnis konnte nicht angezeigt werden.",
+    "request_failed": "Anfrage fehlgeschlagen ({{status}}).",
+    "generic": "Etwas ist schiefgelaufen.",
+    "please_enter_message": "Bitte gib eine Nachricht ein.",
+    "please_select_image": "Bitte wähle ein Bild aus."
+  },
+  "button": {
+    "signing_in": "Anmeldung…",
+    "revealing": "Anzeigen…",
+    "creating": "Erstellen…",
+    "copied": "Kopiert",
+    "copy_failed": "Kopieren fehlgeschlagen",
+    "cancel": "abbrechen",
+    "confirm": "bestätigen?",
+    "canceling": "Abbrechen…",
+    "clear_past": {
+      "one": "{{n}} vergangenen Eintrag löschen",
+      "other": "{{n}} vergangene Einträge löschen"
+    },
+    "clearing": "Löschen…"
+  },
+  "status": {
+    "pending": "ausstehend",
+    "viewed": "angesehen",
+    "burned": "zerstört",
+    "canceled": "abgebrochen",
+    "expired": "abgelaufen",
+    "gone": "nicht mehr verfolgt"
+  },
+  "sender": {
+    "expires_prefix": "Läuft ab: ",
+    "viewed_at_prefix": "um "
+  },
+  "tracked": {
+    "image_secret": "Bild-Geheimnis",
+    "text_secret": "Text-Geheimnis",
+    "copy_ok": "in die Zwischenablage kopiert",
+    "copy_fail": "Kopieren fehlgeschlagen",
+    "orphan_hint": "anderswo erstellt",
+    "aria_remove": "aus der Liste entfernen",
+    "aria_cancel": "dieses Geheimnis widerrufen",
+    "tooltip_cancel": "Die URL widerrufen, damit der Empfänger dies nicht mehr ansehen kann",
+    "tooltip_copy": "Klicke, um den Link zu kopieren",
+    "tooltip_orphan": "Die URL enthält einen Verschlüsselungsschlüssel, der nur in dem Browser gespeichert ist, in dem dieses Geheimnis erstellt wurde. Öffne ephemera in diesem Browser, um den Link zu kopieren.",
+    "time_created": "erstellt {{when}}",
+    "time_viewed": "angesehen {{when}}",
+    "time_burned": "zerstört {{when}}",
+    "time_canceled": "abgebrochen {{when}}",
+    "time_expired": "abgelaufen {{when}}"
+  }
+}

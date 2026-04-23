@@ -1,1 +1,63 @@
-{}
+{
+  "error": {
+    "network": "Error de red. Inténtalo de nuevo.",
+    "locked_with_until": "Demasiados intentos fallidos. Bloqueado hasta {{until}}.",
+    "locked": "Demasiados intentos fallidos. Cuenta bloqueada.",
+    "too_many_attempts": "Demasiados intentos. Espera un momento.",
+    "form_stale": "Los campos del formulario están desactualizados — recarga la página (Ctrl+Shift+R) e inténtalo de nuevo.",
+    "invalid_credentials": "Credenciales no válidas.",
+    "unexpected_http": "Error inesperado (HTTP {{status}}). Revisa los registros del servidor.",
+    "missing_key": "A este enlace le falta su clave de descifrado.",
+    "wrong_passphrase": "Frase de contraseña incorrecta.",
+    "reveal_failed": "No se pudo revelar el secreto.",
+    "request_failed": "La solicitud ha fallado ({{status}}).",
+    "generic": "Algo ha salido mal.",
+    "please_enter_message": "Por favor, introduce un mensaje.",
+    "please_select_image": "Por favor, selecciona una imagen."
+  },
+  "button": {
+    "signing_in": "Iniciando sesión…",
+    "revealing": "Revelando…",
+    "creating": "Creando…",
+    "copied": "Copiado",
+    "copy_failed": "Error al copiar",
+    "cancel": "cancelar",
+    "confirm": "¿confirmar?",
+    "canceling": "cancelando…",
+    "clear_past": {
+      "one": "Borrar {{n}} entrada anterior",
+      "many": "Borrar {{n}} entradas anteriores",
+      "other": "Borrar {{n}} entradas anteriores"
+    },
+    "clearing": "borrando…"
+  },
+  "status": {
+    "pending": "pendiente",
+    "viewed": "visto",
+    "burned": "destruido",
+    "canceled": "cancelado",
+    "expired": "caducado",
+    "gone": "ya no se rastrea"
+  },
+  "sender": {
+    "expires_prefix": "Caduca: ",
+    "viewed_at_prefix": "a las "
+  },
+  "tracked": {
+    "image_secret": "Secreto de imagen",
+    "text_secret": "Secreto de texto",
+    "copy_ok": "copiado al portapapeles",
+    "copy_fail": "error al copiar",
+    "orphan_hint": "creado en otro sitio",
+    "aria_remove": "quitar de la lista",
+    "aria_cancel": "cancelar este secreto",
+    "tooltip_cancel": "Revocar la URL para que el receptor ya no pueda verlo",
+    "tooltip_copy": "Haz clic para copiar el enlace",
+    "tooltip_orphan": "La URL incluye una clave de cifrado guardada solo en el navegador donde se creó este secreto. Abre ephemera en ese navegador para copiar el enlace.",
+    "time_created": "creado {{when}}",
+    "time_viewed": "visto {{when}}",
+    "time_burned": "destruido {{when}}",
+    "time_canceled": "cancelado {{when}}",
+    "time_expired": "caducado {{when}}"
+  }
+}

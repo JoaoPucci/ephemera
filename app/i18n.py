@@ -45,15 +45,15 @@ SUPPORTED: tuple[str, ...] = (
 )
 DEFAULT: str = "en"
 
-# Subset of SUPPORTED that the picker advertises. Translation catalogs ship
-# empty for the non-English members until a translator fills them in, so
-# shipping the picker with all six would surface locales that resolve cleanly
-# (lang attribute, Accept-Language negotiation, cookie round-trip) but render
-# every string in English anyway -- a picker that lies about what it delivers.
-# Resolution-layer code always uses SUPPORTED; only the picker reads LAUNCHED.
-# When `ja` lands, move it from SUPPORTED-only to LAUNCHED and the picker
-# starts rendering the option without any other wiring.
-LAUNCHED: tuple[str, ...] = ("en",)
+# Subset of SUPPORTED that the picker advertises. Resolution-layer code
+# always uses SUPPORTED (so `?lang=xx`, the cookie, Accept-Language, and
+# users.preferred_language keep working against any tag in SUPPORTED);
+# only the picker reads LAUNCHED. Promoting a locale from SUPPORTED-only
+# into LAUNCHED is a deliberate product decision -- happens when the
+# translations have been reviewed and are ready to advertise in the UI.
+# All nine non-English locales landed in this release; a future locale
+# stays SUPPORTED-only until it gets the same review pass.
+LAUNCHED: tuple[str, ...] = SUPPORTED
 
 # BCP-47 (web wire format) -> POSIX (on-disk catalog directory).
 POSIX_MAP: dict[str, str] = {

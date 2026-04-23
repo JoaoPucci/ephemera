@@ -1,1 +1,61 @@
-{}
+{
+  "error": {
+    "network": "ネットワークエラー。もう一度お試しください。",
+    "locked_with_until": "ログイン試行が多すぎます。{{until}} までロックされました。",
+    "locked": "ログイン試行が多すぎます。アカウントがロックされました。",
+    "too_many_attempts": "試行回数が多すぎます。少々お待ちください。",
+    "form_stale": "フォームの内容が古くなっています — ページをハードリロード（Ctrl+Shift+R）してからもう一度お試しください。",
+    "invalid_credentials": "認証情報が正しくありません。",
+    "unexpected_http": "予期しないエラー（HTTP {{status}}）。サーバーログを確認してください。",
+    "missing_key": "このリンクには復号キーがありません。",
+    "wrong_passphrase": "パスフレーズが正しくありません。",
+    "reveal_failed": "秘密の表示に失敗しました。",
+    "request_failed": "リクエストに失敗しました（{{status}}）。",
+    "generic": "エラーが発生しました。",
+    "please_enter_message": "メッセージを入力してください。",
+    "please_select_image": "画像を選択してください。"
+  },
+  "button": {
+    "signing_in": "サインイン中…",
+    "revealing": "表示中…",
+    "creating": "作成中…",
+    "copied": "コピーしました",
+    "copy_failed": "コピー失敗",
+    "cancel": "取り消す",
+    "confirm": "よろしいですか？",
+    "canceling": "取り消し中…",
+    "clear_past": {
+      "other": "過去のエントリー {{n}} 件を消去"
+    },
+    "clearing": "消去中…"
+  },
+  "status": {
+    "pending": "保留中",
+    "viewed": "閲覧済み",
+    "burned": "破棄済み",
+    "canceled": "取り消し済み",
+    "expired": "期限切れ",
+    "gone": "追跡対象外"
+  },
+  "sender": {
+    "expires_prefix": "有効期限: ",
+    "viewed_at_prefix": "時刻: "
+  },
+  "tracked": {
+    "image_secret": "画像の秘密",
+    "text_secret": "テキストの秘密",
+    "copy_ok": "クリップボードにコピーしました",
+    "copy_fail": "コピーに失敗しました",
+    "orphan_hint": "別の場所で作成",
+    "aria_remove": "リストから削除",
+    "aria_cancel": "この秘密を取り消す",
+    "tooltip_cancel": "URL を無効化して、受信者がこれを閲覧できないようにします",
+    "tooltip_copy": "クリックしてリンクをコピー",
+    "tooltip_orphan": "この URL には、この秘密が作成されたブラウザにのみ保存されている暗号化キーが含まれています。そのブラウザで ephemera を開いてリンクをコピーしてください。",
+    "time_created": "{{when}}に作成",
+    "time_viewed": "{{when}}に閲覧",
+    "time_burned": "{{when}}に破棄",
+    "time_canceled": "{{when}}に取り消し",
+    "time_expired": "{{when}}に期限切れ"
+  }
+}
