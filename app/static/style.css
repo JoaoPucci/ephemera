@@ -1230,15 +1230,26 @@ button.copy-error:hover {
    single opt-in. */
 .chrome-menu { display: none; }
 
-/* Kill Android Chromium's tap-highlight overlay on every interactive
-   element in the drawer. Chrome / Brave / Samsung Internet on Android
-   paint a subtle semi-transparent rectangle/circle over tapped elements
-   by default; on round/full-width interactive surfaces that reads as a
-   ghost halo after tap. Scoped to .chrome-menu so it doesn't blanket
-   the whole app. */
-.chrome-menu *,
-.chrome-menu {
+/* Suppress Android Chromium's tap feedback across the drawer. The
+   pre-Material tap-highlight (a semi-transparent rectangle over the
+   tapped element) is killed by -webkit-tap-highlight-color; the newer
+   Material-ripple fade (Chrome 121+) ignores that property and needs
+   user-select: none + touch-action: manipulation on the tap target
+   to suppress. Belt-and-braces: set both broadly, then an extra
+   !important safety net on the interactive targets themselves. */
+.chrome-menu,
+.chrome-menu * {
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+          user-select: none;
+  -webkit-touch-callout: none;
+}
+.chrome-menu-btn,
+.chrome-menu-row,
+.chrome-menu-row-native,
+.chrome-menu-scrim {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent !important;
 }
 
 @media (max-width: 480px) {
