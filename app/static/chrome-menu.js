@@ -1,28 +1,50 @@
-// Hamburger drawer for the prototype "?chrome=hamburger" variant.
-// Inert when not active: the button is display:none, no handlers fire.
-//
-// The menu rows are purpose-built for a vertical mobile menu -- not
-// reused copies of the desktop pills -- so each row needs its own wiring
-// here. Sign-out doesn't use the two-click confirm pattern because
-// tapping the hamburger + tapping "sign out" is already a two-step
-// interaction; a third confirm would just be friction.
+// Hamburger menu for the mobile chrome. Inert when the variant isn't
+// active (no button in the DOM -> bail immediately). Otherwise wires:
+//   - open/close + aria-expanded + aria-hidden on panel + scrim
+//   - outside-click / scrim-click / Esc to close
+//   - basic focus trap while open
+//   - language row: delegates to window.i18n.setLocale
+//   - theme row: delegates to the desktop toggle, syncs the switch state
+//   - sign-out row: two-click confirm (label swap + 3s auto-disarm), same
+//     pattern as the desktop user pill
+//   - user name: mirrors #user-name so the drawer header populates once
+//     sender.js resolves /api/me
 (() => {
   const root = document.documentElement;
+  const menu = document.getElementById('chrome-menu');
   const btn = document.getElementById('chrome-menu-btn');
-  if (!btn) return;
+  if (!menu || !btn) return;
 
   const panel = document.getElementById('chrome-menu-panel');
+  const scrim = document.getElementById('chrome-menu-scrim');
   const userNameEl = document.getElementById('chrome-menu-user-name');
   const langSelect = document.getElementById('chrome-menu-lang');
+  const langLabel = document.getElementById('chrome-menu-lang-label');
   const themeBtn = document.getElementById('chrome-menu-theme');
-  const themeLabel = document.getElementById('chrome-menu-theme-label');
   const signoutBtn = document.getElementById('chrome-menu-signout');
+  const signoutLabel = document.getElementById('chrome-menu-signout-label');
+
+  // ---- Open / close ----
+
+  function focusableInPanel() {
+    if (!panel) return [];
+    return Array.from(panel.querySelectorAll(
+      'button, [href], select, input, [tabindex]:not([tabindex="-1"])'
+    )).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
+  }
 
   function setOpen(open) {
     if (open) root.dataset.chromeMenuOpen = 'true';
     else delete root.dataset.chromeMenuOpen;
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (panel) panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (scrim) scrim.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) {
+      // Move focus into the panel so screen readers start there and Esc
+      // works without the user having to tab in first.
+      const first = focusableInPanel()[0];
+      if (first) setTimeout(() => first.focus(), 50);
+    }
   }
 
   btn.addEventListener('click', (e) => {
@@ -30,30 +52,42 @@
     setOpen(root.dataset.chromeMenuOpen !== 'true');
   });
 
-  // Outside-click closes. Clicks inside the menu container don't close
-  // (row handlers close themselves where it matters, e.g. after navigating).
-  document.addEventListener('click', (e) => {
-    if (root.dataset.chromeMenuOpen !== 'true') return;
-    if (e.target.closest('#chrome-menu')) return;
-    setOpen(false);
-  });
+  if (scrim) {
+    scrim.addEventListener('click', () => setOpen(false));
+  }
 
+  // Esc closes and returns focus to the trigger.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && root.dataset.chromeMenuOpen === 'true') {
+    if (root.dataset.chromeMenuOpen !== 'true') return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
       setOpen(false);
       btn.focus();
+      return;
+    }
+    // Minimal focus trap: Tab out of the last element wraps to the first,
+    // and Shift+Tab out of the first wraps to the last.
+    if (e.key === 'Tab' && panel) {
+      const items = focusableInPanel();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   });
 
-  // ---- User name row ----
-  // sender.js fetches /api/me and writes the username into #user-name.
-  // Mirror that into the menu by observing the source node; one watcher,
-  // zero duplicate fetches.
+  // ---- User name mirror ----
   function syncUserName() {
     const src = document.getElementById('user-name');
     if (!src || !userNameEl) return;
     const txt = (src.textContent || '').trim();
-    if (txt && txt !== '…' && txt !== '…') userNameEl.textContent = txt;
+    if (txt && txt !== '…') userNameEl.textContent = txt;
   }
   syncUserName();
   const userSrc = document.getElementById('user-name');
@@ -64,48 +98,74 @@
   }
 
   // ---- Language row ----
-  // Delegates to window.i18n.setLocale so cookie + DB + reload happen
-  // through the one path the desktop picker already uses.
   if (langSelect) {
     langSelect.addEventListener('change', (e) => {
       const lang = e.target.value;
       if (window.i18n && typeof window.i18n.setLocale === 'function') {
         window.i18n.setLocale(lang);
       } else {
-        // Fallback: reload with ?lang=; server middleware honors it.
         const u = new URL(location.href);
         u.searchParams.set('lang', lang);
         location.href = u.toString();
       }
     });
-  }
-
-  // ---- Theme row ----
-  // The desktop theme.js wires #theme-toggle and owns the localStorage
-  // + <html data-theme> state. We trigger its click programmatically and
-  // mirror the label here, rather than duplicating the theme-flip logic.
-  function updateThemeLabel() {
-    if (!themeLabel) return;
-    const theme = document.documentElement.dataset.theme || 'light';
-    const light = themeLabel.dataset.light || 'light';
-    const dark = themeLabel.dataset.dark || 'dark';
-    themeLabel.textContent = theme === 'dark' ? dark : light;
-  }
-  updateThemeLabel();
-  new MutationObserver(updateThemeLabel).observe(document.documentElement, {
-    attributes: true, attributeFilter: ['data-theme'],
-  });
-  if (themeBtn) {
-    themeBtn.addEventListener('click', () => {
-      const desktop = document.getElementById('theme-toggle');
-      if (desktop) desktop.click();
-      // Menu stays open so the user can see the theme flip and pick again.
+    // Keep the row-value label in sync when user flips the select without
+    // committing (e.g. arrow-keys through options before picking). The
+    // native popup does its own thing, but if a focused-but-unopened
+    // <select> receives input, the label should still read right.
+    langSelect.addEventListener('input', (e) => {
+      if (langLabel) {
+        const opt = e.target.options[e.target.selectedIndex];
+        if (opt) langLabel.textContent = opt.textContent;
+      }
     });
   }
 
-  // ---- Sign-out row ----
-  if (signoutBtn) {
+  // ---- Theme row (switch) ----
+  function syncThemeState() {
+    if (!themeBtn) return;
+    const theme = root.dataset.theme || 'light';
+    themeBtn.setAttribute('aria-checked', theme === 'dark' ? 'true' : 'false');
+    themeBtn.dataset.theme = theme;
+  }
+  syncThemeState();
+  new MutationObserver(syncThemeState).observe(root, {
+    attributes: true, attributeFilter: ['data-theme'],
+  });
+  if (themeBtn) {
+    themeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const desktop = document.getElementById('theme-toggle');
+      if (desktop) desktop.click();
+      // syncThemeState fires via the MutationObserver when the data-theme
+      // attribute flips, no need to call it manually here.
+    });
+  }
+
+  // ---- Sign-out row (two-click confirm) ----
+  if (signoutBtn && signoutLabel) {
+    const defaultLabel = signoutBtn.dataset.labelDefault || signoutLabel.textContent;
+    let armed = false;
+    let armTimer = null;
+
+    function disarm() {
+      armed = false;
+      signoutBtn.classList.remove('armed');
+      signoutLabel.textContent = defaultLabel;
+    }
+
     signoutBtn.addEventListener('click', async () => {
+      if (!armed) {
+        armed = true;
+        signoutBtn.classList.add('armed');
+        const confirmText = (window.i18n && window.i18n.t)
+          ? window.i18n.t('button.sign_out_confirm')
+          : 'sure?';
+        signoutLabel.textContent = confirmText;
+        armTimer = setTimeout(disarm, 3000);
+        return;
+      }
+      if (armTimer) clearTimeout(armTimer);
       try {
         await fetch('/send/logout', { method: 'POST' });
       } catch {}
