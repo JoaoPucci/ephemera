@@ -23,7 +23,7 @@
     "copy_failed": "Falha ao copiar",
     "cancel": "cancelar",
     "confirm": "confirmar?",
-    "sign_out_confirm": "sair mesmo?",
+    "sign_out_confirm": "confirmar saída?",
     "canceling": "cancelando…",
     "clear_past": {
       "one": "Limpar {{n}} entrada anterior",
