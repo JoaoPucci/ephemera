@@ -17,15 +17,22 @@ window.addEventListener('pageshow', clearOneShotFields);
 
 let backupMode = false;
 
-// Password visibility toggle
+// Password visibility toggle. Strings go through window.i18n.t so the
+// click-flipped label matches the page locale -- the template renders
+// the initial "show" via gettext, then JS had been writing back English
+// on every click, which produced a surprising locale-flip. Both toggles
+// in this file have the same issue; same fix shape.
 const pwInput = document.getElementById('password');
 const pwToggle = document.getElementById('toggle-password');
 pwToggle.addEventListener('click', () => {
   const showing = pwInput.getAttribute('type') === 'text';
   pwInput.setAttribute('type', showing ? 'password' : 'text');
-  pwToggle.textContent = showing ? 'show' : 'hide';
+  pwToggle.textContent = window.i18n.t(showing ? 'login.show' : 'login.hide');
   pwToggle.setAttribute('aria-pressed', String(!showing));
-  pwToggle.setAttribute('aria-label', showing ? 'show password' : 'hide password');
+  pwToggle.setAttribute(
+    'aria-label',
+    window.i18n.t(showing ? 'login.aria_show_password' : 'login.aria_hide_password'),
+  );
 });
 
 function setMode(backup) {
@@ -35,29 +42,29 @@ function setMode(backup) {
     // field on-screen so shoulder-surfing can't lift one by just watching
     // the user type -- same rationale as the sender-form and receiver-form
     // passphrase fields.
-    codeLabel.textContent = 'Recovery code';
+    codeLabel.textContent = window.i18n.t('login.code_label_recovery');
     codeInput.setAttribute('type', 'password');
     codeInput.setAttribute('autocomplete', 'off');
     codeInput.setAttribute('inputmode', 'text');
     codeInput.setAttribute('pattern', '[0-9A-Za-z\\-]*');
     codeInput.placeholder = 'XXXXX-XXXXX';
     codeToggleBtn.hidden = false;
-    toggle.textContent = 'Use 6-digit code';
+    toggle.textContent = window.i18n.t('login.toggle_to_totp');
   } else {
     // TOTP codes rotate every 30s with anti-replay; masking them buys
     // nothing and costs UX. Leave plain text, hide the show/hide button.
-    codeLabel.textContent = '6-digit code';
+    codeLabel.textContent = window.i18n.t('login.code_label_totp');
     codeInput.setAttribute('type', 'text');
     codeInput.setAttribute('autocomplete', 'one-time-code');
     codeInput.setAttribute('inputmode', 'numeric');
     codeInput.placeholder = '';
     codeToggleBtn.hidden = true;
-    toggle.textContent = 'Use a recovery code';
+    toggle.textContent = window.i18n.t('login.toggle_to_recovery');
   }
   // Reset the show/hide button's internal state whenever the mode flips.
   codeToggleBtn.setAttribute('aria-pressed', 'false');
-  codeToggleBtn.setAttribute('aria-label', 'show code');
-  codeToggleBtn.textContent = 'show';
+  codeToggleBtn.setAttribute('aria-label', window.i18n.t('login.aria_show_code'));
+  codeToggleBtn.textContent = window.i18n.t('login.show');
   codeInput.value = '';
   codeInput.focus();
 }
@@ -71,11 +78,11 @@ if (codeToggleBtn) {
   codeToggleBtn.addEventListener('click', () => {
     const showing = codeInput.getAttribute('type') === 'text';
     codeInput.setAttribute('type', showing ? 'password' : 'text');
-    codeToggleBtn.textContent = showing ? 'show' : 'hide';
+    codeToggleBtn.textContent = window.i18n.t(showing ? 'login.show' : 'login.hide');
     codeToggleBtn.setAttribute('aria-pressed', String(!showing));
     codeToggleBtn.setAttribute(
       'aria-label',
-      showing ? 'show code' : 'hide code',
+      window.i18n.t(showing ? 'login.aria_show_code' : 'login.aria_hide_code'),
     );
   });
 }

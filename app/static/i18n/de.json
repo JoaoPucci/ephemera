@@ -42,6 +42,18 @@
     "expires_prefix": "Läuft ab: ",
     "viewed_at_prefix": "um "
   },
+  "login": {
+    "code_label_totp": "6-stelliger Code",
+    "code_label_recovery": "Wiederherstellungscode",
+    "toggle_to_recovery": "Wiederherstellungscode verwenden",
+    "toggle_to_totp": "6-stelligen Code verwenden",
+    "show": "anzeigen",
+    "hide": "verbergen",
+    "aria_show_password": "Passwort anzeigen",
+    "aria_hide_password": "Passwort verbergen",
+    "aria_show_code": "Code anzeigen",
+    "aria_hide_code": "Code verbergen"
+  },
   "tracked": {
     "image_secret": "Bild-Geheimnis",
     "text_secret": "Text-Geheimnis",

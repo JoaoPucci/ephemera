@@ -892,6 +892,81 @@ def test_every_js_i18n_key_exists_in_en_catalog():
 
 
 # ---------------------------------------------------------------------------
+# Cross-locale key parity
+#
+# Mirror of test_every_js_i18n_key_exists_in_en_catalog from the other
+# angle. That one ensures every i18n.t('...') call site has a key in
+# en.json; this one ensures every key in en.json also exists in every
+# other locale's JSON catalog.
+#
+# Structural check only. Missing translations (empty string values,
+# identical-to-English values) are NOT caught here -- those are a
+# translator-quality concern, handled by the translator workflow and
+# (on the shim side) the fallback chain. This test catches the
+# "translator forgot to copy a key across" or "developer added a key
+# to en.json and the other locales weren't updated" drift.
+# ---------------------------------------------------------------------------
+
+
+def _structural_paths(tree, prefix=""):
+    """Enumerate paths for cross-locale parity. Differs from the
+    _enumerate_string_paths enumerator used by the JS-key-coverage
+    test: plural containers (dicts whose keys are a subset of the
+    CLDR categories) yield ONLY the container path, never the
+    individual per-category leaves. That matches CLDR reality --
+    en has `one`+`other`, ja/ko/zh only `other`, ar all six; none
+    of those locales "should" have the others' category keys, so
+    per-category parity would false-positive."""
+    _CLDR = {"zero", "one", "two", "few", "many", "other"}
+    if isinstance(tree, dict):
+        keys = set(tree.keys())
+        if keys and keys <= _CLDR:
+            yield prefix  # plural container -- single unit
+            return
+        for name, child in tree.items():
+            child_prefix = f"{prefix}.{name}" if prefix else name
+            yield from _structural_paths(child, child_prefix)
+    elif isinstance(tree, str):
+        yield prefix
+
+
+def test_every_locale_catalog_has_every_en_key():
+    """Every non-plural leaf path and every plural container path in
+    en.json must exist in every other locale's JSON catalog. Without
+    this coverage, a PR that adds a new key to en.json + wires it into
+    JS would pass the JS-key-coverage test above but silently fall back
+    to English on every non-en locale because the key is missing from
+    their catalogs -- exactly the shape of the login-toggle bug this
+    repo discovered in code review.
+
+    CLDR-aware via _structural_paths: plural containers count as one
+    path, not one per category, so locales with different plural rules
+    (ja/ko/zh use only `other`; ar uses all six) don't false-positive.
+    Per-category translation quality is the translator's concern, not
+    this test's scope."""
+    js_root = Path(__file__).resolve().parent.parent / "app" / "static" / "i18n"
+    en_paths = set(_structural_paths(json.loads((js_root / "en.json").read_text())))
+    assert en_paths, "en.json has no string paths; test setup is broken"
+
+    missing_by_locale: dict[str, list[str]] = {}
+    for path in sorted(js_root.glob("*.json")):
+        if path.stem == "en":
+            continue
+        other_paths = set(_structural_paths(json.loads(path.read_text())))
+        gaps = sorted(en_paths - other_paths)
+        if gaps:
+            missing_by_locale[path.stem] = gaps
+
+    assert not missing_by_locale, (
+        "non-en JSON catalogs missing keys from en.json:\n"
+        + "\n".join(
+            f"  {loc}: {keys}"
+            for loc, keys in sorted(missing_by_locale.items())
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # Version string in the layout footer
 #
 # app.version computes a one-off string via `git describe --tags --always

@@ -41,6 +41,18 @@
     "expires_prefix": "有効期限: ",
     "viewed_at_prefix": "時刻: "
   },
+  "login": {
+    "code_label_totp": "6桁のコード",
+    "code_label_recovery": "リカバリーコード",
+    "toggle_to_recovery": "リカバリーコードを使う",
+    "toggle_to_totp": "6桁のコードを使う",
+    "show": "表示",
+    "hide": "非表示",
+    "aria_show_password": "パスワードを表示",
+    "aria_hide_password": "パスワードを非表示",
+    "aria_show_code": "コードを表示",
+    "aria_hide_code": "コードを非表示"
+  },
   "tracked": {
     "image_secret": "画像の秘密",
     "text_secret": "テキストの秘密",

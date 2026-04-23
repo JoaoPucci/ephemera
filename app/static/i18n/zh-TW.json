@@ -41,6 +41,18 @@
     "expires_prefix": "有效期限: ",
     "viewed_at_prefix": "於 "
   },
+  "login": {
+    "code_label_totp": "6 位數驗證碼",
+    "code_label_recovery": "復原碼",
+    "toggle_to_recovery": "使用復原碼",
+    "toggle_to_totp": "使用 6 位數驗證碼",
+    "show": "顯示",
+    "hide": "隱藏",
+    "aria_show_password": "顯示密碼",
+    "aria_hide_password": "隱藏密碼",
+    "aria_show_code": "顯示驗證碼",
+    "aria_hide_code": "隱藏驗證碼"
+  },
   "tracked": {
     "image_secret": "圖片祕密",
     "text_secret": "文字祕密",

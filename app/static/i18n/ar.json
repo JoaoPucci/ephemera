@@ -46,6 +46,18 @@
     "expires_prefix": "تنتهي الصلاحية: ",
     "viewed_at_prefix": "في "
   },
+  "login": {
+    "code_label_totp": "رمز مكوَّن من 6 أرقام",
+    "code_label_recovery": "رمز الاسترداد",
+    "toggle_to_recovery": "استخدام رمز الاسترداد",
+    "toggle_to_totp": "استخدام رمز مكوَّن من 6 أرقام",
+    "show": "إظهار",
+    "hide": "إخفاء",
+    "aria_show_password": "إظهار كلمة المرور",
+    "aria_hide_password": "إخفاء كلمة المرور",
+    "aria_show_code": "إظهار الرمز",
+    "aria_hide_code": "إخفاء الرمز"
+  },
   "tracked": {
     "image_secret": "سر صورة",
     "text_secret": "سر نصي",
