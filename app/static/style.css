@@ -1288,10 +1288,21 @@ button.copy-error:hover {
     color: var(--text);
     cursor: pointer;
     pointer-events: auto;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-appearance: none;
+            appearance: none;
     transition: background 0.15s, color 0.15s;
   }
-  .chrome-menu-btn:hover {
-    background: color-mix(in srgb, var(--muted) 12%, transparent);
+  /* Scope :hover to mouse-pointer devices. On touch browsers (Brave /
+     Chrome on Android in particular) :hover persists after a tap, which
+     kept a visible circular pill painted under the X while the drawer
+     was open -- and the pill's bottom edge looked like it overlapped
+     the drawer. (hover: hover) keeps the desktop hover affordance while
+     touch devices never paint that pill. */
+  @media (hover: hover) {
+    .chrome-menu-btn:hover {
+      background: color-mix(in srgb, var(--muted) 12%, transparent);
+    }
   }
   .chrome-menu-btn:focus-visible {
     outline: none;
