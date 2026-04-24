@@ -79,7 +79,9 @@ jobs:
       - name: Upload to code-scanning
         # Merges Scorecard findings into the same Security -> Code-scanning
         # view as CodeQL results, with their own tool category so they're
-        # easy to filter.
-        uses: github/codeql-action/upload-sarif@v3
+        # easy to filter. SHA-pinned like every other action in this file,
+        # per Scorecard's own Pinned-Dependencies guidance; Dependabot
+        # bumps both the SHA and the trailing comment together.
+        uses: github/codeql-action/upload-sarif@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a # v3.35.2
         with:
           sarif_file: results.sarif
