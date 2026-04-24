@@ -38,3 +38,11 @@ jobs:
           # fail-on-severity defaults to "low" -- any CVE on a new dep
           # fails the check. Strict, intentional. Loosen to "moderate" or
           # "high" only if dev-dep transitives become consistently noisy.
+          #
+          # fail-on-scopes defaults to "runtime" alone, which would leave
+          # npm devDependencies (vitest, playwright, jsdom, eslint) and
+          # GitHub Actions (scope "unknown") uncovered -- a CVE in any of
+          # those would not fail the check. Enumerate every scope
+          # explicitly so "any CVE on a new dep fails" actually matches
+          # this workflow's intent.
+          fail-on-scopes: runtime, development, unknown
