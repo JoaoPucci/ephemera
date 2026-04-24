@@ -115,16 +115,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install pip-audit (with patched pip)
-        # Runner's bundled pip (currently 26.0.1) is flagged by
-        # CVE-2026-3219: concatenated tar+ZIP archives are treated as
-        # ZIPs regardless of filename. Fix landed in pip 26.1. Upgrade
-        # here so pip-audit's own runtime pip isn't in the advisory
-        # graph; this also keeps the step self-protecting against
-        # future pip CVEs without hardcoding a --ignore-vuln ID.
-        run: |
-          pip install --upgrade 'pip>=26.1'
-          pip install pip-audit
+      - name: Install pip-audit
+        run: pip install pip-audit
 
       - name: Audit Python deps (requirements-dev transitively includes runtime)
         # Disable hash checking for the audit pass: pip-audit itself pulls in
@@ -132,7 +124,16 @@ jobs:
         # actually runs in the backend / e2e jobs uses --require-hashes and
         # is the real integrity gate; pip-audit just needs to resolve the
         # graph to check advisories against it.
-        run: pip-audit --disable-pip -r requirements-dev.txt
+        #
+        # --ignore-vuln CVE-2026-3219: pip 26.0.1 (the latest on PyPI at
+        # the time of writing) is flagged -- concatenated tar+ZIP archives
+        # are installed as ZIP regardless of filename (pypa/pip#13870).
+        # Fix has merged to pip's main branch but no release has been cut
+        # yet; once pip 26.1+ is on PyPI, drop this ignore. The runtime
+        # exploitation vector against our deploys is blocked anyway:
+        # `pip install --require-hashes -r requirements.txt` rejects any
+        # archive whose SHA-256 doesn't match the committed hash.
+        run: pip-audit --disable-pip --ignore-vuln CVE-2026-3219 -r requirements-dev.txt
 
       - name: Set up Node
         uses: actions/setup-node@v6
