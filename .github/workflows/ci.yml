@@ -155,13 +155,26 @@ jobs:
   forbidden-paths:
     name: Forbidden file paths
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    # 3 min is generous for a one-file grep; the actual budget is dominated
+    # by checkout on push-to-main, where fetch-depth=0 (see below) clones
+    # the full history. 1 min was too tight -- observed overrun on the
+    # first post-merge run.
+    timeout-minutes: 3
     steps:
-      # fetch-depth: 0 gives us the full history so we can diff against the
-      # PR base SHA below without a shallow-clone miss.
+      # Depth depends on the event:
+      #   pull_request -> fetch-depth: 0, because we diff base..head below
+      #     (the PR's merge-ref mechanism makes this effectively shallow
+      #     under the hood -- typically <1s).
+      #   push         -> fetch-depth: 1, because we only use `git ls-files`
+      #     below; no history needed, and a full-depth push-event clone is
+      #     the slow path.
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          # Quote the values: in GitHub Actions expressions, bare `0` is
+          # falsy, so `x && 0 || 1` always collapses to `1`. Using strings
+          # ('0' is a non-empty string, thus truthy) makes the ternary
+          # behave as intended; actions/checkout parses them as numbers.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - name: Check for filenames that are never OK to commit
         run: |

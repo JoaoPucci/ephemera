@@ -1,0 +1,48 @@
+# Dependency Review
+#
+# Checks every PR for newly-added or upgraded dependencies and fails the
+# run if any introduce a known CVE in the GitHub Advisory Database. Also
+# surfaces license changes. Complements pip-audit (which scans the whole
+# requirements-dev tree in CI) by looking only at the *delta* the PR
+# introduces, which is the actual attack surface of a merge.
+#
+# Source:  https://github.com/actions/dependency-review-action
+# Docs:    https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/about-dependency-review
+name: 'Dependency review'
+
+on:
+  pull_request:
+    branches: [main]
+
+# Read-only on repo contents; write on pull_requests for the on-failure
+# summary comment. No other scopes required.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Only post a comment when the check finds a problem -- keeps
+          # clean PRs quiet; failures still surface in the Actions tab and
+          # the PR check status.
+          comment-summary-in-pr: on-failure
+          # fail-on-severity defaults to "low" -- any CVE on a new dep
+          # fails the check. Strict, intentional. Loosen to "moderate" or
+          # "high" only if dev-dep transitives become consistently noisy.
+          #
+          # fail-on-scopes defaults to "runtime" alone, which would leave
+          # npm devDependencies (vitest, playwright, jsdom, eslint) and
+          # GitHub Actions (scope "unknown") uncovered -- a CVE in any of
+          # those would not fail the check. Enumerate every scope
+          # explicitly so "any CVE on a new dep fails" actually matches
+          # this workflow's intent.
+          fail-on-scopes: runtime, development, unknown
