@@ -33,6 +33,14 @@ HEALTHZ_RETRY_INTERVAL=1
 ISACTIVE_MAX_RETRIES=30
 ISACTIVE_RETRY_INTERVAL=0.5
 
+# Anchor cwd to a directory ephemera can read. Without this, `find` (and any
+# other chdir-and-restore tool) errors on exit when the caller's cwd is
+# unreadable to ephemera -- which is the case both from an admin shell (the
+# admin's $HOME is 0700) and from the CI forced-command path (/home/deploy/
+# is 0700 too). The find stderr is silenced, the pipeline's nonzero exit
+# cascades through pipefail, and the script appears to hang silently.
+cd "$APP_DIR"
+
 die() { echo "DEPLOY FAILED: $*" >&2; exit 1; }
 
 # --- 0. Re-validate tag -----------------------------------------------------

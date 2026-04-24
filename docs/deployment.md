@@ -349,12 +349,15 @@ Run as root on the server.
 5. **Sudoers fragment.** Validate with `visudo -c -f /etc/sudoers.d/ephemera-deploy`:
 
    ```
-   deploy ALL=(ephemera) NOPASSWD: /opt/ephemera/scripts/deploy/deploy.sh
-   deploy ALL=(root) NOPASSWD: /bin/systemctl restart ephemera, /bin/systemctl is-active ephemera
+   deploy   ALL=(ephemera) NOPASSWD: /opt/ephemera/scripts/deploy/deploy.sh
+   ephemera ALL=(root)     NOPASSWD: /bin/systemctl restart ephemera, /bin/systemctl is-active ephemera
    ```
 
    Exact forms, no wildcards — a trailing `...` would let a future
-   caller slip extra argv in.
+   caller slip extra argv in. Note the second row's subject: `deploy`
+   sudos to `ephemera` to run the script (first row), then it is
+   `ephemera` that issues the internal `sudo systemctl` calls, so the
+   NOPASSWD grant for systemctl must target `ephemera`, not `deploy`.
 
 6. **Lock SSH to the tailnet.** Remove the laptop-IP allow from UFW
    and replace it with a tailnet-interface rule:
