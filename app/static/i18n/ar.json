@@ -23,7 +23,7 @@
     "copy_failed": "فشل النسخ",
     "cancel": "إلغاء",
     "confirm": "تأكيد؟",
-    "sign_out_confirm": "تأكيد؟",
+    "sign_out_confirm": "هل تريد تسجيل الخروج؟",
     "canceling": "جارٍ الإلغاء…",
     "clear_past": {
       "zero": "محو {{n}} إدخال سابق",
@@ -34,6 +34,9 @@
       "other": "محو {{n}} إدخال سابق"
     },
     "clearing": "جارٍ المحو…"
+  },
+  "menu": {
+    "sign_out_confirm": "هل تريد تسجيل الخروج؟"
   },
   "status": {
     "pending": "قيد الانتظار",

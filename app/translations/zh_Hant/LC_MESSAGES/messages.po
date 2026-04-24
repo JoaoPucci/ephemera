@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"POT-Creation-Date: 2026-04-24 04:11+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: zh_Hant\n"
@@ -18,11 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:21
+#: app/templates/_layout.html:49 app/templates/_layout.html:50
+msgid "open menu"
+msgstr "開啟選單"
+
+#: app/templates/_layout.html:51
+msgid "close menu"
+msgstr "關閉選單"
+
+#: app/templates/_layout.html:70
+msgid "signed in as"
+msgstr "目前登入帳號"
+
+#: app/templates/_layout.html:77
+msgid "settings"
+msgstr "設定"
+
+#: app/templates/_layout.html:89 app/templates/_layout.html:94
+msgid "language"
+msgstr "語言"
+
+#: app/templates/_layout.html:121
+msgid "dark mode"
+msgstr "深色模式"
+
+#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr "登出"
+
+#: app/templates/_layout.html:151
 msgid "Language"
 msgstr "語言"
 
-#: app/templates/_layout.html:27
+#: app/templates/_layout.html:157
 msgid "toggle theme"
 msgstr "切換主題"
 
@@ -129,10 +158,6 @@ msgstr "使用復原碼"
 msgid "ephemera — create secret"
 msgstr "ephemera — 建立祕密"
 
-#: app/templates/sender.html:4 app/templates/sender.html:7
-msgid "sign out"
-msgstr "登出"
-
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
 msgstr "你正在追蹤的祕密"
@@ -225,9 +250,7 @@ msgstr "例如：Acme 的 API 金鑰"
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
-msgstr ""
-"建立後，你將無法再次讀取內容 — 即使是你自己這一端也一樣。若日後還會用"
-"到，請另外保存一份副本。"
+msgstr "建立後，你將無法再次讀取內容 — 即使是你自己這一端也一樣。若日後還會用到，請另外保存一份副本。"
 
 #: app/templates/sender.html:96
 msgid "Create Secret"
@@ -248,3 +271,4 @@ msgstr "狀態"
 #: app/templates/sender.html:111
 msgid "Create another"
 msgstr "再建立一個"
+

@@ -158,6 +158,7 @@ LAUNCHED: tuple[str, ...] = tuple(
     tag for tag in SUPPORTED if tag not in _LAUNCH_OPT_OUT
 )
 
+
 # Set by the i18n middleware per request; read by lazy_gettext at str()-coerce
 # time. Default covers direct-imports in tests, the admin CLI, and any other
 # path where no middleware runs -- lazy strings render as English instead of

@@ -23,7 +23,7 @@
     "copy_failed": "Falha ao copiar",
     "cancel": "cancelar",
     "confirm": "confirmar?",
-    "sign_out_confirm": "sair?",
+    "sign_out_confirm": "sair mesmo?",
     "canceling": "cancelando…",
     "clear_past": {
       "one": "Limpar {{n}} entrada anterior",
@@ -31,6 +31,9 @@
       "other": "Limpar {{n}} entradas anteriores"
     },
     "clearing": "limpando…"
+  },
+  "menu": {
+    "sign_out_confirm": "sair mesmo?"
   },
   "status": {
     "pending": "pendente",

@@ -23,7 +23,7 @@
     "copy_failed": "Error al copiar",
     "cancel": "cancelar",
     "confirm": "¿confirmar?",
-    "sign_out_confirm": "¿seguro?",
+    "sign_out_confirm": "¿cerrar sesión de verdad?",
     "canceling": "cancelando…",
     "clear_past": {
       "one": "Borrar {{n}} entrada anterior",
@@ -31,6 +31,9 @@
       "other": "Borrar {{n}} entradas anteriores"
     },
     "clearing": "borrando…"
+  },
+  "menu": {
+    "sign_out_confirm": "¿cerrar sesión de verdad?"
   },
   "status": {
     "pending": "pendiente",

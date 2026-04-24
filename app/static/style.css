@@ -1214,3 +1214,388 @@ button.copy-error:hover {
   #user-name { max-width: 4rem; }
   .wordmark { font-size: 0.8rem; }
 }
+
+/* ===================================================================
+   Mobile chrome: hamburger menu
+
+   Replaces the desktop top-chrome + user pill below the mobile
+   breakpoint. Anatomy: a fixed (invisible) top bar that anchors the
+   hamburger button, a backdrop scrim that fades in with the drawer,
+   and a drawer that slides down from under the bar. Rows are
+   purpose-built for a vertical menu, grouped into sections, with a
+   switch-style toggle for theme and a two-click confirm for sign-out.
+   =================================================================== */
+
+/* Hidden above the mobile breakpoint; the @media block below is the
+   single opt-in. */
+.chrome-menu { display: none; }
+
+/* Drawer-wide tap affordance hygiene:
+   - no tap-highlight flash during finger-down,
+   - no text selection or long-press callout on menu rows
+     (they're controls, not content).
+   Interactive targets additionally opt into touch-action: manipulation
+   to skip the 300ms tap delay on mobile browsers. */
+.chrome-menu,
+.chrome-menu * {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+          user-select: none;
+  -webkit-touch-callout: none;
+}
+.chrome-menu-btn,
+.chrome-menu-row,
+.chrome-menu-row-native,
+.chrome-menu-scrim {
+  touch-action: manipulation;
+}
+
+@media (max-width: 480px) {
+
+  /* The desktop top-chrome + user-btn step aside at mobile -- the
+     drawer replaces them. The bottom wordmark + .app-version STAY
+     visible: they're the brand signature and belong in their paired-
+     baseline position above the card, not squeezed into a toolbar. */
+  .top-chrome,
+  .user-btn { display: none; }
+
+  body {
+    /* Reserve room for the hamburger button's fixed slot; content begins
+       below the notional bar line even though the bar itself is invisible. */
+    padding-top: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
+  }
+
+  .chrome-menu { display: block; }
+
+  /* ----- Top bar -----
+     Intentionally invisible. The bar is a structural slot -- a landing
+     edge for the drawer to slide from, and an anchor point for the
+     hamburger button -- not a visible surface. pointer-events skip the
+     empty area so taps reach the page underneath; the button itself
+     opts back in. */
+  .chrome-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
+    padding: max(0.5rem, env(safe-area-inset-top)) 0.75rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    background: transparent;
+    pointer-events: none;
+    z-index: 12;
+  }
+
+  /* ----- Hamburger button -----
+     44px (2.75rem) hit target: Apple HIG minimum; Material recommends
+     48px but 44px clears both WCAG 2.5.8 and platform guidance. The
+     glyph inside stays small (18x14) so visual weight doesn't change,
+     only the touchable area. */
+  .chrome-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    pointer-events: auto;
+    -webkit-appearance: none;
+            appearance: none;
+    transition: background 0.15s, color 0.15s;
+  }
+  /* Reset the interaction states inherited from the global
+     `button` / `button:hover` / `button:focus-visible` rules defined
+     earlier in this file -- those paint an accent background + lift +
+     focus-ring that's wrong for this transparent chrome button. The
+     class+pseudo specificity here beats element+pseudo, so the reset
+     applies unconditionally; the pointer-aware media block below is
+     the only place we re-opt-in to hover / focus-ring visuals. */
+  .chrome-menu-btn:hover,
+  .chrome-menu-btn:active,
+  .chrome-menu-btn:focus,
+  .chrome-menu-btn:focus-visible {
+    background: transparent;
+    transform: none;
+    box-shadow: none;
+    outline: none;
+  }
+  /* Re-apply hover + focus-visible affordances only where the PRIMARY
+     pointer is fine (mouse, trackpad). Gating on (hover: hover) alone
+     isn't enough: Samsung devices with an S Pen report hover-capable
+     even though the user is tapping with a finger, and the focus-ring
+     then paints as a persistent halo around the X after tap.
+     `(pointer: fine)` requires a precise primary pointer, which the
+     S Pen isn't (the device's primary is still the touchscreen). */
+  @media (hover: hover) and (pointer: fine) {
+    .chrome-menu-btn:hover {
+      background: color-mix(in srgb, var(--muted) 12%, transparent);
+    }
+    .chrome-menu-btn:focus-visible {
+      box-shadow: var(--focus-ring);
+    }
+  }
+
+  /* Icon: 3 lines built from spans, no SVG. Top and bottom rotate into
+     an X on open; middle fades out. The fixed icon box (18x14) pins the
+     center so the morph reads as transform, not relayout. */
+  .chrome-menu-btn-icon {
+    position: relative;
+    display: inline-block;
+    width: 1.125rem;
+    height: 0.875rem;
+  }
+  .chrome-menu-btn-icon-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1.6px;
+    background: currentColor;
+    border-radius: 2px;
+    transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1),
+                opacity 0.14s;
+    transform-origin: center;
+  }
+  .chrome-menu-btn-icon-line:nth-child(1) { top: 0; }
+  .chrome-menu-btn-icon-line:nth-child(2) { top: 50%; transform: translateY(-50%); }
+  .chrome-menu-btn-icon-line:nth-child(3) { bottom: 0; }
+
+  html[data-chrome-menu-open] .chrome-menu-btn-icon-line:nth-child(1) {
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+  }
+  html[data-chrome-menu-open] .chrome-menu-btn-icon-line:nth-child(2) {
+    opacity: 0;
+    transform: translateY(-50%) scaleX(0.1);
+  }
+  html[data-chrome-menu-open] .chrome-menu-btn-icon-line:nth-child(3) {
+    bottom: 50%;
+    transform: translateY(50%) rotate(-45deg);
+  }
+
+  /* ----- Backdrop scrim ----- */
+  .chrome-menu-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-out;
+    z-index: 10;
+  }
+  html[data-chrome-menu-open] .chrome-menu-scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ----- Drawer ----- */
+  .chrome-menu-panel {
+    position: fixed;
+    top: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
+    left: 0;
+    right: 0;
+    max-height: calc(100vh - 3.25rem - max(0.5rem, env(safe-area-inset-top)));
+    overflow-y: auto;
+    padding: 0.5rem 0.6rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-102%);
+    transition: transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1),
+                visibility 0s linear 0.26s;
+    visibility: hidden;
+    z-index: 11;
+  }
+  html[data-chrome-menu-open] .chrome-menu-panel {
+    transform: translateY(0);
+    visibility: visible;
+    transition: transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1),
+                visibility 0s linear 0s;
+  }
+
+  /* ----- Sections ----- */
+  .chrome-menu-section {
+    padding: 0.25rem 0;
+    /* Staggered entrance: each section (in source order via --stagger-i)
+       fades + rises in a beat later than the previous. Keeps the drawer
+       opening from reading as one flat slide. */
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.22s ease-out, transform 0.22s ease-out;
+    transition-delay: 0s;
+  }
+  .chrome-menu-section + .chrome-menu-section {
+    border-top: 1px solid var(--border);
+    margin-top: 0.25rem;
+    padding-top: 0.5rem;
+  }
+  html[data-chrome-menu-open] .chrome-menu-section {
+    opacity: 1;
+    transform: translateY(0);
+    transition-delay: calc(60ms + var(--stagger-i, 0) * 40ms);
+  }
+
+  .chrome-menu-section-label {
+    margin: 0 0 0.2rem;
+    padding: 0 0.75rem;
+    font-size: 0.66rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  /* ----- User header ----- */
+  .chrome-menu-user {
+    display: flex;
+    flex-direction: column;
+    padding: 0.2rem 0.75rem 0.4rem;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+  .chrome-menu-user-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chrome-menu-user-sub {
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  /* ----- Rows ----- */
+  .chrome-menu-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0.5rem 0.75rem;
+    border: 0;
+    border-radius: 0.75rem;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.92rem;
+    text-align: start;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+  .chrome-menu-row:hover,
+  .chrome-menu-row:active {
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+  }
+  .chrome-menu-row:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .chrome-menu-row-icon { flex-shrink: 0; color: var(--muted); }
+  .chrome-menu-row-label { flex: 0 1 auto; }
+  .chrome-menu-row-value {
+    margin-inline-start: auto;
+    font-size: 0.85rem;
+    color: var(--muted);
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chrome-menu-row-chevron {
+    flex-shrink: 0;
+    color: var(--muted);
+    opacity: 0.8;
+  }
+  [dir="rtl"] .chrome-menu-row-chevron { transform: scaleX(-1); }
+
+  /* Language row: native <select> layered invisibly over the row so the
+     tap target is the whole row. Explicit color on <option> so Chromium
+     / Brave renders the popup text (the select itself is transparent;
+     options inherit color when we don't say otherwise). */
+  .chrome-menu-row-select { cursor: pointer; }
+  .chrome-menu-row-native {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: transparent;
+    opacity: 0;
+    appearance: none;
+    cursor: pointer;
+    font: inherit;
+  }
+  .chrome-menu-row-native option {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  /* Theme row: icon swaps with the current theme. The trailing switch
+     animates its thumb between the two ends. */
+  .chrome-menu-row-icon-sun { display: inline-block; }
+  .chrome-menu-row-icon-moon { display: none; }
+  html[data-theme="dark"] .chrome-menu-row-icon-sun { display: none; }
+  html[data-theme="dark"] .chrome-menu-row-icon-moon { display: inline-block; }
+
+  .chrome-menu-switch {
+    position: relative;
+    display: inline-block;
+    margin-inline-start: auto;
+    width: 2.4rem;
+    height: 1.3rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 30%, transparent);
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .chrome-menu-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: calc(1.3rem - 4px);
+    height: calc(1.3rem - 4px);
+    border-radius: 999px;
+    background: var(--surface);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  html[data-theme="dark"] .chrome-menu-switch {
+    background: var(--accent);
+  }
+  html[data-theme="dark"] .chrome-menu-switch-thumb {
+    transform: translateX(1.1rem);
+  }
+  [dir="rtl"] html[data-theme="dark"] .chrome-menu-switch-thumb {
+    transform: translateX(-1.1rem);
+  }
+
+  /* Danger row (sign-out) + armed state */
+  .chrome-menu-row-danger { color: var(--danger); }
+  .chrome-menu-row-danger .chrome-menu-row-icon { color: var(--danger); }
+  .chrome-menu-row-danger:hover {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
+  .chrome-menu-row-danger.armed {
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+  .chrome-menu-row-danger.armed .chrome-menu-row-label {
+    animation: chrome-menu-armed-fade 0.18s ease-out;
+  }
+  @keyframes chrome-menu-armed-fade {
+    from { opacity: 0; transform: translateX(-0.2rem); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+}

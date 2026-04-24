@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"POT-Creation-Date: 2026-04-24 04:11+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: ja\n"
@@ -18,11 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:21
+#: app/templates/_layout.html:49 app/templates/_layout.html:50
+msgid "open menu"
+msgstr "メニューを開く"
+
+#: app/templates/_layout.html:51
+msgid "close menu"
+msgstr "メニューを閉じる"
+
+#: app/templates/_layout.html:70
+msgid "signed in as"
+msgstr "サインイン中のアカウント"
+
+#: app/templates/_layout.html:77
+msgid "settings"
+msgstr "設定"
+
+#: app/templates/_layout.html:89 app/templates/_layout.html:94
+msgid "language"
+msgstr "言語"
+
+#: app/templates/_layout.html:121
+msgid "dark mode"
+msgstr "ダークモード"
+
+#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr "サインアウト"
+
+#: app/templates/_layout.html:151
 msgid "Language"
 msgstr "言語"
 
-#: app/templates/_layout.html:27
+#: app/templates/_layout.html:157
 msgid "toggle theme"
 msgstr "テーマを切り替え"
 
@@ -38,8 +67,7 @@ msgstr "誰かがあなたに秘密を共有しました。"
 msgid ""
 "This message can only be viewed once. After you reveal it, it will be "
 "permanently destroyed."
-msgstr ""
-"このメッセージは一度だけ閲覧できます。表示すると完全に破棄されます。"
+msgstr "このメッセージは一度だけ閲覧できます。表示すると完全に破棄されます。"
 
 #: app/templates/landing.html:13
 msgid "Passphrase"
@@ -129,10 +157,6 @@ msgstr "リカバリーコードを使う"
 #: app/templates/sender.html:2
 msgid "ephemera — create secret"
 msgstr "ephemera — 秘密を作成"
-
-#: app/templates/sender.html:4 app/templates/sender.html:7
-msgid "sign out"
-msgstr "サインアウト"
 
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
@@ -226,9 +250,7 @@ msgstr "例: Acme の API キー"
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
-msgstr ""
-"作成後は、自分側からも内容を再度読むことはできません。必要であれば別途"
-"コピーを保存してください。"
+msgstr "作成後は、自分側からも内容を再度読むことはできません。必要であれば別途コピーを保存してください。"
 
 #: app/templates/sender.html:96
 msgid "Create Secret"
@@ -249,3 +271,4 @@ msgstr "ステータス"
 #: app/templates/sender.html:111
 msgid "Create another"
 msgstr "もう1つ作成"
+

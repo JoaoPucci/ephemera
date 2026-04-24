@@ -23,12 +23,15 @@
     "copy_failed": "复制失败",
     "cancel": "撤销",
     "confirm": "确认？",
-    "sign_out_confirm": "确定？",
+    "sign_out_confirm": "确定要退出登录？",
     "canceling": "撤销中…",
     "clear_past": {
       "other": "清除 {{n}} 条历史条目"
     },
     "clearing": "清除中…"
+  },
+  "menu": {
+    "sign_out_confirm": "确定要退出登录？"
   },
   "status": {
     "pending": "待查看",

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"POT-Creation-Date: 2026-04-24 04:11+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: ko\n"
@@ -18,11 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:21
+#: app/templates/_layout.html:49 app/templates/_layout.html:50
+msgid "open menu"
+msgstr "메뉴 열기"
+
+#: app/templates/_layout.html:51
+msgid "close menu"
+msgstr "메뉴 닫기"
+
+#: app/templates/_layout.html:70
+msgid "signed in as"
+msgstr "로그인한 계정"
+
+#: app/templates/_layout.html:77
+msgid "settings"
+msgstr "설정"
+
+#: app/templates/_layout.html:89 app/templates/_layout.html:94
+msgid "language"
+msgstr "언어"
+
+#: app/templates/_layout.html:121
+msgid "dark mode"
+msgstr "다크 모드"
+
+#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr "로그아웃"
+
+#: app/templates/_layout.html:151
 msgid "Language"
 msgstr "언어"
 
-#: app/templates/_layout.html:27
+#: app/templates/_layout.html:157
 msgid "toggle theme"
 msgstr "테마 전환"
 
@@ -38,8 +67,7 @@ msgstr "누군가 당신에게 비밀을 공유했습니다."
 msgid ""
 "This message can only be viewed once. After you reveal it, it will be "
 "permanently destroyed."
-msgstr ""
-"이 메시지는 한 번만 볼 수 있습니다. 확인하면 영구적으로 삭제됩니다."
+msgstr "이 메시지는 한 번만 볼 수 있습니다. 확인하면 영구적으로 삭제됩니다."
 
 #: app/templates/landing.html:13
 msgid "Passphrase"
@@ -129,10 +157,6 @@ msgstr "복구 코드 사용"
 #: app/templates/sender.html:2
 msgid "ephemera — create secret"
 msgstr "ephemera — 비밀 만들기"
-
-#: app/templates/sender.html:4 app/templates/sender.html:7
-msgid "sign out"
-msgstr "로그아웃"
 
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
@@ -226,9 +250,7 @@ msgstr "예: Acme API 키"
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
-msgstr ""
-"만든 후에는 본인도 내용을 다시 읽을 수 없습니다. 필요할 경우 다른 곳에 "
-"복사본을 보관하세요."
+msgstr "만든 후에는 본인도 내용을 다시 읽을 수 없습니다. 필요할 경우 다른 곳에 복사본을 보관하세요."
 
 #: app/templates/sender.html:96
 msgid "Create Secret"
@@ -249,3 +271,4 @@ msgstr "상태"
 #: app/templates/sender.html:111
 msgid "Create another"
 msgstr "하나 더 만들기"
+

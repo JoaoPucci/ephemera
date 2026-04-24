@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-23 05:49+0900\n"
+"POT-Creation-Date: 2026-04-24 04:11+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: es\n"
@@ -18,11 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:21
+#: app/templates/_layout.html:49 app/templates/_layout.html:50
+msgid "open menu"
+msgstr "abrir menú"
+
+#: app/templates/_layout.html:51
+msgid "close menu"
+msgstr "cerrar menú"
+
+#: app/templates/_layout.html:70
+msgid "signed in as"
+msgstr "sesión iniciada como"
+
+#: app/templates/_layout.html:77
+msgid "settings"
+msgstr "ajustes"
+
+#: app/templates/_layout.html:89 app/templates/_layout.html:94
+msgid "language"
+msgstr "idioma"
+
+#: app/templates/_layout.html:121
+msgid "dark mode"
+msgstr "modo oscuro"
+
+#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/sender.html:4 app/templates/sender.html:7
+msgid "sign out"
+msgstr "cerrar sesión"
+
+#: app/templates/_layout.html:151
 msgid "Language"
 msgstr "Idioma"
 
-#: app/templates/_layout.html:27
+#: app/templates/_layout.html:157
 msgid "toggle theme"
 msgstr "cambiar tema"
 
@@ -73,7 +102,9 @@ msgstr "Haz clic para ver a tamaño completo"
 
 #: app/templates/landing.html:33
 msgid "Click the image for full size · this secret has been destroyed."
-msgstr "Haz clic en la imagen para verla a tamaño completo · este secreto ha sido destruido."
+msgstr ""
+"Haz clic en la imagen para verla a tamaño completo · este secreto ha sido"
+" destruido."
 
 #: app/templates/landing.html:37
 msgid "This secret is no longer available."
@@ -131,17 +162,15 @@ msgstr "Usar un código de recuperación"
 msgid "ephemera — create secret"
 msgstr "ephemera — crear secreto"
 
-#: app/templates/sender.html:4 app/templates/sender.html:7
-msgid "sign out"
-msgstr "cerrar sesión"
-
 #: app/templates/sender.html:14
 msgid "Secrets you're tracking"
 msgstr "Secretos que estás siguiendo"
 
 #: app/templates/sender.html:23
 msgid "Remove every row that is no longer pending — pending secrets are kept"
-msgstr "Eliminar todas las filas que ya no estén pendientes — los secretos pendientes se conservan"
+msgstr ""
+"Eliminar todas las filas que ya no estén pendientes — los secretos "
+"pendientes se conservan"
 
 #: app/templates/sender.html:32
 msgid "Clear past entries"
@@ -250,3 +279,4 @@ msgstr "Estado"
 #: app/templates/sender.html:111
 msgid "Create another"
 msgstr "Crear otro"
+
