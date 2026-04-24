@@ -151,3 +151,55 @@ jobs:
         # are typically toolchain-adjacent and handled via Dependabot PRs
         # at their own pace.
         run: npm audit --audit-level=high
+
+  forbidden-paths:
+    name: Forbidden file paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      # fetch-depth: 0 gives us the full history so we can diff against the
+      # PR base SHA below without a shallow-clone miss.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for filenames that are never OK to commit
+        run: |
+          set -euo pipefail
+
+          # Filename patterns that are always a commit-time bug, independent
+          # of branch or author. Matches on filename only, not contents, so
+          # docs or tests that *mention* these names in prose are unaffected.
+          #
+          # Keep this list tight: only entries whose commit is unambiguously
+          # wrong. Speculative extras (*.pem, *.key) have real false-positive
+          # risk (public certs, docs examples) and stay out.
+          #
+          # Blocklist:
+          #   .env and common env-variant files (secrets)   ->  EPHEMERA_SECRET_KEY lives here in dev
+          #   SQLite DB file + WAL/SHM sidecars             ->  live service state, never in the repo
+          #   SSH private keys in their canonical names     ->  id_rsa, id_ed25519, etc.
+          forbidden_re='^\.env$|^\.env\.(local|production|staging|development)$|\.db$|\.db-wal$|\.db-shm$|\.sqlite$|\.sqlite3$|(^|/)id_(rsa|dsa|ecdsa|ed25519)$'
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # On a PR, only scan files that actually changed in this PR's
+            # diff -- a preexisting legal file won't re-trip the check.
+            files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          else
+            # On push-to-main, scan the full tree. Belt-and-braces in case
+            # a branch-protection bypass ever lets a bad file through.
+            files=$(git ls-files)
+          fi
+
+          matches=$(printf '%s\n' "$files" | grep -E "$forbidden_re" || true)
+          if [[ -n "$matches" ]]; then
+            echo "::error::Forbidden filename(s) in diff:"
+            printf '  %s\n' $matches
+            echo ""
+            echo "These names are on the commit-time blocklist because they"
+            echo "almost always contain secrets or local state. If this is a"
+            echo "genuine false positive, narrow the regex in ci.yml rather"
+            echo "than committing the file."
+            exit 1
+          fi
+          echo "No forbidden paths in diff."
