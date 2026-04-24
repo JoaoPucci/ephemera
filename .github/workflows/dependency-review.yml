@@ -1,39 +1,40 @@
-# Dependency Review Action
+# Dependency Review
 #
-# This Action will scan dependency manifest files that change as part of a Pull Request,
-# surfacing known-vulnerable versions of the packages declared or updated in the PR.
-# Once installed, if the workflow run is marked as required, PRs introducing known-vulnerable
-# packages will be blocked from merging.
+# Checks every PR for newly-added or upgraded dependencies and fails the
+# run if any introduce a known CVE in the GitHub Advisory Database. Also
+# surfaces license changes. Complements pip-audit (which scans the whole
+# requirements-dev tree in CI) by looking only at the *delta* the PR
+# introduces, which is the actual attack surface of a merge.
 #
-# Source repository: https://github.com/actions/dependency-review-action
-# Public documentation: https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/about-dependency-review#dependency-review-enforcement
+# Source:  https://github.com/actions/dependency-review-action
+# Docs:    https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/about-dependency-review
 name: 'Dependency review'
+
 on:
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
 
-# If using a dependency submission action in this workflow this permission will need to be set to:
-#
-# permissions:
-#   contents: write
-#
-# https://docs.github.com/en/enterprise-cloud@latest/code-security/supply-chain-security/understanding-your-software-supply-chain/using-the-dependency-submission-api
+# Read-only on repo contents; write on pull_requests for the on-failure
+# summary comment. No other scopes required.
 permissions:
   contents: read
-  # Write permissions for pull-requests are required for using the `comment-summary-in-pr` option, comment out if you aren't using this option
   pull-requests: write
 
 jobs:
   dependency-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: 'Checkout repository'
-        uses: actions/checkout@v4
-      - name: 'Dependency Review'
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Dependency Review
         uses: actions/dependency-review-action@v4
-        # Commonly enabled options, see https://github.com/actions/dependency-review-action#configuration-options for all available options.
         with:
-          comment-summary-in-pr: always
-        #   fail-on-severity: moderate
-        #   deny-licenses: GPL-1.0-or-later, LGPL-2.0-or-later
-        #   retry-on-snapshot-warnings: true
+          # Only post a comment when the check finds a problem -- keeps
+          # clean PRs quiet; failures still surface in the Actions tab and
+          # the PR check status.
+          comment-summary-in-pr: on-failure
+          # fail-on-severity defaults to "low" -- any CVE on a new dep
+          # fails the check. Strict, intentional. Loosen to "moderate" or
+          # "high" only if dev-dep transitives become consistently noisy.
