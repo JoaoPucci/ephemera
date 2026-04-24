@@ -170,7 +170,11 @@ jobs:
       #     the slow path.
       - uses: actions/checkout@v6
         with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          # Quote the values: in GitHub Actions expressions, bare `0` is
+          # falsy, so `x && 0 || 1` always collapses to `1`. Using strings
+          # ('0' is a non-empty string, thus truthy) makes the ternary
+          # behave as intended; actions/checkout parses them as numbers.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - name: Check for filenames that are never OK to commit
         run: |
