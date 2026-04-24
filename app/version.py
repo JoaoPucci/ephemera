@@ -15,6 +15,7 @@ Fallbacks:
 Zero per-request cost -- the string is cached in a module constant at
 import, read directly from `template_context()` on every page render.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -35,7 +36,12 @@ def _compute_version() -> str:
             check=True,
             timeout=2,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+        OSError,
+    ):
         return "unknown"
     return result.stdout.strip() or "unknown"
 

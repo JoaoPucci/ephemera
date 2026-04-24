@@ -20,7 +20,6 @@ The split keeps the plaintext seed off every session/dependency/admin
 read path, so a future log line or error handler that dumps a user dict
 can't leak it.
 """
-from typing import Optional
 
 from ..crypto import (
     AtRestDecryptionError,
@@ -30,7 +29,6 @@ from ..crypto import (
 )
 from ..security_log import emit as audit
 from ._core import _connect, _iso, _row_to_dict, _utcnow
-
 
 # Columns returned by the default (no-TOTP) getters. Enumerated explicitly
 # rather than SELECT * so that adding a new column to the users table is a
@@ -63,7 +61,8 @@ def _decrypt_totp(row_dict: dict) -> dict:
     except AtRestDecryptionError:
         audit(
             "totp.decrypt_failed",
-            user_id=row_dict.get("id"), username=row_dict.get("username"),
+            user_id=row_dict.get("id"),
+            username=row_dict.get("username"),
         )
         row_dict["totp_secret"] = ""
     return row_dict
@@ -75,7 +74,7 @@ def user_count() -> int:
     return int(n)
 
 
-def get_user_by_id(user_id: int) -> Optional[dict]:
+def get_user_by_id(user_id: int) -> dict | None:
     """Fetch a user row WITHOUT `totp_secret`. See module docstring."""
     with _connect() as conn:
         row = conn.execute(
@@ -85,7 +84,7 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
     return _row_to_dict(row) if row else None
 
 
-def get_user_by_username(username: str) -> Optional[dict]:
+def get_user_by_username(username: str) -> dict | None:
     """Fetch a user row WITHOUT `totp_secret`. See module docstring."""
     with _connect() as conn:
         row = conn.execute(
@@ -95,7 +94,7 @@ def get_user_by_username(username: str) -> Optional[dict]:
     return _row_to_dict(row) if row else None
 
 
-def get_user_with_totp_by_id(user_id: int) -> Optional[dict]:
+def get_user_with_totp_by_id(user_id: int) -> dict | None:
     """Fetch a user row INCLUDING the decrypted TOTP plaintext. Use only
     from code that actually has to verify a TOTP code."""
     with _connect() as conn:
@@ -103,11 +102,13 @@ def get_user_with_totp_by_id(user_id: int) -> Optional[dict]:
     return _decrypt_totp(_row_to_dict(row)) if row else None
 
 
-def get_user_with_totp_by_username(username: str) -> Optional[dict]:
+def get_user_with_totp_by_username(username: str) -> dict | None:
     """Fetch a user row INCLUDING the decrypted TOTP plaintext. Use only
     from code that actually has to verify a TOTP code."""
     with _connect() as conn:
-        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ?", (username,)
+        ).fetchone()
     return _decrypt_totp(_row_to_dict(row)) if row else None
 
 
@@ -125,7 +126,7 @@ def create_user(
     password_hash: str,
     totp_secret: str,
     recovery_code_hashes: str,
-    email: Optional[str] = None,
+    email: str | None = None,
 ) -> int:
     now = _iso(_utcnow())
     encrypted_totp = encrypt_at_rest(totp_secret)
@@ -134,7 +135,15 @@ def create_user(
             """INSERT INTO users (username, email, password_hash, totp_secret,
                                    recovery_code_hashes, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (username, email, password_hash, encrypted_totp, recovery_code_hashes, now, now),
+            (
+                username,
+                email,
+                password_hash,
+                encrypted_totp,
+                recovery_code_hashes,
+                now,
+                now,
+            ),
         )
     return int(cur.lastrowid)
 
@@ -148,23 +157,25 @@ def create_user(
 # `cols` is only reached after the key passes this gate, so a future
 # endpoint that did `update_user(uid, **request_body)` couldn't become a
 # SQL-injection sink.
-_ALLOWED_UPDATE_COLUMNS = frozenset({
-    "username",
-    "email",
-    "password_hash",
-    "totp_secret",
-    "totp_last_step",
-    "recovery_code_hashes",
-    "failed_attempts",
-    "lockout_until",
-    "session_generation",
-    "preferred_language",
-    # `updated_at` is set by update_user itself, not by callers, but
-    # naming it here makes the set the authoritative list of writable
-    # columns rather than "everything writable except the one the
-    # function itself sets."
-    "updated_at",
-})
+_ALLOWED_UPDATE_COLUMNS = frozenset(
+    {
+        "username",
+        "email",
+        "password_hash",
+        "totp_secret",
+        "totp_last_step",
+        "recovery_code_hashes",
+        "failed_attempts",
+        "lockout_until",
+        "session_generation",
+        "preferred_language",
+        # `updated_at` is set by update_user itself, not by callers, but
+        # naming it here makes the set the authoritative list of writable
+        # columns rather than "everything writable except the one the
+        # function itself sets."
+        "updated_at",
+    }
+)
 
 
 def update_user(user_id: int, **fields) -> None:
@@ -190,7 +201,7 @@ def delete_user(user_id: int) -> None:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
-def set_preferred_language(user_id: int, language: Optional[str]) -> None:
+def set_preferred_language(user_id: int, language: str | None) -> None:
     """Store the user's preferred UI language (BCP-47 tag like 'ja' or 'pt-BR').
     Passing None clears the preference so locale resolution falls back to the
     request-scoped signals (cookie, Accept-Language, default)."""

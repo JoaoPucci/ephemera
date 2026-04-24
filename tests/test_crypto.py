@@ -1,4 +1,5 @@
 """Tests for app.crypto: key generation, splitting, encryption round-trips."""
+
 import pytest
 
 from app import crypto
@@ -86,9 +87,9 @@ def test_split_key_rejects_wrong_size():
     import pytest
 
     with pytest.raises(ValueError):
-        crypto.split_key(b"\x00" * 16)   # too short
+        crypto.split_key(b"\x00" * 16)  # too short
     with pytest.raises(ValueError):
-        crypto.split_key(b"\x00" * 64)   # too long
+        crypto.split_key(b"\x00" * 64)  # too long
 
 
 def test_reconstruct_key_rejects_wrong_half_sizes():
@@ -139,6 +140,7 @@ def test_decrypt_at_rest_fails_after_secret_key_rotation(tmp_db_path, monkeypatc
     pins that the failure is a loud AtRestDecryptionError, not a silent
     wrong value."""
     import pytest
+
     from app import config
 
     token = crypto.encrypt_at_rest("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")

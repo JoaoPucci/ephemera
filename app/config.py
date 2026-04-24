@@ -1,11 +1,9 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import List
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 # pydantic-settings loads env files in order, later entries winning.
 # Ordered from per-user (lowest priority) to system-wide (highest), so
@@ -79,7 +77,7 @@ class Settings(BaseSettings):
     totp_issuer: str = Field(default="ephemera")
 
     @property
-    def origins(self) -> List[str]:
+    def origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
 

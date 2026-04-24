@@ -4,10 +4,11 @@ Kept underscore-prefixed so the public `app.models` namespace stays focused
 on per-table CRUD. Siblings under this package import `_connect`,
 `_utcnow`, `_iso`, `_row_to_dict` from here rather than re-declaring them.
 """
+
 import sqlite3
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 from ..config import get_settings
 
@@ -99,7 +100,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_user_name ON api_tokens(user_id
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso(dt: datetime) -> str:
@@ -143,12 +144,20 @@ def _cols(conn: sqlite3.Connection, table: str) -> set[str]:
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
     return {
-        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
     }
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
-    return {k: row[k] for k in row.keys()}
+    # `row.keys()` is load-bearing here. Iterating a sqlite3.Row yields the
+    # *values*, not the column names -- `for k in row` would make `k` a
+    # value, and `row[value]` then raises IndexError. Ruff's SIM118 rule
+    # flags `in row.keys()` as redundant but is a false positive for
+    # sqlite3.Row specifically.
+    return {k: row[k] for k in row.keys()}  # noqa: SIM118
 
 
 # -----------------------------------------------------------------------------
@@ -231,7 +240,9 @@ def init_db() -> None:
                 # working. Uniqueness is enforced by the unique index we create
                 # below after the column exists.
                 conn.execute("ALTER TABLE users ADD COLUMN username TEXT")
-                conn.execute("UPDATE users SET username = 'admin' WHERE username IS NULL")
+                conn.execute(
+                    "UPDATE users SET username = 'admin' WHERE username IS NULL"
+                )
             if "email" not in user_cols:
                 conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
             if "session_generation" not in user_cols:

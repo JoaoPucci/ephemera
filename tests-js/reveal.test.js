@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushAsync, jsonResponse, loadModule } from './helpers.js';
 
 // reveal.js reads window.location.pathname and window.location.hash on every
@@ -177,7 +177,10 @@ describe('reveal.js — passphrase visibility toggle', () => {
 
   it('starts masked; clicking the toggle swaps between password and text', async () => {
     // Never-resolving /meta so the toggle is the only code path being exercised.
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {}))
+    );
     await loadModule('reveal');
 
     const input = document.getElementById('passphrase');

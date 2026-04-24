@@ -3,7 +3,7 @@
 //
 // Single-source-of-truth is the server (/api/secrets/tracked); the browser
 // just joins in its local URL cache to decide which rows are re-copyable.
-import { getUrl, forgetUrl, gcUrls } from './url-cache.js';
+import { forgetUrl, gcUrls, getUrl } from './url-cache.js';
 
 // ---------- polling ----------
 
@@ -16,27 +16,31 @@ function startTrackedPoll() {
 }
 
 function stopTrackedPoll() {
-  if (trackedPollId) { clearInterval(trackedPollId); trackedPollId = null; }
+  if (trackedPollId) {
+    clearInterval(trackedPollId);
+    trackedPollId = null;
+  }
 }
 
 async function pollTrackedOnce() {
   const items = await fetchTracked();
-  if (items === null) return;  // transient network error; try again next tick
+  if (items === null) return; // transient network error; try again next tick
 
   const list = document.getElementById('tracked-list');
   const existing = [...list.querySelectorAll('li[data-id]')];
-  const existingMap = new Map(existing.map(li => [li.dataset.id, li.dataset.status]));
-  const serverMap = new Map(items.map(i => [i.id, i.status]));
+  const existingMap = new Map(existing.map((li) => [li.dataset.id, li.dataset.status]));
+  const serverMap = new Map(items.map((i) => [i.id, i.status]));
 
-  const same = existing.length === items.length
-    && [...serverMap].every(([id, s]) => existingMap.get(id) === s);
+  const same =
+    existing.length === items.length &&
+    [...serverMap].every(([id, s]) => existingMap.get(id) === s);
 
   // Respect in-flight user interaction (copy flash, remove click).
   const busy = list.querySelector('[data-busy="1"]') !== null;
 
   if (!same && !busy) await renderTrackedList();
 
-  if (!items.some(i => i.status === 'pending')) stopTrackedPoll();
+  if (!items.some((i) => i.status === 'pending')) stopTrackedPoll();
 }
 
 async function fetchTracked() {
@@ -44,7 +48,10 @@ async function fetchTracked() {
   // and an array (possibly empty) on success.
   try {
     const res = await fetch('/api/secrets/tracked');
-    if (res.status === 401) { window.location.reload(); return null; }
+    if (res.status === 401) {
+      window.location.reload();
+      return null;
+    }
     if (!res.ok) return null;
     const body = await res.json();
     return body.items || [];
@@ -63,7 +70,9 @@ async function cancelOnServer(id) {
   try {
     const res = await fetch(`/api/secrets/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
     return res.ok || res.status === 204;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function fmtRelative(iso) {
@@ -76,7 +85,7 @@ function fmtRelative(iso) {
     numeric: 'auto',
     style: 'short',
   });
-  const deltaSeconds = (new Date(iso).getTime() - Date.now()) / 1000;  // negative = past
+  const deltaSeconds = (new Date(iso).getTime() - Date.now()) / 1000; // negative = past
   const abs = Math.abs(deltaSeconds);
   if (abs < 60) return rtf.format(Math.round(deltaSeconds), 'second');
   if (abs < 3600) return rtf.format(Math.round(deltaSeconds / 60), 'minute');
@@ -99,7 +108,7 @@ async function copyRowUrl(li, timeEl, originalTimeText, url) {
   li.dataset.busy = '1';
   let ok = false;
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+    if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(url);
       ok = true;
     } else {
@@ -135,8 +144,8 @@ export async function renderTrackedList() {
   const countEl = document.getElementById('tracked-count');
 
   const items = await fetchTracked();
-  if (items === null) return;          // fetch failed; leave UI + URL cache alone
-  gcUrls(items.map(i => i.id));
+  if (items === null) return; // fetch failed; leave UI + URL cache alone
+  gcUrls(items.map((i) => i.id));
 
   if (items.length === 0) {
     section.hidden = true;
@@ -155,10 +164,11 @@ export async function renderTrackedList() {
     li.dataset.id = item.id;
     li.dataset.status = item.status;
 
-    const fallback = item.content_type === 'image'
-      ? window.i18n.t('tracked.image_secret')
-      : window.i18n.t('tracked.text_secret');
-    const labelText = (item.label && item.label.trim()) ? item.label : fallback;
+    const fallback =
+      item.content_type === 'image'
+        ? window.i18n.t('tracked.image_secret')
+        : window.i18n.t('tracked.text_secret');
+    const labelText = item.label?.trim() ? item.label : fallback;
 
     const labelEl = document.createElement('span');
     labelEl.className = 'label';
@@ -166,7 +176,7 @@ export async function renderTrackedList() {
     // Long labels truncate with ellipsis (see CSS); carry the full text
     // in the tooltip so hovering still reveals everything. Skip the
     // tooltip for fallback labels -- they're short and non-informative.
-    if (item.label && item.label.trim()) {
+    if (item.label?.trim()) {
       labelEl.title = labelText;
     }
 
@@ -178,22 +188,34 @@ export async function renderTrackedList() {
     const loc = window.i18n.currentLocale;
     let timeText = window.i18n.t('tracked.time_created', { when: fmtRelative(item.created_at) });
     if (item.status === 'viewed' && item.viewed_at) {
-      timeText += ' · ' + window.i18n.t('tracked.time_viewed', { when: fmtRelative(item.viewed_at) });
+      timeText += ` · ${window.i18n.t('tracked.time_viewed', { when: fmtRelative(item.viewed_at) })}`;
     } else if (item.status === 'burned' && item.viewed_at) {
-      timeText += ' · ' + window.i18n.t('tracked.time_burned', { when: fmtRelative(item.viewed_at) });
+      timeText += ` · ${window.i18n.t('tracked.time_burned', { when: fmtRelative(item.viewed_at) })}`;
     } else if (item.status === 'canceled' && item.viewed_at) {
-      timeText += ' · ' + window.i18n.t('tracked.time_canceled', { when: fmtRelative(item.viewed_at) });
+      timeText += ` · ${window.i18n.t('tracked.time_canceled', { when: fmtRelative(item.viewed_at) })}`;
     } else if (item.status === 'expired') {
-      timeText += ' · ' + window.i18n.t('tracked.time_expired', { when: fmtRelative(item.expires_at) });
+      timeText += ` · ${window.i18n.t('tracked.time_expired', { when: fmtRelative(item.expires_at) })}`;
     }
     timeEl.textContent = timeText;
     // Exact timestamps on hover for older entries where the relative
     // phrase is ambiguous. Same event keys, just absolute dates this time.
-    const hoverBits = [window.i18n.t('tracked.time_created', { when: new Date(item.created_at).toLocaleString(loc) })];
+    const hoverBits = [
+      window.i18n.t('tracked.time_created', {
+        when: new Date(item.created_at).toLocaleString(loc),
+      }),
+    ];
     if (item.viewed_at) {
-      hoverBits.push(window.i18n.t('tracked.time_' + item.status, { when: new Date(item.viewed_at).toLocaleString(loc) }));
+      hoverBits.push(
+        window.i18n.t(`tracked.time_${item.status}`, {
+          when: new Date(item.viewed_at).toLocaleString(loc),
+        })
+      );
     } else if (item.status === 'expired') {
-      hoverBits.push(window.i18n.t('tracked.time_expired', { when: new Date(item.expires_at).toLocaleString(loc) }));
+      hoverBits.push(
+        window.i18n.t('tracked.time_expired', {
+          when: new Date(item.expires_at).toLocaleString(loc),
+        })
+      );
     }
     timeEl.title = hoverBits.join(' · ');
 
@@ -203,8 +225,8 @@ export async function renderTrackedList() {
     meta.appendChild(timeEl);
 
     const pill = document.createElement('span');
-    pill.className = 'status-pill ' + item.status;
-    pill.textContent = window.i18n.t('status.' + item.status);
+    pill.className = `status-pill ${item.status}`;
+    pill.textContent = window.i18n.t(`status.${item.status}`);
 
     const rm = document.createElement('button');
     rm.type = 'button';
@@ -263,12 +285,15 @@ export async function renderTrackedList() {
       li.title = window.i18n.t('tracked.tooltip_copy');
       const activate = async (e) => {
         // Ignore clicks that originated on row-level action buttons.
-        if (e.target && e.target.closest('.tracked-remove, .tracked-cancel')) return;
+        if (e.target?.closest('.tracked-remove, .tracked-cancel')) return;
         await copyRowUrl(li, timeEl, timeText, cachedUrl);
       };
       li.addEventListener('click', activate);
       li.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(e); }
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          activate(e);
+        }
       });
     } else if (!cachedUrl && item.status === 'pending') {
       // Tracked on this server but we don't have the URL -- it was created in a
@@ -296,15 +321,17 @@ export async function renderTrackedList() {
   // Reveal the "clear past entries" action only when there's something to clear.
   const clearBtn = document.getElementById('tracked-clear');
   const clearLbl = document.getElementById('tracked-clear-label');
-  const nonPending = items.filter(i => i.status !== 'pending').length;
+  const nonPending = items.filter((i) => i.status !== 'pending').length;
   if (clearBtn) {
     clearBtn.hidden = nonPending === 0;
     if (clearLbl && nonPending > 0) {
-      clearLbl.textContent = window.i18n.t(pluralKey('button.clear_past', nonPending), { n: nonPending });
+      clearLbl.textContent = window.i18n.t(pluralKey('button.clear_past', nonPending), {
+        n: nonPending,
+      });
     }
   }
 
-  if (items.some(i => i.status === 'pending')) startTrackedPoll();
+  if (items.some((i) => i.status === 'pending')) startTrackedPoll();
   else stopTrackedPoll();
 }
 
@@ -322,8 +349,7 @@ export async function renderTrackedList() {
   // Remember the last "idle" label so we can restore it (it carries the
   // current count, set by renderTrackedList, and may differ between calls).
   function idleLabel() {
-    return clearBtn.dataset.idleLabel
-      || window.i18n.t(pluralKey('button.clear_past', 0), { n: 0 });
+    return clearBtn.dataset.idleLabel || window.i18n.t(pluralKey('button.clear_past', 0), { n: 0 });
   }
   clearBtn.addEventListener('click', async (e) => {
     e.stopPropagation();

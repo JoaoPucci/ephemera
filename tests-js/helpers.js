@@ -18,14 +18,13 @@
 // the app ships with, not mock strings that could drift.
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { vi } from 'vitest';
-
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EN_CATALOG = JSON.parse(
-  readFileSync(join(__dirname, '..', 'app', 'static', 'i18n', 'en.json'), 'utf-8'),
+  readFileSync(join(__dirname, '..', 'app', 'static', 'i18n', 'en.json'), 'utf-8')
 );
 
 function catalogLookup(tree, key) {
@@ -40,7 +39,7 @@ function catalogLookup(tree, key) {
 function interpolate(template, vars) {
   if (!vars) return template;
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (m, name) =>
-    name in vars ? String(vars[name]) : m,
+    name in vars ? String(vars[name]) : m
   );
 }
 
@@ -52,11 +51,13 @@ export function installI18nStub() {
   const stub = {
     t(key, vars) {
       const hit = catalogLookup(EN_CATALOG, key);
-      if (hit === undefined) return key;  // matches real shim's visible-sentinel behavior
+      if (hit === undefined) return key; // matches real shim's visible-sentinel behavior
       return interpolate(hit, vars);
     },
     currentLocale: 'en',
-    setLocale() { /* no-op in tests */ },
+    setLocale() {
+      /* no-op in tests */
+    },
   };
   // Both assignments: app code reads `window.i18n`; some test helpers look at
   // globalThis. In jsdom both resolve to the same object, but being explicit

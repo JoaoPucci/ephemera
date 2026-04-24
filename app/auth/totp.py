@@ -1,7 +1,7 @@
 """TOTP per RFC 6238, via pyotp. +/-1 step tolerance with anti-replay."""
+
 import hmac
 import time
-from typing import Optional
 
 import pyotp
 
@@ -12,17 +12,19 @@ def generate_totp_secret() -> str:
     return pyotp.random_base32(length=32)
 
 
-def provisioning_uri(secret: str, account_name: str = "admin", issuer: str = "ephemera") -> str:
-    return pyotp.TOTP(secret, digits=TOTP_DIGITS, interval=TOTP_INTERVAL).provisioning_uri(
-        name=account_name, issuer_name=issuer
-    )
+def provisioning_uri(
+    secret: str, account_name: str = "admin", issuer: str = "ephemera"
+) -> str:
+    return pyotp.TOTP(
+        secret, digits=TOTP_DIGITS, interval=TOTP_INTERVAL
+    ).provisioning_uri(name=account_name, issuer_name=issuer)
 
 
 def _current_step() -> int:
     return int(time.time()) // TOTP_INTERVAL
 
 
-def verify_totp(secret: str, code: str, last_step: int) -> Optional[int]:
+def verify_totp(secret: str, code: str, last_step: int) -> int | None:
     """Return the accepted step on success (caller should persist it as the
     new `last_step` to prevent replay), or None on failure / rejected code.
 

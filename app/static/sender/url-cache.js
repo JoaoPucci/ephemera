@@ -10,19 +10,31 @@
 const URL_STORE_KEY = 'ephemera_urls_v1';
 
 function loadUrls() {
-  try { return JSON.parse(localStorage.getItem(URL_STORE_KEY) || '{}'); } catch { return {}; }
+  try {
+    return JSON.parse(localStorage.getItem(URL_STORE_KEY) || '{}');
+  } catch {
+    return {};
+  }
 }
 
 function saveUrls(obj) {
-  try { localStorage.setItem(URL_STORE_KEY, JSON.stringify(obj)); } catch {}
+  try {
+    localStorage.setItem(URL_STORE_KEY, JSON.stringify(obj));
+  } catch {}
 }
 
 export function cacheUrl(id, url) {
-  const m = loadUrls(); m[id] = url; saveUrls(m);
+  const m = loadUrls();
+  m[id] = url;
+  saveUrls(m);
 }
 
 export function forgetUrl(id) {
-  const m = loadUrls(); if (m[id]) { delete m[id]; saveUrls(m); }
+  const m = loadUrls();
+  if (m[id]) {
+    delete m[id];
+    saveUrls(m);
+  }
 }
 
 export function getUrl(id) {
@@ -36,7 +48,10 @@ export function gcUrls(knownIds) {
   const known = new Set(knownIds);
   let changed = false;
   for (const id of Object.keys(m)) {
-    if (!known.has(id)) { delete m[id]; changed = true; }
+    if (!known.has(id)) {
+      delete m[id];
+      changed = true;
+    }
   }
   if (changed) saveUrls(m);
 }

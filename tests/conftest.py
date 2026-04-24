@@ -1,4 +1,5 @@
 """Shared fixtures for the ephemera test suite."""
+
 import sys
 from pathlib import Path
 
@@ -39,6 +40,7 @@ def _provision(username: str, password: str = TEST_PASSWORD) -> dict:
     """Create a user directly via the data layer. Returns a dict with the
     created user's id, password, totp_secret, and a pyotp.TOTP helper."""
     import pyotp
+
     from app import auth, models
 
     secret = pyotp.random_base32(length=32)
@@ -54,7 +56,9 @@ def _provision(username: str, password: str = TEST_PASSWORD) -> dict:
         "username": username,
         "password": password,
         "totp_secret": secret,
-        "totp": pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL),
+        "totp": pyotp.TOTP(
+            secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL
+        ),
     }
 
 
@@ -67,8 +71,10 @@ def provisioned_user(tmp_db_path):
 @pytest.fixture
 def make_user(tmp_db_path):
     """Factory for creating additional users on demand (multi-user tests)."""
+
     def _make(username: str, password: str = TEST_PASSWORD) -> dict:
         return _provision(username, password)
+
     return _make
 
 
@@ -86,8 +92,9 @@ def api_token(provisioned_user):
 def client(tmp_db_path):
     """FastAPI TestClient bound to an isolated DB, with rate-limiters reset."""
     from fastapi.testclient import TestClient
+
     from app import create_app
-    from app.limiter import reveal_limiter, login_limiter, create_limiter, read_limiter
+    from app.limiter import create_limiter, login_limiter, read_limiter, reveal_limiter
 
     for lim in (reveal_limiter, login_limiter, create_limiter, read_limiter):
         lim.reset()
@@ -124,6 +131,7 @@ def auth_headers(api_token):
 @pytest.fixture
 def sample_png_bytes():
     import base64
+
     b64 = (
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
         "+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg=="
@@ -133,7 +141,11 @@ def sample_png_bytes():
 
 @pytest.fixture
 def sample_jpeg_bytes():
-    return bytes.fromhex("ffd8ffe000104a46494600010101006000600000") + b"\x00" * 32 + bytes.fromhex("ffd9")
+    return (
+        bytes.fromhex("ffd8ffe000104a46494600010101006000600000")
+        + b"\x00" * 32
+        + bytes.fromhex("ffd9")
+    )
 
 
 @pytest.fixture

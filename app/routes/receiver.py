@@ -1,4 +1,5 @@
 """Receiver routes: landing, metadata, reveal."""
+
 import base64
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,7 +17,6 @@ from ..schemas import (
     RevealResponse,
     RevealTextResponse,
 )
-
 
 router = APIRouter()
 
@@ -40,7 +40,9 @@ def _load_live_row(token: str):
 def landing_page(token: str, request: Request):
     from .. import TEMPLATES
 
-    return TEMPLATES.TemplateResponse(request, "landing.html", template_context(request))
+    return TEMPLATES.TemplateResponse(
+        request, "landing.html", template_context(request)
+    )
 
 
 @router.get(
@@ -80,13 +82,16 @@ def reveal(
             attempts = models.increment_attempts(row["id"])
             security_log.emit(
                 "reveal.wrong_passphrase",
-                secret_id=row["id"], client_ip=ip, attempts=attempts,
+                secret_id=row["id"],
+                client_ip=ip,
+                attempts=attempts,
             )
             if attempts >= settings.max_passphrase_attempts:
                 models.burn(row["id"])
                 security_log.emit(
                     "reveal.burned",
-                    secret_id=row["id"], client_ip=ip,
+                    secret_id=row["id"],
+                    client_ip=ip,
                 )
                 raise http_error(410, "too_many_attempts_burned")
             raise http_error(401, "wrong_passphrase")
@@ -94,7 +99,7 @@ def reveal(
     try:
         client_half = crypto.decode_half(body.key)
     except Exception:
-        raise http_error(400, "malformed_key")
+        raise http_error(400, "malformed_key") from None
 
     if len(client_half) != 16:
         raise http_error(400, "invalid_key_length")
@@ -103,7 +108,7 @@ def reveal(
         full_key = crypto.reconstruct_key(row["server_key"], client_half)
         plaintext = crypto.decrypt(row["ciphertext"], full_key)
     except (crypto.DecryptionError, ValueError):
-        raise http_error(400, "decryption_failed")
+        raise http_error(400, "decryption_failed") from None
 
     # Atomically claim the row; if a concurrent reveal already won, 404 and
     # discard the plaintext we decrypted. See models.consume_for_reveal.

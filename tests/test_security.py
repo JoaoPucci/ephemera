@@ -1,6 +1,6 @@
 """Tests for security headers, rate limiting, origin validation."""
-import pytest
 
+import pytest
 
 SEC_HEADERS = {
     "content-security-policy",
@@ -115,9 +115,9 @@ def test_docs_accessible_with_session(authed_client):
     html = r.text
     # Swagger UI assets are served locally, not from a CDN, so the CSP's
     # script-src 'self' doesn't need to be relaxed.
-    assert '/static/swagger/swagger-ui-bundle.js' in html
-    assert '/static/swagger/swagger-ui.css' in html
-    assert '/static/swagger/init.js' in html
+    assert "/static/swagger/swagger-ui-bundle.js" in html
+    assert "/static/swagger/swagger-ui.css" in html
+    assert "/static/swagger/init.js" in html
 
 
 def test_swagger_static_assets_are_public_by_design(client):
@@ -213,9 +213,7 @@ def test_every_response_carries_every_security_header(
     def assert_full_headers(resp, label):
         for k, expected in SECURITY_HEADERS.items():
             got = resp.headers.get(k)
-            assert got == expected, (
-                f"{label}: {k!r} was {got!r}, expected {expected!r}"
-            )
+            assert got == expected, f"{label}: {k!r} was {got!r}, expected {expected!r}"
 
     # Cross-section of routes: page GET, API GETs, API POST, DELETE,
     # error status, static asset, the auth-gated docs surface.
@@ -295,7 +293,9 @@ def test_permissions_policy_denies_sensitive_features(client):
     r = client.get("/send")
     pp = r.headers.get("Permissions-Policy", "")
     for feature in ("camera", "microphone", "geolocation", "payment", "usb"):
-        assert f"{feature}=()" in pp, f"permissions-policy does not deny {feature}: {pp!r}"
+        assert f"{feature}=()" in pp, (
+            f"permissions-policy does not deny {feature}: {pp!r}"
+        )
 
 
 def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_client):
@@ -381,6 +381,7 @@ def test_rate_limiter_recovers_after_window_expires(monkeypatch):
     same key can take a fresh round of hits. Deterministic via patching
     time.monotonic -- no wall-clock sleeping in the test."""
     from fastapi import HTTPException
+
     from app import limiter
 
     fake_time = [100.0]
@@ -453,9 +454,9 @@ def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch):
     monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
 
     rl = limiter.RateLimiter(max_hits=5, window_seconds=60)
-    rl.check("recent")           # at t=1000
+    rl.check("recent")  # at t=1000
     fake_time[0] = 2000.0
-    rl.check("even-more-recent") # at t=2000
+    rl.check("even-more-recent")  # at t=2000
 
     # Sweep at t=2010: "recent" is 1010s old (past the 60s window),
     # "even-more-recent" is 10s old (still in window).
@@ -480,14 +481,19 @@ def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch, tmp_db_path)
         lim = getattr(limiter, name)
         lim.reset()
         original = lim.sweep
+
         def wrapped(orig=original, n=name):
             called.append(n)
             return orig()
+
         monkeypatch.setattr(lim, "sweep", wrapped)
 
     cleanup.run_once()
     assert set(called) == {
-        "reveal_limiter", "login_limiter", "create_limiter", "read_limiter"
+        "reveal_limiter",
+        "login_limiter",
+        "create_limiter",
+        "read_limiter",
     }
 
 
@@ -604,7 +610,9 @@ def test_landing_passphrase_input_is_type_password():
 
     html = (
         pathlib.Path(__file__).resolve().parent.parent
-        / "app" / "templates" / "landing.html"
+        / "app"
+        / "templates"
+        / "landing.html"
     ).read_text()
     # Find the passphrase input specifically; there may be other inputs on
     # the page in the future.
@@ -633,7 +641,9 @@ def test_login_code_input_has_show_hide_toggle_wiring():
 
     html = (
         pathlib.Path(__file__).resolve().parent.parent
-        / "app" / "templates" / "login.html"
+        / "app"
+        / "templates"
+        / "login.html"
     ).read_text()
 
     # The code input must live inside an .input-with-action wrapper so the
@@ -642,7 +652,7 @@ def test_login_code_input_has_show_hide_toggle_wiring():
         r'<div[^>]*class="[^"]*input-with-action[^"]*"[^>]*>'
         r'(?:(?!</div>).)*<input[^>]*id="code"[^>]*>'
         r'(?:(?!</div>).)*<button[^>]*id="toggle-code"[^>]*>[^<]*</button>'
-        r'(?:(?!</div>).)*</div>',
+        r"(?:(?!</div>).)*</div>",
         html,
         flags=re.DOTALL,
     )
@@ -655,7 +665,7 @@ def test_login_code_input_has_show_hide_toggle_wiring():
     # show it; setMode(true) unhides it when entering recovery mode.
     toggle_match = re.search(r'<button[^>]*id="toggle-code"[^>]*>', html)
     assert toggle_match is not None
-    assert 'hidden' in toggle_match.group(0), (
+    assert "hidden" in toggle_match.group(0), (
         "login.html #toggle-code button must ship `hidden` so it isn't "
         "rendered in TOTP mode"
     )

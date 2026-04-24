@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushAsync, jsonResponse, loadModule } from './helpers.js';
 
 // Minimal sender.html fixture -- just the parts sender.js touches on load and
@@ -86,9 +86,9 @@ function submitBtn() {
 }
 
 function submitForm() {
-  document.getElementById('secret-form').dispatchEvent(
-    new Event('submit', { cancelable: true, bubbles: true })
-  );
+  document
+    .getElementById('secret-form')
+    .dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
 }
 
 describe('sender.js — create-secret in-flight guard', () => {
@@ -212,7 +212,6 @@ describe('sender.js — create-secret in-flight guard', () => {
   });
 });
 
-
 describe('sender.js — user button sign-out two-click confirm', () => {
   beforeEach(() => {
     mountSender();
@@ -225,7 +224,7 @@ describe('sender.js — user button sign-out two-click confirm', () => {
   // promise is the same trick tracked-cancel's existing tests would use.
   function stubSenderFetchWithLogout(createHandler) {
     return vi.fn((url, opts) => {
-      if (url === '/send/logout') return new Promise(() => {});  // hang
+      if (url === '/send/logout') return new Promise(() => {}); // hang
       if (url === '/api/me') {
         return Promise.resolve(jsonResponse({ id: 1, username: 'admin', email: null }));
       }
@@ -239,8 +238,12 @@ describe('sender.js — user button sign-out two-click confirm', () => {
     });
   }
 
-  function userBtn() { return document.getElementById('user-btn'); }
-  function actionLabel() { return userBtn().querySelector('.user-action').textContent; }
+  function userBtn() {
+    return document.getElementById('user-btn');
+  }
+  function actionLabel() {
+    return userBtn().querySelector('.user-action').textContent;
+  }
 
   it('first click arms the button without firing logout', async () => {
     const fetchMock = stubSenderFetchWithLogout();
@@ -266,9 +269,9 @@ describe('sender.js — user button sign-out two-click confirm', () => {
     await loadModule('sender');
     await flushAsync();
 
-    userBtn().click();          // arm
+    userBtn().click(); // arm
     await flushAsync();
-    userBtn().click();          // confirm
+    userBtn().click(); // confirm
     await flushAsync();
 
     const logoutCalls = fetchMock.mock.calls.filter(([url]) => url === '/send/logout');
@@ -283,7 +286,7 @@ describe('sender.js — user button sign-out two-click confirm', () => {
     await loadModule('sender');
     await vi.runOnlyPendingTimersAsync();
 
-    userBtn().click();  // arm
+    userBtn().click(); // arm
     expect(userBtn().classList.contains('armed')).toBe(true);
     expect(actionLabel()).toBe('really sign out?');
 

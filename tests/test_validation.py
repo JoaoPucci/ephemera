@@ -1,32 +1,43 @@
 """Tests for app.validation: MIME whitelist, magic bytes, size limits."""
+
 import pytest
 
 from app import validation
 
 
 def test_png_magic_bytes_accepted(sample_png_bytes):
-    mime = validation.validate_image(sample_png_bytes, "image/png", max_bytes=10_000_000)
+    mime = validation.validate_image(
+        sample_png_bytes, "image/png", max_bytes=10_000_000
+    )
     assert mime == "image/png"
 
 
 def test_jpeg_magic_bytes_accepted(sample_jpeg_bytes):
-    mime = validation.validate_image(sample_jpeg_bytes, "image/jpeg", max_bytes=10_000_000)
+    mime = validation.validate_image(
+        sample_jpeg_bytes, "image/jpeg", max_bytes=10_000_000
+    )
     assert mime == "image/jpeg"
 
 
 def test_gif_magic_bytes_accepted(sample_gif_bytes):
-    mime = validation.validate_image(sample_gif_bytes, "image/gif", max_bytes=10_000_000)
+    mime = validation.validate_image(
+        sample_gif_bytes, "image/gif", max_bytes=10_000_000
+    )
     assert mime == "image/gif"
 
 
 def test_webp_magic_bytes_accepted(sample_webp_bytes):
-    mime = validation.validate_image(sample_webp_bytes, "image/webp", max_bytes=10_000_000)
+    mime = validation.validate_image(
+        sample_webp_bytes, "image/webp", max_bytes=10_000_000
+    )
     assert mime == "image/webp"
 
 
 def test_svg_rejected(sample_svg_bytes):
     with pytest.raises(validation.ValidationError):
-        validation.validate_image(sample_svg_bytes, "image/svg+xml", max_bytes=10_000_000)
+        validation.validate_image(
+            sample_svg_bytes, "image/svg+xml", max_bytes=10_000_000
+        )
 
 
 def test_content_type_header_must_match_magic_bytes(sample_png_bytes):
@@ -52,7 +63,9 @@ def test_unknown_binary_blob_rejected():
 
 def test_content_type_whitelist_is_enforced(sample_png_bytes):
     with pytest.raises(validation.ValidationError):
-        validation.validate_image(sample_png_bytes, "application/octet-stream", max_bytes=10_000_000)
+        validation.validate_image(
+            sample_png_bytes, "application/octet-stream", max_bytes=10_000_000
+        )
 
 
 def test_detect_mime_returns_correct_values_for_all_formats(

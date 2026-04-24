@@ -6,7 +6,7 @@ export async function copyWithFeedback(button, text) {
   const original = button.textContent;
   let ok = false;
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+    if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
       ok = true;
     } else {

@@ -26,6 +26,7 @@ Design notes (retained from the pre-split single file):
 This `__init__` re-exports the full public surface so existing
 `from app import auth; auth.foo()` call-sites continue to work.
 """
+
 from ._core import (
     BCRYPT_ROUNDS,
     LOCKOUT_DURATION_SECONDS,

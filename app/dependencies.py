@@ -5,7 +5,6 @@ so the cookie value rotates (session-fixation defense). API tokens are keyed to
 a user as well. A request is "authenticated as user X" if either credential
 resolves to a user row; dependencies below return that row (or raise 401).
 """
-from typing import Optional
 
 from fastapi import Header, Request
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
@@ -14,7 +13,6 @@ from . import auth as auth_mod
 from . import models
 from .config import get_settings
 from .errors import http_error
-
 
 # ---------------------------------------------------------------------------
 # Session cookie helpers
@@ -34,7 +32,7 @@ def make_session_cookie(user_id: int, session_generation: int) -> str:
     return _signer().sign(payload).decode("ascii")
 
 
-def read_session_cookie(raw: str) -> Optional[tuple[int, int]]:
+def read_session_cookie(raw: str) -> tuple[int, int] | None:
     """Parse a session cookie to (user_id, generation). Returns None on any
     failure (bad signature, expired, malformed payload)."""
     try:
@@ -46,7 +44,7 @@ def read_session_cookie(raw: str) -> Optional[tuple[int, int]]:
         return None
 
 
-def current_user_id(request: Request) -> Optional[int]:
+def current_user_id(request: Request) -> int | None:
     """Return the user id associated with the session cookie, if any. The
     cookie's generation must match the stored `users.session_generation`;
     a mismatch means the session was revoked and the cookie is treated as
@@ -79,7 +77,7 @@ def is_logged_in(request: Request) -> bool:
 
 def verify_api_token_or_session(
     request: Request,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> dict:
     """Accept either a valid DB-issued API token OR a valid session cookie,
     and return the authenticated user row."""

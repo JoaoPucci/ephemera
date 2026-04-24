@@ -1,11 +1,11 @@
 """Key generation, splitting, encryption, and decryption for ephemera."""
+
 import base64
 import os
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-
 
 KEY_SIZE = 32
 HALF_SIZE = KEY_SIZE // 2
@@ -105,7 +105,9 @@ def decrypt_at_rest(stored: str) -> str:
         raise AtRestDecryptionError("not an at-rest ciphertext")
     fernet = Fernet(base64.urlsafe_b64encode(_at_rest_key()))
     try:
-        return fernet.decrypt(stored[len(_AT_REST_VERSION):].encode("ascii")).decode("utf-8")
+        return fernet.decrypt(stored[len(_AT_REST_VERSION) :].encode("ascii")).decode(
+            "utf-8"
+        )
     except InvalidToken as e:
         raise AtRestDecryptionError(
             "at-rest decryption failed (SECRET_KEY rotated or data tampered)"

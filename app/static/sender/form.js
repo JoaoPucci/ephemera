@@ -1,8 +1,9 @@
 // Compose form: submit handler (text + image paths), tab toggle, drag-and-
 // drop dropzone, create-another reset, and the status widget that polls
 // the just-created secret's status after a successful create.
-import { cacheUrl } from './url-cache.js';
+
 import { renderTrackedList } from './tracked-list.js';
+import { cacheUrl } from './url-cache.js';
 
 const form = document.getElementById('secret-form');
 const compose = document.getElementById('compose');
@@ -33,10 +34,7 @@ if (ppInput && ppToggle) {
     ppInput.setAttribute('type', showing ? 'password' : 'text');
     ppToggle.textContent = showing ? 'show' : 'hide';
     ppToggle.setAttribute('aria-pressed', String(!showing));
-    ppToggle.setAttribute(
-      'aria-label',
-      showing ? 'show passphrase' : 'hide passphrase',
-    );
+    ppToggle.setAttribute('aria-label', showing ? 'show passphrase' : 'hide passphrase');
   });
 }
 
@@ -44,27 +42,46 @@ let activeTab = 'text';
 
 function setTab(name) {
   activeTab = name;
-  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  Object.entries(panels).forEach(([k, el]) => (el.hidden = k !== name));
+  for (const t of tabs) {
+    t.classList.toggle('active', t.dataset.tab === name);
+  }
+  for (const [k, el] of Object.entries(panels)) {
+    el.hidden = k !== name;
+  }
 }
 
-tabs.forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
+for (const t of tabs) {
+  t.addEventListener('click', () => setTab(t.dataset.tab));
+}
 
 // ---------- dropzone ----------
 
 dropzone.addEventListener('click', () => fileInput.click());
 dropzone.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    fileInput.click();
+  }
 });
-dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropzone.classList.add('drag');
+});
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
 dropzone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropzone.classList.remove('drag');
-  if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; showPreview(); }
+  if (e.dataTransfer.files.length) {
+    fileInput.files = e.dataTransfer.files;
+    showPreview();
+  }
 });
 fileInput.addEventListener('change', showPreview);
-clearFile.addEventListener('click', (e) => { e.stopPropagation(); fileInput.value = ''; preview.hidden = true; });
+clearFile.addEventListener('click', (e) => {
+  e.stopPropagation();
+  fileInput.value = '';
+  preview.hidden = true;
+});
 
 function showPreview() {
   if (fileInput.files.length) {
@@ -123,7 +140,10 @@ form.addEventListener('submit', async (e) => {
       res = await fetch('/api/secrets', { method: 'POST', body: fd });
     }
 
-    if (res.status === 401) { window.location.reload(); return; }
+    if (res.status === 401) {
+      window.location.reload();
+      return;
+    }
     if (!res.ok) {
       let msg = window.i18n.t('error.request_failed', { status: res.status });
       // Server's {code, message} shape: prefer the localized error.<code>
@@ -131,10 +151,10 @@ form.addEventListener('submit', async (e) => {
       // generic "Request failed (N)" above.
       try {
         const j = await res.json();
-        if (j.detail && j.detail.code) {
-          const key = 'error.' + j.detail.code;
+        if (j.detail?.code) {
+          const key = `error.${j.detail.code}`;
           const localized = window.i18n.t(key);
-          msg = localized === key ? (j.detail.message || msg) : localized;
+          msg = localized === key ? j.detail.message || msg : localized;
         } else if (typeof j.detail === 'string') {
           msg = j.detail;
         }
@@ -181,7 +201,10 @@ function showResult({ url, id, expires_at }) {
 }
 
 function stopPolling() {
-  if (statusPoll) { clearInterval(statusPoll); statusPoll = null; }
+  if (statusPoll) {
+    clearInterval(statusPoll);
+    statusPoll = null;
+  }
 }
 
 async function fetchStatus(id) {
@@ -197,13 +220,16 @@ async function fetchStatus(id) {
 
 function paintStatus(valueEl, detailEl, data) {
   const statuses = ['pending', 'viewed', 'burned', 'expired', 'gone'];
-  statuses.forEach((s) => valueEl.classList.remove(s));
-  const s = (data && data.status) || 'pending';
+  for (const s of statuses) {
+    valueEl.classList.remove(s);
+  }
+  const s = data?.status || 'pending';
   valueEl.classList.add(s);
-  valueEl.textContent = window.i18n.t('status.' + s);
-  if (data && data.viewed_at) {
-    detailEl.textContent = window.i18n.t('sender.viewed_at_prefix')
-      + new Date(data.viewed_at).toLocaleString(window.i18n.currentLocale);
+  valueEl.textContent = window.i18n.t(`status.${s}`);
+  if (data?.viewed_at) {
+    detailEl.textContent =
+      window.i18n.t('sender.viewed_at_prefix') +
+      new Date(data.viewed_at).toLocaleString(window.i18n.currentLocale);
   } else {
     detailEl.textContent = '';
   }

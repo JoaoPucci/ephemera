@@ -8,6 +8,7 @@ computed in the test with `otplib`.
 Wipes any existing DB at EPHEMERA_DB_PATH first so a re-run always
 starts from a clean slate.
 """
+
 from __future__ import annotations
 
 import os

@@ -1,6 +1,8 @@
 """Tests for app.auth: password, TOTP skew+replay, backup codes, lockout, users, tokens."""
+
 import json
 import time
+from datetime import UTC
 
 import pytest
 
@@ -33,11 +35,15 @@ def test_totp_accepts_current_step(provisioned_user):
 
 
 def test_totp_rejects_wrong_code(provisioned_user):
-    assert auth.verify_totp(provisioned_user["totp_secret"], "000000", last_step=0) is None
+    assert (
+        auth.verify_totp(provisioned_user["totp_secret"], "000000", last_step=0) is None
+    )
 
 
 def test_totp_rejects_non_numeric(provisioned_user):
-    assert auth.verify_totp(provisioned_user["totp_secret"], "abcdef", last_step=0) is None
+    assert (
+        auth.verify_totp(provisioned_user["totp_secret"], "abcdef", last_step=0) is None
+    )
 
 
 def test_totp_accepts_previous_step_within_tolerance(provisioned_user):
@@ -122,32 +128,44 @@ def test_consume_backup_code_rejects_unknown_code(tmp_db_path):
 
 def test_authenticate_accepts_password_and_totp(provisioned_user):
     user = auth.authenticate(
-        provisioned_user["username"], provisioned_user["password"], provisioned_user["totp"].now()
+        provisioned_user["username"],
+        provisioned_user["password"],
+        provisioned_user["totp"].now(),
     )
     assert user["id"] == provisioned_user["id"]
 
 
 def test_authenticate_rejects_unknown_username(provisioned_user):
     with pytest.raises(auth.AuthError):
-        auth.authenticate("nobody", provisioned_user["password"], provisioned_user["totp"].now())
+        auth.authenticate(
+            "nobody", provisioned_user["password"], provisioned_user["totp"].now()
+        )
 
 
 def test_authenticate_rejects_wrong_password(provisioned_user):
     with pytest.raises(auth.AuthError):
-        auth.authenticate(provisioned_user["username"], "wrong", provisioned_user["totp"].now())
+        auth.authenticate(
+            provisioned_user["username"], "wrong", provisioned_user["totp"].now()
+        )
 
 
 def test_authenticate_rejects_wrong_code(provisioned_user):
     with pytest.raises(auth.AuthError):
-        auth.authenticate(provisioned_user["username"], provisioned_user["password"], "000000")
+        auth.authenticate(
+            provisioned_user["username"], provisioned_user["password"], "000000"
+        )
 
 
 def test_authenticate_with_backup_code_works_once(provisioned_user):
     codes, blob = auth.generate_recovery_codes()
     models.update_user(provisioned_user["id"], recovery_code_hashes=blob)
-    auth.authenticate(provisioned_user["username"], provisioned_user["password"], codes[0])
+    auth.authenticate(
+        provisioned_user["username"], provisioned_user["password"], codes[0]
+    )
     with pytest.raises(auth.AuthError):
-        auth.authenticate(provisioned_user["username"], provisioned_user["password"], codes[0])
+        auth.authenticate(
+            provisioned_user["username"], provisioned_user["password"], codes[0]
+        )
 
 
 def test_authenticate_resets_failed_attempts_on_success(provisioned_user):
@@ -156,7 +174,9 @@ def test_authenticate_resets_failed_attempts_on_success(provisioned_user):
             auth.authenticate(provisioned_user["username"], "wrong", "000000")
     assert models.get_user_by_id(provisioned_user["id"])["failed_attempts"] == 3
     auth.authenticate(
-        provisioned_user["username"], provisioned_user["password"], provisioned_user["totp"].now()
+        provisioned_user["username"],
+        provisioned_user["password"],
+        provisioned_user["totp"].now(),
     )
     assert models.get_user_by_id(provisioned_user["id"])["failed_attempts"] == 0
 
@@ -184,7 +204,9 @@ def test_lockout_after_max_failures(provisioned_user):
             auth.authenticate(provisioned_user["username"], "wrong", "000000")
     with pytest.raises(auth.LockoutError):
         auth.authenticate(
-            provisioned_user["username"], provisioned_user["password"], provisioned_user["totp"].now()
+            provisioned_user["username"],
+            provisioned_user["password"],
+            provisioned_user["totp"].now(),
         )
 
 
@@ -197,7 +219,9 @@ def test_lockout_is_per_user(provisioned_user, make_user):
     # Alice is locked.
     with pytest.raises(auth.LockoutError):
         auth.authenticate(
-            provisioned_user["username"], provisioned_user["password"], provisioned_user["totp"].now()
+            provisioned_user["username"],
+            provisioned_user["password"],
+            provisioned_user["totp"].now(),
         )
     # Bob still fine.
     user = auth.authenticate(bob["username"], bob["password"], bob["totp"].now())
@@ -214,7 +238,11 @@ def test_api_token_mint_and_lookup(provisioned_user):
     assert plaintext.startswith("eph_")
     models.create_token(user_id=provisioned_user["id"], name="t1", token_hash=digest)
     row = auth.lookup_api_token(plaintext)
-    assert row is not None and row["name"] == "t1" and row["user_id"] == provisioned_user["id"]
+    assert (
+        row is not None
+        and row["name"] == "t1"
+        and row["user_id"] == provisioned_user["id"]
+    )
 
 
 def test_api_token_lookup_rejects_unknown(provisioned_user):
@@ -256,6 +284,7 @@ def test_token_name_unique_per_user_not_global(provisioned_user, make_user):
 
 class _FakeResponse:
     """Minimal context-manager-compatible stand-in for urlopen()'s return."""
+
     def __init__(self, body: str, status: int = 200):
         self._body = body.encode("ascii")
         self.status = status
@@ -272,6 +301,7 @@ class _FakeResponse:
 
 def _sha1_parts(password: str) -> tuple[str, str]:
     import hashlib
+
     h = hashlib.sha1(password.encode()).hexdigest().upper()
     return h[:5], h[5:]
 
@@ -354,7 +384,7 @@ def test_totp_secret_at_rest_is_not_plaintext(provisioned_user, tmp_db_path):
 
     plaintext = provisioned_user["totp_secret"]
     with sqlite3.connect(tmp_db_path) as conn:
-        stored, = conn.execute(
+        (stored,) = conn.execute(
             "SELECT totp_secret FROM users WHERE id = ?", (provisioned_user["id"],)
         ).fetchone()
     assert stored != plaintext
@@ -374,7 +404,7 @@ def test_rotate_totp_writes_ciphertext(provisioned_user, tmp_db_path):
     new_secret = auth.generate_totp_secret()
     models.update_user(provisioned_user["id"], totp_secret=new_secret)
     with sqlite3.connect(tmp_db_path) as conn:
-        stored, = conn.execute(
+        (stored,) = conn.execute(
             "SELECT totp_secret FROM users WHERE id = ?", (provisioned_user["id"],)
         ).fetchone()
     assert stored.startswith("v1:")
@@ -422,12 +452,14 @@ def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path, monkeypat
     """A DB rescued from before the at-rest rollout has a plaintext base32
     totp_secret. init_db() must encrypt it in place, idempotently."""
     import sqlite3
+
     from app import models
 
     db_path = tmp_path / "legacy.db"
     monkeypatch.setenv("EPHEMERA_DB_PATH", str(db_path))
     monkeypatch.setenv("EPHEMERA_SECRET_KEY", "legacy-migration-test-xxxxxxxxxxxxx")
     from app import config
+
     config.get_settings.cache_clear()
 
     plaintext = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"  # valid base32, 32 chars
@@ -443,7 +475,9 @@ def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path, monkeypat
     # Second init_db picks the row up and rewrites it.
     models.init_db()
     with sqlite3.connect(db_path) as conn:
-        stored, = conn.execute("SELECT totp_secret FROM users WHERE username = 'legacy'").fetchone()
+        (stored,) = conn.execute(
+            "SELECT totp_secret FROM users WHERE username = 'legacy'"
+        ).fetchone()
     assert stored.startswith("v1:")
     assert stored != plaintext
 
@@ -451,7 +485,9 @@ def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path, monkeypat
     prior = stored
     models.init_db()
     with sqlite3.connect(db_path) as conn:
-        again, = conn.execute("SELECT totp_secret FROM users WHERE username = 'legacy'").fetchone()
+        (again,) = conn.execute(
+            "SELECT totp_secret FROM users WHERE username = 'legacy'"
+        ).fetchone()
     assert again == prior
 
     config.get_settings.cache_clear()
@@ -461,10 +497,11 @@ def test_check_not_locked_passes_when_lockout_already_expired():
     """A lockout_until timestamp in the past (e.g., a stale lockout that
     wasn't cleared after its window elapsed) shouldn't block auth — the
     gate should silently pass through."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from app.auth.lockout import check_not_locked
 
-    past = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    past = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     user = {"lockout_until": past}
     check_not_locked(user)  # must not raise
 
@@ -493,7 +530,9 @@ def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch
     Rather than wall-clock timing (flaky), count bcrypt.checkpw calls
     directly."""
     import bcrypt as bcrypt_lib
-    from app.auth import _core, login as login_mod
+
+    from app.auth import _core
+    from app.auth import login as login_mod
 
     count = [0]
     real_checkpw = bcrypt_lib.checkpw
@@ -545,7 +584,9 @@ def test_known_user_wrong_password_correct_totp_runs_worst_case_bcrypt_count(
     Mirrors test_unknown_user_runs_worst_case_bcrypt_count at the other
     axis of the symmetry."""
     import bcrypt as bcrypt_lib
-    from app.auth import _core, login as login_mod
+
+    from app.auth import _core
+    from app.auth import login as login_mod
 
     count = [0]
     real_checkpw = bcrypt_lib.checkpw
@@ -560,9 +601,7 @@ def test_known_user_wrong_password_correct_totp_runs_worst_case_bcrypt_count(
     count[0] = 0
     valid_totp = provisioned_user["totp"].now()
     with pytest.raises(auth.AuthError):
-        auth.authenticate(
-            provisioned_user["username"], "wrong-password", valid_totp
-        )
+        auth.authenticate(provisioned_user["username"], "wrong-password", valid_totp)
 
     expected = 1 + _core.RECOVERY_CODE_COUNT
     assert count[0] == expected, (
@@ -673,7 +712,9 @@ def test_recovery_code_lookup_is_constant_time_across_consumption_state(
     left used to run only 1). End-to-end via authenticate() to catch
     both the helper's loop AND the caller's wrapping behaviour."""
     import bcrypt as bcrypt_lib
-    from app.auth import _core, login as login_mod
+
+    from app.auth import _core
+    from app.auth import login as login_mod
 
     # Freshly-minted recovery codes for Alice so we have known plaintexts.
     codes, blob = auth.generate_recovery_codes()
@@ -727,5 +768,3 @@ def test_recovery_code_lookup_is_constant_time_across_consumption_state(
         f"consumption-state leak at k=10: baseline {baseline_checkpws} vs "
         f"all-used {all_used_checkpws} -- must match."
     )
-
-

@@ -5,8 +5,7 @@
   const KEY = 'ephemera_theme_v1';
 
   function systemPref() {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark' : 'light';
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
   function current() {

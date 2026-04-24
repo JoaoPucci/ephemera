@@ -31,13 +31,12 @@ User-selection rules:
   user if there is exactly one (single-user convenience), otherwise they ask.
 - Sensitive commands re-authenticate against the target user before mutating.
 """
+
 import getpass
 import io
-import json
 import sys
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import pyotp
 import qrcode
@@ -91,11 +90,11 @@ def _prompt_new_password() -> str:
         return p1
 
 
-def _parse_user_flag(args: list[str]) -> tuple[Optional[str], list[str]]:
+def _parse_user_flag(args: list[str]) -> tuple[str | None, list[str]]:
     """Extract '--user <name>' (or '-u <name>') from args, return (name, remaining)."""
     out = []
     i = 0
-    username: Optional[str] = None
+    username: str | None = None
     while i < len(args):
         a = args[i]
         if a in ("--user", "-u") and i + 1 < len(args):
@@ -107,7 +106,7 @@ def _parse_user_flag(args: list[str]) -> tuple[Optional[str], list[str]]:
     return username, out
 
 
-def _resolve_user(username: Optional[str]) -> dict:
+def _resolve_user(username: str | None) -> dict:
     """Pick the target user: explicit flag, or the only user, or prompt."""
     if username:
         user = models.get_user_by_username(username)
@@ -155,7 +154,9 @@ def _print_totp_setup(secret: str, username: str) -> None:
         secret, account_name=username, issuer=get_settings().totp_issuer
     )
     print()
-    print("Scan this QR in your authenticator app (1Password, Google Authenticator, Aegis, ...):")
+    print(
+        "Scan this QR in your authenticator app (1Password, Google Authenticator, Aegis, ...):"
+    )
     print()
     print(_ascii_qr(uri))
     print(f"  Or enter the secret manually: {secret}")
@@ -201,8 +202,13 @@ def _provision_user(username: str) -> tuple[int, str, list[str]]:
 def cmd_init(username: str) -> None:
     models.init_db()
     if models.user_count() > 0:
-        print("at least one user already exists — refusing to run init.", file=sys.stderr)
-        print("use `add-user` for additional users, or rotation commands to change credentials.", file=sys.stderr)
+        print(
+            "at least one user already exists — refusing to run init.", file=sys.stderr
+        )
+        print(
+            "use `add-user` for additional users, or rotation commands to change credentials.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     _, secret, codes = _provision_user(username)
     _print_totp_setup(secret, username)
@@ -282,7 +288,7 @@ def _reauth_for_force_removal(target: dict) -> None:
     _reauth(authenticator)
 
 
-def cmd_reset_password(username: Optional[str]) -> None:
+def cmd_reset_password(username: str | None) -> None:
     user = _resolve_user(username)
     _reauth(user)
     new_pw = _prompt_new_password()
@@ -290,10 +296,12 @@ def cmd_reset_password(username: Optional[str]) -> None:
     models.bump_session_generation(user["id"])
     audit("password.reset", user_id=user["id"], username=user["username"])
     print(f"password updated for '{user['username']}'.")
-    print("  live sessions for this user have been invalidated; they must log in again.")
+    print(
+        "  live sessions for this user have been invalidated; they must log in again."
+    )
 
 
-def cmd_rotate_totp(username: Optional[str]) -> None:
+def cmd_rotate_totp(username: str | None) -> None:
     user = _resolve_user(username)
     _reauth(user)
     secret = auth.generate_totp_secret()
@@ -301,11 +309,15 @@ def cmd_rotate_totp(username: Optional[str]) -> None:
     models.bump_session_generation(user["id"])
     audit("totp.rotated", user_id=user["id"], username=user["username"])
     _print_totp_setup(secret, user["username"])
-    print("new TOTP active. The old authenticator entry will stop working after you re-scan.")
-    print("  live sessions for this user have been invalidated; they must log in again.")
+    print(
+        "new TOTP active. The old authenticator entry will stop working after you re-scan."
+    )
+    print(
+        "  live sessions for this user have been invalidated; they must log in again."
+    )
 
 
-def cmd_regen_recovery_codes(username: Optional[str]) -> None:
+def cmd_regen_recovery_codes(username: str | None) -> None:
     user = _resolve_user(username)
     _reauth(user)
     codes, codes_json = auth.generate_recovery_codes()
@@ -313,10 +325,12 @@ def cmd_regen_recovery_codes(username: Optional[str]) -> None:
     models.bump_session_generation(user["id"])
     audit("recovery.regenerated", user_id=user["id"], username=user["username"])
     _print_recovery_codes(codes)
-    print("  live sessions for this user have been invalidated; they must log in again.")
+    print(
+        "  live sessions for this user have been invalidated; they must log in again."
+    )
 
 
-def cmd_list_tokens(username: Optional[str]) -> None:
+def cmd_list_tokens(username: str | None) -> None:
     user = _resolve_user(username)
     rows = models.list_tokens(user["id"])
     if not rows:
@@ -328,7 +342,7 @@ def cmd_list_tokens(username: Optional[str]) -> None:
         print(f"  [{state}] {r['name']}  created {r['created_at']}  last used {last}")
 
 
-def cmd_create_token(name: str, username: Optional[str]) -> None:
+def cmd_create_token(name: str, username: str | None) -> None:
     user = _resolve_user(username)
     _reauth(user)
     plaintext, digest = auth.mint_api_token()
@@ -336,30 +350,48 @@ def cmd_create_token(name: str, username: Optional[str]) -> None:
         models.create_token(user_id=user["id"], name=name, token_hash=digest)
     except Exception as e:
         if "UNIQUE" in str(e):
-            print(f"token name '{name}' already exists for user '{user['username']}'.", file=sys.stderr)
+            print(
+                f"token name '{name}' already exists for user '{user['username']}'.",
+                file=sys.stderr,
+            )
             sys.exit(1)
         raise
-    audit("apitoken.created", user_id=user["id"], username=user["username"], token_name=name)
+    audit(
+        "apitoken.created",
+        user_id=user["id"],
+        username=user["username"],
+        token_name=name,
+    )
     print()
-    print(f"API token '{name}' created for user '{user['username']}'. Save this now — it will NOT be shown again:")
+    print(
+        f"API token '{name}' created for user '{user['username']}'. Save this now — it will NOT be shown again:"
+    )
     print()
     print(f"  {plaintext}")
     print()
     print("Use as: Authorization: Bearer <token>")
 
 
-def cmd_revoke_token(name: str, username: Optional[str]) -> None:
+def cmd_revoke_token(name: str, username: str | None) -> None:
     user = _resolve_user(username)
     _reauth(user)
     if models.revoke_token(user["id"], name):
-        audit("apitoken.revoked", user_id=user["id"], username=user["username"], token_name=name)
+        audit(
+            "apitoken.revoked",
+            user_id=user["id"],
+            username=user["username"],
+            token_name=name,
+        )
         print(f"token '{name}' revoked.")
     else:
-        print(f"no active token named '{name}' for user '{user['username']}'.", file=sys.stderr)
+        print(
+            f"no active token named '{name}' for user '{user['username']}'.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 
-def cmd_diagnose(username: Optional[str], show_secret: bool = False) -> None:
+def cmd_diagnose(username: str | None, show_secret: bool = False) -> None:
     # `_resolve_user` returns without TOTP plaintext (module default).
     # This command generates candidate TOTP codes from the seed, so
     # explicitly re-fetch the with-TOTP variant.
@@ -376,14 +408,18 @@ def cmd_diagnose(username: Optional[str], show_secret: bool = False) -> None:
 
     print()
     print(f"User:                '{user['username']}' (id={user['id']})")
-    print(f"Server time (UTC):   {datetime.now(timezone.utc).isoformat()}")
+    print(f"Server time (UTC):   {datetime.now(UTC).isoformat()}")
     print(f"Server unix ts:      {now_ts}")
-    print(f"Current TOTP step:   {step}  ({seconds_into}s in, {seconds_left}s until next rotation)")
+    print(
+        f"Current TOTP step:   {step}  ({seconds_into}s in, {seconds_left}s until next rotation)"
+    )
     print(f"Last step used:      {last_step}")
     print()
     print("If your authenticator's current code matches any of these, login will work:")
     print(f"  previous step ({step - 1}):  {totp.at(now_ts - auth.TOTP_INTERVAL)}")
-    print(f"  current  step ({step}):      {totp.at(now_ts)}   <-- this is what it should show now")
+    print(
+        f"  current  step ({step}):      {totp.at(now_ts)}   <-- this is what it should show now"
+    )
     print(f"  next     step ({step + 1}):  {totp.at(now_ts + auth.TOTP_INTERVAL)}")
     print()
     # The raw TOTP seed is gated behind --show-secret. The common reason
@@ -404,12 +440,18 @@ def cmd_diagnose(username: Optional[str], show_secret: bool = False) -> None:
         )
     print()
     print("If your authenticator shows a different code for the 'current step':")
-    print("  -> your authenticator has an OLD entry from a previous `init` / `rotate-totp`.")
-    print("     Delete that entry in the authenticator and re-scan the QR from your last")
-    print("     `init` or `rotate-totp`. Or run `rotate-totp` to generate a fresh secret + QR.")
+    print(
+        "  -> your authenticator has an OLD entry from a previous `init` / `rotate-totp`."
+    )
+    print(
+        "     Delete that entry in the authenticator and re-scan the QR from your last"
+    )
+    print(
+        "     `init` or `rotate-totp`. Or run `rotate-totp` to generate a fresh secret + QR."
+    )
 
 
-def cmd_verify(username: Optional[str]) -> None:
+def cmd_verify(username: str | None) -> None:
     # Verifies TOTP against the stored seed -- fetch the with-TOTP variant.
     resolved = _resolve_user(username)
     user = models.get_user_with_totp_by_id(resolved["id"])
@@ -419,12 +461,16 @@ def cmd_verify(username: Optional[str]) -> None:
     pw_ok = auth.verify_password(password, user["password_hash"])
     totp_step = None
     if code.isdigit() and len(code) == auth.TOTP_DIGITS:
-        totp_step = auth.verify_totp(user["totp_secret"], code, last_step=user["totp_last_step"])
+        totp_step = auth.verify_totp(
+            user["totp_secret"], code, last_step=user["totp_last_step"]
+        )
 
     print()
     print(f"user:      '{user['username']}' (id={user['id']})")
     print(f"password:  {'OK' if pw_ok else 'MISMATCH'}")
-    print(f"totp:      {'OK (step ' + str(totp_step) + ')' if totp_step is not None else 'MISMATCH'}")
+    print(
+        f"totp:      {'OK (step ' + str(totp_step) + ')' if totp_step is not None else 'MISMATCH'}"
+    )
     print(f"stored totp_last_step: {user['totp_last_step']}")
     print()
 
@@ -433,7 +479,9 @@ def cmd_verify(username: Optional[str]) -> None:
     elif not pw_ok:
         print("Password is wrong; TOTP is correct.")
     elif totp_step is None:
-        print("Password is right; TOTP is wrong (clock drift or stale authenticator entry).")
+        print(
+            "Password is right; TOTP is wrong (clock drift or stale authenticator entry)."
+        )
     else:
         print("Both correct. Login via the web UI should succeed with these values.")
 
@@ -445,18 +493,18 @@ def cmd_verify(username: Optional[str]) -> None:
 
 COMMANDS = {
     # name: (fn, positional_arity, takes_user_flag)
-    "init":                 (cmd_init,                 1, False),
-    "add-user":             (cmd_add_user,             1, False),
-    "list-users":           (cmd_list_users,           0, False),
-    "remove-user":          (cmd_remove_user,          1, False),
-    "reset-password":       (cmd_reset_password,       0, True),
-    "rotate-totp":          (cmd_rotate_totp,          0, True),
+    "init": (cmd_init, 1, False),
+    "add-user": (cmd_add_user, 1, False),
+    "list-users": (cmd_list_users, 0, False),
+    "remove-user": (cmd_remove_user, 1, False),
+    "reset-password": (cmd_reset_password, 0, True),
+    "rotate-totp": (cmd_rotate_totp, 0, True),
     "regen-recovery-codes": (cmd_regen_recovery_codes, 0, True),
-    "list-tokens":          (cmd_list_tokens,          0, True),
-    "create-token":         (cmd_create_token,         1, True),
-    "revoke-token":         (cmd_revoke_token,         1, True),
-    "diagnose":             (cmd_diagnose,             0, True),
-    "verify":               (cmd_verify,               0, True),
+    "list-tokens": (cmd_list_tokens, 0, True),
+    "create-token": (cmd_create_token, 1, True),
+    "revoke-token": (cmd_revoke_token, 1, True),
+    "diagnose": (cmd_diagnose, 0, True),
+    "verify": (cmd_verify, 0, True),
 }
 
 
@@ -478,7 +526,7 @@ def main(argv: list[str] | None = None) -> None:
     if argv[0] == "diagnose" and "--show-secret" in rest:
         rest = [a for a in rest if a != "--show-secret"]
         extra_kwargs["show_secret"] = True
-    user_flag, rest = (_parse_user_flag(rest) if takes_user else (None, rest))
+    user_flag, rest = _parse_user_flag(rest) if takes_user else (None, rest)
     if len(rest) != arity:
         print(f"`{argv[0]}` expects {arity} positional arg(s).", file=sys.stderr)
         sys.exit(2)

@@ -36,6 +36,7 @@ def test_filter_readable_skips_unreadable_files(tmp_path):
             # Running as root defeats the test's premise; skip rather
             # than silently pass.
             import pytest
+
             pytest.skip("running as root -- unreadable-file branch can't fire")
 
         result = _filter_readable((str(locked),))
@@ -76,7 +77,8 @@ def test_env_file_precedence_system_wins_over_dev():
     )
     # Dev XDG file must be earlier so system overrides it.
     xdg_index = next(
-        i for i, p in enumerate(_ENV_FILE_CANDIDATES)
+        i
+        for i, p in enumerate(_ENV_FILE_CANDIDATES)
         if p.endswith(".local/share/ephemera-dev/.env")
     )
     assert xdg_index < system_index

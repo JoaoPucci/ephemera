@@ -4,7 +4,7 @@
 // user pill + logout button, and the initial /api/me fetch that populates
 // the username in that pill.
 import { copyWithFeedback } from './copy.js';
-import './sender/form.js';   // side-effect import: wires compose form + status widget
+import './sender/form.js'; // side-effect import: wires compose form + status widget
 import { renderTrackedList } from './sender/tracked-list.js';
 
 // "Copy URL" button on the success screen.
@@ -56,11 +56,15 @@ if (userBtn) {
 (async function loadMe() {
   try {
     const res = await fetch('/api/me');
-    if (res.status === 401) { window.location.reload(); return; }
+    if (res.status === 401) {
+      window.location.reload();
+      return;
+    }
     if (!res.ok) return;
     const me = await res.json();
     if (userNameEl && me.username) userNameEl.textContent = me.username;
-    if (userBtn) userBtn.setAttribute('aria-label', `Signed in as ${me.username}. Click to sign out.`);
+    if (userBtn)
+      userBtn.setAttribute('aria-label', `Signed in as ${me.username}. Click to sign out.`);
   } catch {}
 })();
 

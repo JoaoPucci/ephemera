@@ -11,17 +11,16 @@ degrade to "couldn't check, skipping" rather than blocking password
 setup on an offline host. The online behaviour is to reject on a >0
 count.
 """
+
 import hashlib
 import urllib.error
 import urllib.request
-from typing import Optional
-
 
 _HIBP_RANGE_URL = "https://api.pwnedpasswords.com/range/{}"
 _DEFAULT_TIMEOUT = 5.0
 
 
-def pwned_count(password: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Optional[int]:
+def pwned_count(password: str, *, timeout: float = _DEFAULT_TIMEOUT) -> int | None:
     """Return the breach count for `password`. 0 = not seen in any corpus,
     >0 = appeared N times across known breaches, None = the API could not
     be reached."""

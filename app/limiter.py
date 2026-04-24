@@ -1,4 +1,5 @@
 """Tiny in-memory sliding-window rate limiter, keyed by client IP."""
+
 import threading
 import time
 from collections import deque
@@ -101,8 +102,8 @@ def login_rate_limit(request: Request) -> None:
 def create_rate_limit(request: Request) -> None:
     """Per-session rate limit on secret creation. Falls back to IP if unauthenticated
     (which shouldn't happen on authed routes, but keeps the limiter safe)."""
-    from .dependencies import read_session_cookie
     from .config import get_settings
+    from .dependencies import read_session_cookie
 
     raw = request.cookies.get(get_settings().session_cookie_name)
     key = read_session_cookie(raw) if raw else None

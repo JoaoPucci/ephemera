@@ -28,9 +28,9 @@
 
   function focusableInPanel() {
     if (!panel) return [];
-    return Array.from(panel.querySelectorAll(
-      'button, [href], select, input, [tabindex]:not([tabindex="-1"])'
-    )).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
+    return Array.from(
+      panel.querySelectorAll('button, [href], select, input, [tabindex]:not([tabindex="-1"])')
+    ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
   }
 
   // Touch-primary devices: blur the tapped target immediately to clear
@@ -39,8 +39,8 @@
   // than (hover: none) because Samsung devices with an S Pen report
   // hover-capable but still have touch as their primary pointer --
   // (hover: none) misses them and the halo persists after finger taps.
-  const isTouchPrimary = typeof window.matchMedia === 'function'
-    && window.matchMedia('(pointer: coarse)').matches;
+  const isTouchPrimary =
+    typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 
   function setOpen(open) {
     if (open) root.dataset.chromeMenuOpen = 'true';
@@ -114,7 +114,9 @@
   const userSrc = document.getElementById('user-name');
   if (userSrc && userNameEl) {
     new MutationObserver(syncUserName).observe(userSrc, {
-      childList: true, characterData: true, subtree: true,
+      childList: true,
+      characterData: true,
+      subtree: true,
     });
   }
 
@@ -151,7 +153,8 @@
   }
   syncThemeState();
   new MutationObserver(syncThemeState).observe(root, {
-    attributes: true, attributeFilter: ['data-theme'],
+    attributes: true,
+    attributeFilter: ['data-theme'],
   });
   if (themeBtn) {
     themeBtn.addEventListener('click', (e) => {
@@ -185,7 +188,7 @@
         // drawer row has full width -- the pill is width-constrained to
         // avoid colliding with the language picker. Splitting the keys
         // lets each surface have register-appropriate copy.
-        const confirmText = (window.i18n && window.i18n.t)
+        const confirmText = window.i18n?.t
           ? window.i18n.t('menu.sign_out_confirm')
           : 'really sign out?';
         signoutLabel.textContent = confirmText;

@@ -1,18 +1,22 @@
 """End-to-end login orchestration: combines password + TOTP/recovery check,
 lockout enforcement, and success-path side effects (step bump, code
 consumption, counter reset)."""
-from typing import Optional
 
 import bcrypt
 
 from .. import models
 from ..security_log import emit as audit
-from ._core import BCRYPT_ROUNDS, RECOVERY_CODE_COUNT, TOTP_DIGITS, AuthError, LockoutError
+from ._core import (
+    BCRYPT_ROUNDS,
+    RECOVERY_CODE_COUNT,
+    TOTP_DIGITS,
+    AuthError,
+    LockoutError,
+)
 from .lockout import check_not_locked, record_failure, record_success
 from .password import verify_password
 from .recovery_codes import consume_backup_code
 from .totp import verify_totp
-
 
 # Pre-computed dummy bcrypt hash used to equalize the unknown-user path's
 # CPU cost with the known-user worst case. The unknown-user branch runs
@@ -25,7 +29,9 @@ from .totp import verify_totp
 _DUMMY_BCRYPT_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
 
 
-def authenticate(username: str, password: str, code: str, client_ip: str = "cli") -> dict:
+def authenticate(
+    username: str, password: str, code: str, client_ip: str = "cli"
+) -> dict:
     """Verify username + password + (TOTP code OR backup code).
 
     Returns the authenticated user dict on success. Raises AuthError on any
@@ -50,27 +56,36 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
         # "username exists" from "username doesn't."
         for _ in range(1 + RECOVERY_CODE_COUNT):
             bcrypt.checkpw(b"dummy", _DUMMY_BCRYPT_HASH)
-        audit("login.failure", username=trimmed, client_ip=client_ip, reason="unknown_user")
+        audit(
+            "login.failure",
+            username=trimmed,
+            client_ip=client_ip,
+            reason="unknown_user",
+        )
         raise AuthError("invalid credentials")
     try:
         check_not_locked(user)
     except LockoutError:
         audit(
             "login.failure",
-            user_id=user["id"], username=user["username"],
-            client_ip=client_ip, reason="locked",
+            user_id=user["id"],
+            username=user["username"],
+            client_ip=client_ip,
+            reason="locked",
         )
         raise
 
     pw_ok = verify_password(password, user["password_hash"])
 
     totp_step = None
-    consumed_backup_json: Optional[str] = None
+    consumed_backup_json: str | None = None
     stripped = code.strip()
     if stripped.isdigit() and len(stripped) == TOTP_DIGITS:
         totp_step = verify_totp(user["totp_secret"], stripped, user["totp_last_step"])
     if totp_step is None:
-        consumed_backup_json = consume_backup_code(stripped, user["recovery_code_hashes"])
+        consumed_backup_json = consume_backup_code(
+            stripped, user["recovery_code_hashes"]
+        )
 
     if not pw_ok or (totp_step is None and consumed_backup_json is None):
         # Persist the accepted TOTP step even on a failure path. Without
@@ -108,14 +123,18 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
         reason = "wrong_password" if not pw_ok else "wrong_second_factor"
         audit(
             "login.failure",
-            user_id=user["id"], username=user["username"],
-            client_ip=client_ip, reason=reason,
+            user_id=user["id"],
+            username=user["username"],
+            client_ip=client_ip,
+            reason=reason,
         )
         if lockout_until is not None:
             audit(
                 "login.lockout",
-                user_id=user["id"], username=user["username"],
-                client_ip=client_ip, until=lockout_until,
+                user_id=user["id"],
+                username=user["username"],
+                client_ip=client_ip,
+                until=lockout_until,
             )
         raise AuthError("invalid credentials")
 
@@ -127,7 +146,9 @@ def authenticate(username: str, password: str, code: str, client_ip: str = "cli"
     record_success(user["id"], updates)
     audit(
         "login.success",
-        user_id=user["id"], username=user["username"], client_ip=client_ip,
+        user_id=user["id"],
+        username=user["username"],
+        client_ip=client_ip,
     )
     # Strip the plaintext TOTP seed from the return so it doesn't travel any
     # further than the verify_totp call above. The models-layer split (see

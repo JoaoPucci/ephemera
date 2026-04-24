@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 // otplib v13 removed the v12 `authenticator` singleton; `generateSync` is
 // the idiomatic v13 entry for producing a TOTP code synchronously.
 import { generateSync } from 'otplib';
@@ -8,7 +8,9 @@ const USERNAME = 'e2e';
 const PASSWORD = 'e2e-password-123';
 const TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 
-test('golden path: sign in, create a text secret, receiver reveals it exactly once', async ({ browser }) => {
+test('golden path: sign in, create a text secret, receiver reveals it exactly once', async ({
+  browser,
+}) => {
   // --- sender context ---
   const sender = await browser.newContext();
   const senderPage = await sender.newPage();
@@ -27,7 +29,7 @@ test('golden path: sign in, create a text secret, receiver reveals it exactly on
   await senderPage.click('#submit-btn');
 
   await expect(senderPage.locator('#result-url')).toBeVisible();
-  const shareUrl = (await senderPage.locator('#result-url').textContent() ?? '').trim();
+  const shareUrl = ((await senderPage.locator('#result-url').textContent()) ?? '').trim();
   expect(shareUrl).toMatch(/#[A-Za-z0-9_-]+$/);
 
   // --- receiver context (separate storage so no session cookie leaks) ---

@@ -1,5 +1,4 @@
 """Operations on the `api_tokens` table."""
-from typing import Optional
 
 from ._core import _connect, _iso, _row_to_dict, _utcnow
 
@@ -34,7 +33,7 @@ def revoke_token(user_id: int, name: str) -> bool:
     return (cur.rowcount or 0) > 0
 
 
-def get_active_token_by_hash(token_hash: str) -> Optional[dict]:
+def get_active_token_by_hash(token_hash: str) -> dict | None:
     """Return the token row with its user_id. Not user-scoped because this IS
     how we find the user from the token."""
     with _connect() as conn:
@@ -48,5 +47,6 @@ def get_active_token_by_hash(token_hash: str) -> Optional[dict]:
 def touch_token_last_used(token_id: int) -> None:
     with _connect() as conn:
         conn.execute(
-            "UPDATE api_tokens SET last_used_at = ? WHERE id = ?", (_iso(_utcnow()), token_id)
+            "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+            (_iso(_utcnow()), token_id),
         )

@@ -1,5 +1,4 @@
 """Sender routes: login, logout, secret creation, status lookup."""
-from typing import Optional
 
 import bcrypt
 from fastapi import (
@@ -24,17 +23,16 @@ from ..errors import http_error
 from ..i18n import template_context
 from ..limiter import create_rate_limit, login_rate_limit, read_rate_limit
 from ..schemas import (
+    EXPIRY_PRESETS,
     ApiMeResponse,
     ClearTrackedResponse,
     CreateSecretResponse,
     CreateTextSecret,
-    EXPIRY_PRESETS,
     LoginResponse,
     LogoutResponse,
     SecretStatusResponse,
     TrackedListResponse,
 )
-
 
 router = APIRouter()
 
@@ -45,11 +43,11 @@ router = APIRouter()
 _MAX_USERNAME_LEN = 256
 _MAX_PASSWORD_LEN = 256
 _MAX_TOTP_CODE_LEN = 64
-_MAX_PASSPHRASE_LEN = 200   # matches CreateTextSecret.passphrase in schemas.py
-_MAX_LABEL_LEN = 60         # matches CreateTextSecret.label
+_MAX_PASSPHRASE_LEN = 200  # matches CreateTextSecret.passphrase in schemas.py
+_MAX_LABEL_LEN = 60  # matches CreateTextSecret.label
 
 
-def _clean_label(raw) -> Optional[str]:
+def _clean_label(raw) -> str | None:
     if raw is None:
         return None
     s = str(raw).strip()
@@ -106,13 +104,15 @@ def send_login(
         raise http_error(400, "field_too_long")
     try:
         user = auth_mod.authenticate(
-            username, password, code,
+            username,
+            password,
+            code,
             client_ip=security_log.client_ip(request),
         )
     except auth_mod.LockoutError as e:
-        raise http_error(423, "locked", until=e.until_iso)
+        raise http_error(423, "locked", until=e.until_iso) from e
     except auth_mod.AuthError:
-        raise http_error(401, "invalid_credentials")
+        raise http_error(401, "invalid_credentials") from None
 
     # Session rotation: re-signing with a fresh timestamp gives a new cookie value.
     # The cookie also binds to the user's current session_generation so that
@@ -163,13 +163,15 @@ async def create_secret(
 ):
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
 
-    label: Optional[str] = None
+    label: str | None = None
     if ctype == "application/json":
         try:
             raw = await request.json()
             payload = CreateTextSecret(**raw)
         except Exception as e:
-            raise http_error(422, "invalid_json_body", message=f"Invalid JSON body: {e}")
+            raise http_error(
+                422, "invalid_json_body", message=f"Invalid JSON body: {e}"
+            ) from e
         content_type = "text"
         mime = None
         plaintext = payload.content.encode("utf-8")
@@ -186,7 +188,7 @@ async def create_secret(
         try:
             expires_in = int(form.get("expires_in", ""))
         except (TypeError, ValueError):
-            raise http_error(422, "invalid_expires_in")
+            raise http_error(422, "invalid_expires_in") from None
         if expires_in not in EXPIRY_PRESETS:
             raise http_error(422, "expires_in_not_preset")
         passphrase = form.get("passphrase") or None
@@ -204,7 +206,7 @@ async def create_secret(
         try:
             mime = validation.validate_image(data, declared, settings.max_image_bytes)
         except validation.ValidationError as e:
-            raise http_error(400, "validation_error", message=str(e))
+            raise http_error(400, "validation_error", message=str(e)) from e
         content_type = "image"
         plaintext = data
     else:
@@ -216,7 +218,9 @@ async def create_secret(
     # Use the project-wide bcrypt cost so a future bump to BCRYPT_ROUNDS
     # applies here too (was silently pinned to the library default before).
     passphrase_hash = (
-        bcrypt.hashpw(passphrase.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
+        bcrypt.hashpw(
+            passphrase.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+        ).decode()
         if passphrase
         else None
     )
@@ -291,7 +295,9 @@ def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
     count = models.clear_non_pending_tracked(user["id"])
     security_log.emit(
         "secret.cleared",
-        user_id=user["id"], username=user["username"], count=count,
+        user_id=user["id"],
+        username=user["username"],
+        count=count,
     )
     return ClearTrackedResponse(cleared=count)
 
@@ -310,7 +316,9 @@ def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
         raise http_error(404, "not_found_or_gone")
     security_log.emit(
         "secret.canceled",
-        user_id=user["id"], username=user["username"], secret_id=sid,
+        user_id=user["id"],
+        username=user["username"],
+        secret_id=sid,
     )
     return Response(status_code=204)
 

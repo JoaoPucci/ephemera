@@ -1,5 +1,6 @@
 """Tests for the i18n system: locale resolution, migration, prefs endpoint,
 error shape, and the JS catalog inlining."""
+
 import json
 import re
 from pathlib import Path
@@ -19,7 +20,6 @@ from app.i18n import (
     lazy_gettext,
     negotiate,
 )
-
 
 ORIGIN = {"Origin": "http://testserver"}
 
@@ -74,6 +74,7 @@ def test_bcp47_to_posix_simple_language_tag():
     """Language-only tags map to themselves (gettext catalog dir == BCP-47
     tag for unambiguous cases like ja, fr, de, ru, ko)."""
     from app.i18n import _bcp47_to_posix
+
     for tag in ("en", "ja", "fr", "de", "ru", "ko", "es"):
         assert _bcp47_to_posix(tag) == tag
 
@@ -83,6 +84,7 @@ def test_bcp47_to_posix_with_territory():
     pt-BR has no CLDR script inference, so Babel's str(loc) is the
     right dir name."""
     from app.i18n import _bcp47_to_posix
+
     assert _bcp47_to_posix("pt-BR") == "pt_BR"
 
 
@@ -93,6 +95,7 @@ def test_bcp47_to_posix_chinese_drops_territory():
     drops the territory so the path lines up with how the catalog dirs
     are actually laid out."""
     from app.i18n import _bcp47_to_posix
+
     assert _bcp47_to_posix("zh-CN") == "zh_Hans"
     assert _bcp47_to_posix("zh-TW") == "zh_Hant"
 
@@ -101,7 +104,8 @@ def test_label_override_wins_over_cldr_default():
     """_LABEL_OVERRIDES exists for aesthetic refinements (title-casing
     Romance/Slavic endonyms, the common-usage abbreviation for Chinese).
     The override value must win over Babel's CLDR endonym."""
-    from app.i18n import _label_for, _LABEL_OVERRIDES
+    from app.i18n import _LABEL_OVERRIDES, _label_for
+
     # pt-BR is overridden
     assert "pt-BR" in _LABEL_OVERRIDES
     assert _label_for("pt-BR") == _LABEL_OVERRIDES["pt-BR"]
@@ -113,6 +117,7 @@ def test_label_falls_back_to_cldr_endonym():
     matches the aesthetic we want -- no override needed, the function
     still returns the right thing."""
     from app.i18n import _label_for
+
     assert _label_for("de") == "Deutsch"
     assert _label_for("ja") == "日本語"
     assert _label_for("ko") == "한국어"
@@ -182,8 +187,8 @@ def test_discover_requires_po_for_non_default_locales(tmp_path, monkeypatch):
     po_dir = tmp_path / "translations"
     js_dir.mkdir(parents=True)
     po_dir.mkdir(parents=True)
-    (js_dir / "en.json").write_text('{}', encoding="utf-8")
-    (js_dir / "es.json").write_text('{}', encoding="utf-8")
+    (js_dir / "en.json").write_text("{}", encoding="utf-8")
+    (js_dir / "es.json").write_text("{}", encoding="utf-8")
     # No es .po file -- es should be skipped.
 
     monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", js_dir)
@@ -207,7 +212,7 @@ def test_discover_default_does_not_require_po(tmp_path, monkeypatch):
     po_dir = tmp_path / "translations"
     js_dir.mkdir(parents=True)
     po_dir.mkdir(parents=True)
-    (js_dir / "en.json").write_text('{}', encoding="utf-8")
+    (js_dir / "en.json").write_text("{}", encoding="utf-8")
     # No en/LC_MESSAGES/messages.po anywhere.
 
     monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", js_dir)
@@ -229,8 +234,8 @@ def test_discover_skips_tags_babel_does_not_recognize(tmp_path, monkeypatch):
     po_dir = tmp_path / "translations"
     js_dir.mkdir(parents=True)
     po_dir.mkdir(parents=True)
-    (js_dir / "en.json").write_text('{}', encoding="utf-8")
-    (js_dir / "xyz-nonsense.json").write_text('{}', encoding="utf-8")
+    (js_dir / "en.json").write_text("{}", encoding="utf-8")
+    (js_dir / "xyz-nonsense.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", js_dir)
     monkeypatch.setattr(i18n_mod, "_TRANSLATIONS_DIR", po_dir)
@@ -250,9 +255,11 @@ def test_launch_opt_out_excludes_from_launched_but_keeps_in_supported(monkeypatc
     # Monkey-patch the opt-out to include an existing launched locale,
     # then re-derive LAUNCHED to exercise the opt-out path.
     monkeypatch.setattr(i18n_mod, "_LAUNCH_OPT_OUT", {"de"})
-    relaunched = tuple(t for t in i18n_mod.SUPPORTED if t not in i18n_mod._LAUNCH_OPT_OUT)
-    assert "de" in i18n_mod.SUPPORTED   # still resolvable
-    assert "de" not in relaunched       # hidden from picker
+    relaunched = tuple(
+        t for t in i18n_mod.SUPPORTED if t not in i18n_mod._LAUNCH_OPT_OUT
+    )
+    assert "de" in i18n_mod.SUPPORTED  # still resolvable
+    assert "de" not in relaunched  # hidden from picker
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +448,7 @@ def test_js_catalog_en_has_expected_keys():
     cat = js_catalog("en")
     # Spot-check: every error-code the server raises should have an
     # error.<code> entry so the JS side can localize it.
-    for code in ERROR_MESSAGES:
+    for _code in ERROR_MESSAGES:
         # We don't require every code in the JS catalog (some codes are
         # API-only and never shown to end users), but the ones the UI
         # actually displays must be present. This is a tripwire for
@@ -514,7 +521,9 @@ def test_locale_unknown_falls_through_silently(client):
     assert 'lang="ja"' in r.text
 
 
-def test_locale_authed_user_preference_wins_over_header(authed_client, provisioned_user):
+def test_locale_authed_user_preference_wins_over_header(
+    authed_client, provisioned_user
+):
     # Persist a preference on the authed user, then verify a request with
     # a conflicting Accept-Language still gets the stored locale.
     from app.models import users as users_model
@@ -808,7 +817,7 @@ def test_body_data_authenticated_absent_for_anonymous(client):
     /api/me/language, so a stray attribute would cost every anonymous
     language change a wasted 401 round-trip."""
     r = client.get("/send")
-    assert 'data-authenticated' not in r.text
+    assert "data-authenticated" not in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -960,8 +969,7 @@ def test_every_locale_catalog_has_every_en_key():
     assert not missing_by_locale, (
         "non-en JSON catalogs missing keys from en.json:\n"
         + "\n".join(
-            f"  {loc}: {keys}"
-            for loc, keys in sorted(missing_by_locale.items())
+            f"  {loc}: {keys}" for loc, keys in sorted(missing_by_locale.items())
         )
     )
 
@@ -1007,6 +1015,7 @@ def test_version_renders_under_wordmark(client):
     wordmark makes the context obvious (screen readers read 'ephemera,
     v0.6.0'), so no aria-label is needed; the layout is the semantic."""
     import re
+
     from app.version import VERSION
 
     body = client.get("/send").text
