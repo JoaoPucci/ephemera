@@ -300,9 +300,60 @@ a dash, e.g. `v1.2.3-rc1`) are deliberately excluded — the tag glob is
 `'v*.*.*'` minus `'v*.*.*-*'`, and the entry stub re-validates against
 `^v[0-9]+\.[0-9]+\.[0-9]+$`.
 
+### Tailscale prerequisites (admin console)
+
+Three things need to be true on the tailnet side before the on-server
+setup will work. None of them are on the server -- they're in the
+Tailscale admin console.
+
+1. **MagicDNS enabled.** Admin console → **DNS** → MagicDNS toggle.
+   Required for the `<hostname>.<tailnet>.ts.net` names that back
+   `DEPLOY_SSH_HOST` and `ssh-keyscan`. Older tailnets often have it
+   off; you may need to add a global nameserver (e.g. Cloudflare
+   `1.1.1.1`) first, since MagicDNS depends on a fallback resolver.
+
+2. **`tag:ci` owner.** Admin console → **Access controls**. The
+   `tagOwners` block must list at least one owner for `tag:ci`:
+
+   ```json
+   "tagOwners": {
+     "tag:ci": ["autogroup:admin"]
+   }
+   ```
+
+   An empty owner list (or no entry at all) causes the OAuth client
+   below to refuse to mint auth keys for the tag ("tag not owned").
+
+3. **ACL grant for `tag:ci` → server:22.** A fresh tailnet's default
+   `{"src": ["*"], "dst": ["*"], "ip": ["*"]}` already covers this.
+   If you've locked the ACL down with targeted grants, add one
+   explicitly:
+
+   ```json
+   {
+     "action": "accept",
+     "src":    ["tag:ci"],
+     "dst":    ["<your-server-hostname>:22"]
+   }
+   ```
+
+   Verify with the admin console's **Preview rules** / **Check
+   access** tool: source `tag:ci`, destination `<server>:22` → must
+   show Accept before proceeding.
+
 ### One-time server setup
 
 Run as root on the server.
+
+**Bootstrap prerequisite.** The entry stub in step 3 below is installed
+*from* `/opt/ephemera/scripts/deploy/ephemera-deploy-entry`, which means
+the on-disk checkout must already contain `scripts/deploy/` before step
+3 can work. If your current deploy predates the auto-deploy
+infrastructure (no `scripts/deploy/` directory in the tree yet), advance
+the checkout manually once first, via the regular manual-deploy recipe
+in `## Operations` above, to a tag or commit that contains these files.
+Every subsequent release then ships its own copy of `deploy.sh` +
+`ephemera-deploy-entry` onto disk as part of normal `git checkout`.
 
 1. **Install Tailscale.** SSH is bound to the tailnet so there is no
    public port 22 exposure at all:
@@ -392,23 +443,66 @@ From a host already on the tailnet (e.g. your laptop), before the
 first real Actions-triggered deploy:
 
 ```bash
-ssh deploy@ephemera.tail1234.ts.net v0.0.0
+# Negative path: the regex `^v[0-9]+\.[0-9]+\.[0-9]+$` must reject
+# anything that isn't vMAJOR.MINOR.PATCH. `v0.0.0` looks like a
+# tempting bad example but it actually *passes* the regex (zeros
+# are digits); use a truly invalid shape:
+ssh deploy@ephemera.tail1234.ts.net v1.0
 ```
 
-Expect `deploy entry: tag 'v0.0.0' does not match vMAJOR.MINOR.PATCH`
-followed by `exit 2` — the regex is right but `v0.0.0` is a tag
-that doesn't exist. Positive-path smoke test: use the currently-
-deployed tag (the command is idempotent; `git checkout` on a tag
-already checked out is a no-op, but `pip install` and `restart`
-will still run).
+Expect `deploy entry: tag 'v1.0' does not match vMAJOR.MINOR.PATCH`
+followed by `exit 2`. Other valid negative-test inputs: `latest`,
+`notatag`, `v0.0.0-rc1` (dashes are deliberately excluded).
+Positive-path smoke test: use the currently-deployed tag (the
+command is idempotent; `git checkout` on a tag already checked out
+is a no-op, but `pip install` and `restart` will still run).
 
-### Failure & rollback
+### When a CI run fails
 
-Any step failing in `deploy.sh` exits nonzero with `DEPLOY FAILED: <step>`
-on stderr. The CI job fails; the service stays on whatever state the
-previous successful deploy left it in (if pip aborted mid-install, the
-venv may be half-updated — rebuild with the second recipe in
-`## Operations` above).
+Before reaching for rollback, diagnose. Any step failing in `deploy.sh`
+exits nonzero with `DEPLOY FAILED: <step>` on stderr and the CI job
+fails; the service stays on whatever state the previous successful
+deploy left it in (if pip aborted mid-install, the venv may be
+half-updated — rebuild with the second recipe in `## Operations`
+above).
+
+1. **On the server**, check the deploy-stamped audit line:
+
+   ```bash
+   sudo journalctl -t ephemera-deploy -n 5 --no-pager
+   ```
+
+   Success writes `deployed vX.Y.Z at <timestamp>`. Absence of that
+   line for the latest tag means `deploy.sh` didn't reach its final
+   step. Also confirm what tag the tree is actually on:
+
+   ```bash
+   sudo -u ephemera git -C /opt/ephemera describe --tags
+   sudo systemctl status ephemera --no-pager | head -8
+   ```
+
+2. **On your laptop**, pull the workflow log to find where it died:
+
+   ```bash
+   gh run list --workflow deploy.yml --limit 5
+   gh run view <ID> --log-failed
+   ```
+
+3. **Retry without cutting a new tag** once the blocker is fixed:
+
+   ```bash
+   gh run rerun <ID>
+   gh run watch
+   ```
+
+   One common case: the failure was inside `deploy.sh` itself, the
+   fix is in the repo but not yet on disk (the bootstrap chicken-
+   and-egg — the on-disk `deploy.sh` is what ran and failed). Advance
+   `/opt/ephemera` to main or the target tag manually first
+   (`sudo -u ephemera git -C /opt/ephemera fetch && git checkout <ref>`),
+   then `gh run rerun`.
+
+### Rollback
 
 No automatic rollback. Roll back manually:
 
