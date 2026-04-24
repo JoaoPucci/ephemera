@@ -45,3 +45,7 @@ coverage/
 playwright-report/
 test-results/
 /playwright/.cache/
+
+# Claude Code local state (scheduled-task lock files, etc.). Per-checkout,
+# per-session; nothing in here should ever be committed.
+.claude/
