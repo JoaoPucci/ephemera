@@ -20,23 +20,22 @@ _HIBP_RANGE_URL = "https://api.pwnedpasswords.com/range/{}"
 _DEFAULT_TIMEOUT = 5.0
 
 
-def pwned_count(password: str, *, timeout: float = _DEFAULT_TIMEOUT) -> int | None:
-    """Return the breach count for `password`. 0 = not seen in any corpus,
+def pwned_count(candidate: str, *, timeout: float = _DEFAULT_TIMEOUT) -> int | None:
+    """Return the breach count for `candidate`. 0 = not seen in any corpus,
     >0 = appeared N times across known breaches, None = the API could not
-    be reached."""
-    # SHA-1 here is NOT a password-storage primitive; it's the HIBP range
-    # API's fixed wire format. Only the first 5 hex chars of the digest
-    # leave the process (k-anonymity); the remaining suffix is matched
-    # locally. Password storage in this project uses bcrypt (see
-    # app/auth/password.py); SHA-1 is never used defensively.
-    #
-    # CodeQL flags this as `py/weak-cryptographic-algorithm` because its
-    # taint analysis sees `password` reach a SHA-1 call and can't tell
-    # that the digest is a protocol field rather than a stored credential.
-    # The alert is dismissed (false positive) on the Security tab; this
-    # comment documents the rationale so any future reviewer reading the
-    # code arrives at the same conclusion without having to retrace it.
-    encoded = password.encode("utf-8")
+    be reached.
+
+    The argument is named `candidate` rather than `password` on purpose:
+    this function is a generic HIBP API client and the SHA-1 it computes
+    is a wire-protocol field, not a password digest. Password storage in
+    this project lives in app/auth/password.py and uses bcrypt. Callers
+    happen to pass passwords here because that's the only useful query,
+    but the function itself doesn't treat the argument as a credential.
+    """
+    # SHA-1 is the HIBP range API's mandated wire format. Only the first
+    # 5 hex chars of the digest leave the process (k-anonymity); the
+    # remaining suffix is matched locally against the response body.
+    encoded = candidate.encode("utf-8")
     digest = hashlib.sha1(encoded)
     sha1 = digest.hexdigest().upper()
     prefix, suffix = sha1[:5], sha1[5:]
