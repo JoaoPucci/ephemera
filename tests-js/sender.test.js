@@ -434,4 +434,58 @@ describe('sender.js — copy passphrase + show/hide on the result screen', () =>
 
     expect(writeText).toHaveBeenCalledWith('s3cret!');
   });
+
+  it('uses the passphrase as it was at submit time, not as it is when the response lands', async () => {
+    // Regression guard for the in-flight edit race: the submit button gets
+    // disabled but the passphrase input doesn't, so nothing prevented the
+    // user from editing it during the bcrypt cost-12 hash window. Before
+    // this fix, the result row read the input on response landing, ending
+    // up with a different value than what the server stored.
+    let resolveCreate;
+    const fetchMock = vi.fn((url) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse({ id: 1, username: 'admin' }));
+      if (url === '/api/secrets/tracked') return Promise.resolve(jsonResponse({ items: [] }));
+      if (url === '/api/secrets') return new Promise((resolve) => { resolveCreate = resolve; });
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('original');
+    await flushAsync(); // submit handler now awaiting fetch
+
+    // Simulate the user editing the input mid-flight.
+    document.getElementById('passphrase').value = 'edited';
+
+    resolveCreate(
+      jsonResponse({
+        url: 'https://example/s/tok#key',
+        id: 'deadbeef',
+        expires_at: '2099-01-01T00:00:00Z',
+      })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    expect(passphraseEl().dataset.real).toBe('original');
+  });
+
+  it('"Create another" clears the result-row dataset so the previous passphrase doesn\'t outlive the UI', async () => {
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('hunter2');
+    await flushAsync();
+    await flushAsync();
+
+    expect(passphraseEl().dataset.real).toBe('hunter2');
+
+    document.getElementById('create-another').click();
+
+    expect(passphraseEl().dataset.real).toBe('');
+    expect(passphraseEl().textContent).toBe('');
+    expect(passphraseRow().hidden).toBe(true);
+  });
 });

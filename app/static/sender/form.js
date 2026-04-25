@@ -116,6 +116,13 @@ form.addEventListener('submit', async (e) => {
   try {
     const track = document.getElementById('track').checked;
     const label = track ? (document.getElementById('label').value || '').trim() : '';
+    // Snapshot the passphrase before awaiting the request: the input stays
+    // editable while bcrypt-cost-12 hashing runs server-side (~5s on a
+    // shared CPU), and a mid-flight edit would split the user-visible value
+    // from what the backend stored, breaking the URL+passphrase pair for
+    // the receiver. We use this same captured value for the request body
+    // AND for the result row so they're guaranteed to agree.
+    const passphrase = document.getElementById('passphrase').value || '';
     if (activeTab === 'text') {
       const content = document.getElementById('content').value;
       if (!content.trim()) throw new Error(window.i18n.t('error.please_enter_message'));
@@ -123,7 +130,7 @@ form.addEventListener('submit', async (e) => {
         content,
         content_type: 'text',
         expires_in: Number(document.getElementById('expires_in').value),
-        passphrase: document.getElementById('passphrase').value || null,
+        passphrase: passphrase || null,
         track,
       };
       if (label) body.label = label;
@@ -137,8 +144,7 @@ form.addEventListener('submit', async (e) => {
       const fd = new FormData();
       fd.append('file', fileInput.files[0]);
       fd.append('expires_in', document.getElementById('expires_in').value);
-      const pw = document.getElementById('passphrase').value;
-      if (pw) fd.append('passphrase', pw);
+      if (passphrase) fd.append('passphrase', passphrase);
       fd.append('track', track ? 'true' : 'false');
       if (label) fd.append('label', label);
       res = await fetch('/api/secrets', { method: 'POST', body: fd });
@@ -167,7 +173,7 @@ form.addEventListener('submit', async (e) => {
     }
     const data = await res.json();
     if (track && data.url && data.id) cacheUrl(data.id, data.url);
-    showResult(data);
+    showResult(data, passphrase);
   } catch (err) {
     errBox.textContent = err.message || window.i18n.t('error.generic');
     errBox.hidden = false;
@@ -184,15 +190,15 @@ form.addEventListener('submit', async (e) => {
 
 let statusPoll = null;
 
-function showResult({ url, id, expires_at }) {
+function showResult({ url, id, expires_at }, passphrase) {
   compose.hidden = true;
   document.getElementById('result-url').textContent = url;
 
   // Passphrase isn't in the API response by design -- the server never
-  // returns it. Lift it from the still-populated compose-form input,
-  // hand it off to the result row, then let form.reset() in
-  // create-another wipe the input on the next round.
-  const passphrase = document.getElementById('passphrase').value || '';
+  // returns it. The submit handler snapshots the value from the input
+  // before awaiting the request and hands it in here, so a user who
+  // edits the field while the request is in flight doesn't end up with
+  // a result screen showing a different value than the server stored.
   const passphraseRow = document.getElementById('result-passphrase-row');
   const passphraseEl = document.getElementById('result-passphrase');
   const passphraseToggle = document.getElementById('toggle-result-passphrase');
@@ -288,6 +294,15 @@ document.getElementById('create-another').addEventListener('click', () => {
   result.hidden = true;
   compose.hidden = false;
   document.getElementById('status-widget').hidden = true;
+  // Wipe the previous passphrase from the result-row's dataset so it
+  // doesn't outlive the visible UI. Without this, a user who clicks
+  // "Create another" and then walks away leaves the previous plaintext
+  // readable via DOM APIs until full page navigation.
+  const passphraseEl = document.getElementById('result-passphrase');
+  passphraseEl.dataset.real = '';
+  passphraseEl.dataset.masked = 'true';
+  passphraseEl.textContent = '';
+  document.getElementById('result-passphrase-row').hidden = true;
   setTab('text');
 });
 
