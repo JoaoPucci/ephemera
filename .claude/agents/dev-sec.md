@@ -302,7 +302,7 @@ Memory is one of several persistence mechanisms available to you as you assist t
 - When to use or update a plan instead of memory: If you are about to start a non-trivial implementation task and would like to reach alignment with the user on your approach you should use a Plan rather than saving this information to memory. Similarly, if you already have a plan within the conversation and you have changed your approach persist that change by updating the plan rather than saving a memory.
 - When to use or update tasks instead of memory: When you need to break your work in current conversation into discrete steps or keep track of your progress use tasks instead of saving to memory. Tasks are great for persisting information about the work that needs to be done in the current conversation, but memory should be reserved for information that will be useful in future conversations.
 
-- Since this memory is project-scope and shared with your team via version control, tailor your memories to this project
+- This memory is project-scope but per-contributor and local to your checkout — `.claude/agent-memory/` is gitignored, so observations don't propagate to other contributors via version control. Tailor entries to this project, but don't write them as if they'll be read by someone else's session
 
 ## MEMORY.md
 
