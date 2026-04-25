@@ -189,12 +189,16 @@ describe('reveal.js — passphrase visibility toggle', () => {
     expect(input.getAttribute('type')).toBe('password');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(toggle.textContent).toBe('show');
+    // aria-label stays at the static (template-rendered) value across clicks
+    // -- aria-pressed carries the state per the ARIA Authoring Practices
+    // toggle pattern. The fixture renders the initial English label.
+    expect(toggle.getAttribute('aria-label')).toBe('show passphrase');
 
     toggle.click();
     expect(input.getAttribute('type')).toBe('text');
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     expect(toggle.textContent).toBe('hide');
-    expect(toggle.getAttribute('aria-label')).toBe('hide passphrase');
+    expect(toggle.getAttribute('aria-label')).toBe('show passphrase');
 
     toggle.click();
     expect(input.getAttribute('type')).toBe('password');

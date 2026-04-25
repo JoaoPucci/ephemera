@@ -790,8 +790,12 @@ button.copy-error:hover {
 }
 
 /* Tighten button -> content gap on the receiver pages, and widen the gap
-   before the "This secret has been destroyed." footer line. */
-#state-ready button,
+   before the "This secret has been destroyed." footer line.
+   Direct-child only so the show/hide toggle nested inside
+   .input-with-action keeps its centerline alignment -- the bare
+   `#state-ready button` form was specific enough to override the
+   .input-action class's `margin: 0` reset. */
+#state-ready > button,
 #state-text .copy-btn {
   margin-top: 0.6rem;
 }
