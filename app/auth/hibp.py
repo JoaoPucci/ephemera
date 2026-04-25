@@ -23,20 +23,11 @@ _DEFAULT_TIMEOUT = 5.0
 def pwned_count(candidate: str, *, timeout: float = _DEFAULT_TIMEOUT) -> int | None:
     """Return the breach count for `candidate`. 0 = not seen in any corpus,
     >0 = appeared N times across known breaches, None = the API could not
-    be reached.
-
-    The argument is named `candidate` rather than `password` on purpose:
-    this function is a generic HIBP API client and the SHA-1 it computes
-    is a wire-protocol field, not a password digest. Password storage in
-    this project lives in app/auth/password.py and uses bcrypt. Callers
-    happen to pass passwords here because that's the only useful query,
-    but the function itself doesn't treat the argument as a credential.
-    """
-    # SHA-1 is the HIBP range API's mandated wire format. Only the first
-    # 5 hex chars of the digest leave the process (k-anonymity); the
-    # remaining suffix is matched locally against the response body.
-    encoded = candidate.encode("utf-8")
-    digest = hashlib.sha1(encoded)
+    be reached."""
+    # SHA-1 is the HIBP range API's wire format; the digest is a query
+    # identifier, not a password hash. Password storage uses bcrypt
+    # (app/auth/password.py).
+    digest = hashlib.sha1(candidate.encode("utf-8"))
     sha1 = digest.hexdigest().upper()
     prefix, suffix = sha1[:5], sha1[5:]
     req = urllib.request.Request(
