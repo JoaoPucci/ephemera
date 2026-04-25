@@ -1,0 +1,83 @@
+# Lint
+#
+# Three fast static-analysis tools running in parallel with the rest of CI:
+#
+#   Ruff         -- Python lint + format + import sort + modernizer
+#                   config in pyproject.toml under [tool.ruff]
+#   Biome        -- JavaScript / CSS lint + format
+#                   config in biome.json at the repo root
+#   shellcheck   -- bash script correctness (no config; defaults are the
+#                   industry standard)
+#   actionlint   -- GitHub Actions workflow correctness (no config)
+#
+# All four finish in seconds on this codebase. They're grouped into a
+# single job because the runner-provisioning cost per job is larger than
+# any of the checks themselves; per-step reporting is still clear via the
+# step names.
+
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # actionlint via reviewdog uses reporter: github-check below, which
+  # writes a separate check run. With `permissions:` declared, every
+  # unspecified scope defaults to `none`, so `checks: write` has to be
+  # named explicitly for the step to be able to post.
+  checks: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Ruff (check + format)
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check --output-format=github
+
+      - name: Ruff format check
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Biome (check)
+        run: ./node_modules/.bin/biome ci --reporter=github
+
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./scripts
+          # ephemera-deploy-entry has no extension but starts with a bash
+          # shebang; pick it up explicitly.
+          additional_files: scripts/deploy/ephemera-deploy-entry
+
+      - name: actionlint
+        uses: reviewdog/action-actionlint@v1
+        with:
+          # github-pr-review has no PR context on push events and would
+          # fail the step on push-to-main runs. github-check works on
+          # both PR and push: it posts findings as a separate check run
+          # rather than PR-inline review comments.
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: error

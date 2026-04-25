@@ -1,0 +1,63 @@
+# pyproject.toml
+#
+# Presently a home for tool config only -- ephemera isn't packaged as a
+# distributable library, so there's no `[project]` table describing an
+# installable artifact. Add one later if that ever changes.
+
+[tool.ruff]
+# 88 columns is Black's default and the prevailing width across the
+# modern Python ecosystem (FastAPI, httpx, pydantic, etc.).
+line-length = 88
+target-version = "py312"
+extend-exclude = [
+  # Keep Ruff off generated / vendored / environment trees.
+  "venv",
+  "node_modules",
+  "app/static/swagger",
+]
+
+[tool.ruff.lint]
+# Rule set modelled on what FastAPI and peers ship:
+#   E, W    pycodestyle (errors and warnings)
+#   F       pyflakes (unused imports, undefined names, etc.)
+#   I       isort (import ordering)
+#   B       flake8-bugbear (common real-world anti-patterns)
+#   UP      pyupgrade (suggest modern syntax for the pinned Python)
+#   SIM     flake8-simplify (obvious boolean / conditional simplifications)
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+ignore = [
+  # E501 (line too long) is delegated to the formatter -- it handles wrapping
+  # when it can, and when it can't (long URLs, long test assertions), failing
+  # the lint doesn't add signal.
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may intentionally keep unused variables for readability
+# (e.g. `alice, bob = make_user("a"), make_user("b")` even if `bob` never
+# appears later in the body). Allow F841 there without loosening it globally.
+"tests/**" = ["F841"]
+"tests-e2e/**" = ["F841"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom is `param: T = Depends(fn)` -- a
+# function call in a default argument, which B008 flags by default.
+# The values returned by these helpers are scoped per-request, so the
+# usual "mutable default shared across calls" risk that B008 targets
+# doesn't apply. List the FastAPI helpers here so Ruff stops flagging
+# the standard pattern.
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Query",
+  "fastapi.Header",
+  "fastapi.Path",
+  "fastapi.Body",
+  "fastapi.Cookie",
+  "fastapi.File",
+  "fastapi.Form",
+  "fastapi.Security",
+]
+
+[tool.ruff.format]
+# Ruff's default format rules already match Black, which is what the
+# existing code was loosely written in. No overrides needed.

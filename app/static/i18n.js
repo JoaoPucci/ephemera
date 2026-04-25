@@ -17,12 +17,16 @@
 // and is CSP-safe.
 (() => {
   const KEY = 'ephemera_lang_v1';
-  const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;  // one year
+  const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // one year
 
   function parseJsonTag(id) {
     const el = document.getElementById(id);
     if (!el) return {};
-    try { return JSON.parse(el.textContent || '{}'); } catch { return {}; }
+    try {
+      return JSON.parse(el.textContent || '{}');
+    } catch {
+      return {};
+    }
   }
 
   const catalog = parseJsonTag('i18n-catalog');
@@ -47,18 +51,18 @@
     // producing empty strings.
     if (!vars) return template;
     return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (m, name) =>
-      name in vars ? String(vars[name]) : m,
+      name in vars ? String(vars[name]) : m
     );
   }
 
   function t(key, vars) {
     const hit = lookup(catalog, key) ?? lookup(fallback, key);
-    if (hit === undefined) return key;   // visible sentinel for missing keys
+    if (hit === undefined) return key; // visible sentinel for missing keys
     return interpolate(hit, vars);
   }
 
-  function readCookie(name) {
-    const prefix = name + '=';
+  function _readCookie(name) {
+    const prefix = `${name}=`;
     for (const p of document.cookie.split('; ')) {
       if (p.startsWith(prefix)) return decodeURIComponent(p.slice(prefix.length));
     }
@@ -66,6 +70,10 @@
   }
 
   function writeCookie(name, value) {
+    // Locale persistence is a simple name=value cookie the server reads on the
+    // next request. Cookie Store API is async and has incomplete Safari
+    // support; plain document.cookie is the correct fit for this narrow use.
+    // biome-ignore lint/suspicious/noDocumentCookie: see note above.
     document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Lax`;
   }
 
@@ -108,7 +116,9 @@
   window.i18n = {
     t,
     setLocale,
-    get currentLocale() { return activeLocale; },
+    get currentLocale() {
+      return activeLocale;
+    },
   };
 
   if (document.readyState === 'loading') {

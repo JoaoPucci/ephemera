@@ -1,8 +1,8 @@
 """Constants, exception types, and datetime helpers shared by every auth
 submodule. Kept underscore-prefixed so the public `app.auth` namespace stays
 focused on the per-concern functions."""
-from datetime import datetime, timezone
 
+from datetime import UTC, datetime
 
 # ----------------------------------------------------------------------------
 # Tuning knobs
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 BCRYPT_ROUNDS = 12
 TOTP_DIGITS = 6
 TOTP_INTERVAL = 30
-TOTP_STEP_TOLERANCE = 1          # accept current step +/- 1
+TOTP_STEP_TOLERANCE = 1  # accept current step +/- 1
 # Cumulative-since-last-success counter; a successful login resets it to 0.
 # There is NO rolling-window decay -- 10 failures spread over a month still
 # trip the lockout. Acceptable at this scale because the rescue path (admin
@@ -21,7 +21,7 @@ TOTP_STEP_TOLERANCE = 1          # accept current step +/- 1
 MAX_FAILURES = 10
 LOCKOUT_DURATION_SECONDS = 60 * 60
 RECOVERY_CODE_COUNT = 10
-RECOVERY_CODE_LENGTH = 10         # visible chars (base32), grouped XXXXX-XXXXX
+RECOVERY_CODE_LENGTH = 10  # visible chars (base32), grouped XXXXX-XXXXX
 
 
 # ----------------------------------------------------------------------------
@@ -47,8 +47,8 @@ class LockoutError(AuthError):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_iso(s: str) -> datetime:
-    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)

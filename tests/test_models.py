@@ -1,5 +1,7 @@
 """Tests for app.models: CRUD, expiry queries, tracking behavior, user scoping."""
-from datetime import datetime, timedelta, timezone
+
+import sqlite3
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -7,7 +9,7 @@ from app import models
 
 
 def _utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso(dt: datetime) -> str:
@@ -263,7 +265,7 @@ def test_cancel_receiver_url_stops_working(provisioned_user):
 
 def test_clear_non_pending_tracked_removes_only_non_live(provisioned_user):
     uid = provisioned_user["id"]
-    live = _mk(uid, track=True)                           # pending, live
+    live = _mk(uid, track=True)  # pending, live
     viewed = _mk(uid, track=True)
     models.mark_viewed(viewed["id"])
     burned = _mk(uid, track=True)
@@ -321,6 +323,7 @@ def test_untrack_scopes_by_user(provisioned_user, make_user):
 def test_cascade_on_delete_user_drops_their_secrets_and_tokens(provisioned_user):
     r = _mk(provisioned_user["id"], track=True)
     from app import auth
+
     _, digest = auth.mint_api_token()
     models.create_token(user_id=provisioned_user["id"], name="t1", token_hash=digest)
 
@@ -336,6 +339,7 @@ def test_cascade_on_delete_user_drops_their_secrets_and_tokens(provisioned_user)
 
 def test_user_count_and_lookup_by_username(tmp_db_path):
     from app import auth
+
     assert models.user_count() == 0
     uid = models.create_user(
         username="alice",
@@ -351,13 +355,14 @@ def test_user_count_and_lookup_by_username(tmp_db_path):
 
 def test_username_is_unique(tmp_db_path):
     from app import auth
+
     models.create_user(
         username="alice",
         password_hash=auth.hash_password("pw12345678"),
         totp_secret=auth.generate_totp_secret(),
         recovery_code_hashes="[]",
     )
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.IntegrityError):
         models.create_user(
             username="alice",
             password_hash=auth.hash_password("pw12345678"),
@@ -459,6 +464,7 @@ def test_fresh_db_is_stamped_to_current_schema_version(tmp_db_path):
     """init_db on a fresh DB must leave schema_version at CURRENT_SCHEMA_VERSION;
     a later boot can then compare and refuse downgrade."""
     import sqlite3
+
     from app.models._core import CURRENT_SCHEMA_VERSION
 
     with sqlite3.connect(tmp_db_path) as conn:
@@ -471,6 +477,7 @@ def test_init_db_is_idempotent_across_reruns(tmp_db_path):
     """Running init_db a second time must not regress the version or duplicate
     the single schema_version row (the CHECK constraint would reject)."""
     import sqlite3
+
     from app.models._core import CURRENT_SCHEMA_VERSION
 
     models.init_db()  # second run
@@ -485,7 +492,9 @@ def test_init_db_refuses_to_run_against_newer_schema(tmp_db_path):
     migrated. We'd rather fail loudly than quietly query with an assumed-
     older column layout."""
     import sqlite3
+
     import pytest
+
     from app.models._core import CURRENT_SCHEMA_VERSION, SchemaVersionError
 
     with sqlite3.connect(tmp_db_path) as conn:
@@ -536,6 +545,7 @@ def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
     monkeypatch.setenv("EPHEMERA_DB_PATH", str(legacy_db))
     monkeypatch.setenv("EPHEMERA_SECRET_KEY", "k")
     from app import config
+
     config.get_settings.cache_clear()
 
     models.init_db()
@@ -552,7 +562,9 @@ def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
     # Legacy DB had no schema_version table. The upgrade must stamp it to
     # CURRENT so subsequent boots compare against a known value.
     import sqlite3
+
     from app.models._core import CURRENT_SCHEMA_VERSION
+
     with sqlite3.connect(legacy_db) as conn:
         (stamped,) = conn.execute(
             "SELECT version FROM schema_version WHERE id = 1"

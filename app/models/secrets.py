@@ -1,9 +1,9 @@
 """Operations on the `secrets` table: create, read, reveal, burn, cancel,
 expire, purge, and the tracked-list views."""
+
 import secrets as _secrets  # stdlib; aliased to avoid shadowing this module's name
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from ._core import _connect, _iso, _row_to_dict, _utcnow
 
@@ -12,13 +12,13 @@ def create_secret(
     *,
     user_id: int,
     content_type: str,
-    mime_type: Optional[str],
+    mime_type: str | None,
     ciphertext: bytes,
     server_key: bytes,
-    passphrase_hash: Optional[str],
+    passphrase_hash: str | None,
     track: bool,
     expires_in: int,
-    label: Optional[str] = None,
+    label: str | None = None,
 ) -> dict:
     now = _utcnow()
     sid = str(uuid.uuid4())
@@ -34,13 +34,30 @@ def create_secret(
                                  label, created_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
             """,
-            (sid, user_id, token, server_key, ciphertext, content_type, mime_type,
-             passphrase_hash, int(bool(track)), label, created_at, expires_at),
+            (
+                sid,
+                user_id,
+                token,
+                server_key,
+                ciphertext,
+                content_type,
+                mime_type,
+                passphrase_hash,
+                int(bool(track)),
+                label,
+                created_at,
+                expires_at,
+            ),
         )
-    return {"id": sid, "token": token, "created_at": created_at, "expires_at": expires_at}
+    return {
+        "id": sid,
+        "token": token,
+        "created_at": created_at,
+        "expires_at": expires_at,
+    }
 
 
-def get_by_token(token: str) -> Optional[dict]:
+def get_by_token(token: str) -> dict | None:
     """Lookup by the URL-facing token. Intentionally not user-scoped: the receiver
     has no user identity and must be able to reach their secret via the link."""
     with _connect() as conn:
@@ -48,7 +65,7 @@ def get_by_token(token: str) -> Optional[dict]:
     return _row_to_dict(row) if row else None
 
 
-def get_by_id(sid: str, user_id: int) -> Optional[dict]:
+def get_by_id(sid: str, user_id: int) -> dict | None:
     """Lookup by server UUID, scoped to one user.
 
     user_id is required (was Optional with a None-bypass before; a future
@@ -170,7 +187,7 @@ def increment_attempts(sid: str) -> int:
     return int(row["attempts"]) if row else 0
 
 
-def get_status(sid: str, user_id: int) -> Optional[dict]:
+def get_status(sid: str, user_id: int) -> dict | None:
     """Return status metadata for a tracked secret that belongs to this user."""
     with _connect() as conn:
         row = conn.execute(
@@ -189,7 +206,9 @@ def get_status(sid: str, user_id: int) -> Optional[dict]:
 
 
 def is_expired(row: dict) -> bool:
-    expires_at = datetime.strptime(row["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    expires_at = datetime.strptime(row["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=UTC
+    )
     return _utcnow() >= expires_at
 
 

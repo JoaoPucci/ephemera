@@ -5,10 +5,10 @@ import { copyWithFeedback } from './copy.js';
 const token = window.location.pathname.split('/').pop();
 const states = {
   loading: document.getElementById('state-loading'),
-  ready:   document.getElementById('state-ready'),
-  text:    document.getElementById('state-text'),
-  image:   document.getElementById('state-image'),
-  gone:    document.getElementById('state-gone'),
+  ready: document.getElementById('state-ready'),
+  text: document.getElementById('state-text'),
+  image: document.getElementById('state-image'),
+  gone: document.getElementById('state-gone'),
 };
 const passphraseWrap = document.getElementById('passphrase-wrap');
 const passphraseInput = document.getElementById('passphrase');
@@ -26,15 +26,14 @@ if (passphraseInput && passphraseToggle) {
     passphraseInput.setAttribute('type', showing ? 'password' : 'text');
     passphraseToggle.textContent = showing ? 'show' : 'hide';
     passphraseToggle.setAttribute('aria-pressed', String(!showing));
-    passphraseToggle.setAttribute(
-      'aria-label',
-      showing ? 'show passphrase' : 'hide passphrase',
-    );
+    passphraseToggle.setAttribute('aria-label', showing ? 'show passphrase' : 'hide passphrase');
   });
 }
 
 function show(name) {
-  Object.entries(states).forEach(([k, el]) => (el.hidden = k !== name));
+  for (const [k, el] of Object.entries(states)) {
+    el.hidden = k !== name;
+  }
 }
 
 async function init() {
@@ -155,10 +154,16 @@ function wireZoom(thumb, src) {
 
   thumb.addEventListener('click', open);
   thumb.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      open();
+    }
   });
   overlay.addEventListener('click', close);
-  closeBtn.addEventListener('click', (e) => { e.stopPropagation(); close(); });
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    close();
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !overlay.hidden) close();
   });

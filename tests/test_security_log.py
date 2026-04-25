@@ -1,4 +1,6 @@
 """Tests for the structured security audit log."""
+
+import contextlib
 import json
 import logging
 
@@ -10,10 +12,8 @@ def _events(caplog):
     for rec in caplog.records:
         if rec.name != "ephemera.security":
             continue
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             out.append(json.loads(rec.message))
-        except (ValueError, TypeError):
-            pass
     return out
 
 
@@ -92,9 +92,7 @@ def test_login_failure_wrong_password_emits_event_with_reason(
     assert failures[0]["username"] == provisioned_user["username"]
 
 
-def test_login_failure_unknown_user_emits_event_without_user_id(
-    client, audit_caplog
-):
+def test_login_failure_unknown_user_emits_event_without_user_id(client, audit_caplog):
     r = client.post(
         "/send/login",
         data={"username": "ghost", "password": "nope", "code": "000000"},
@@ -150,9 +148,7 @@ def _create_and_get_reveal_parts(client, auth_headers, passphrase=None):
     return sid, token, frag
 
 
-def test_reveal_success_emits_event_with_secret_id(
-    client, auth_headers, audit_caplog
-):
+def test_reveal_success_emits_event_with_secret_id(client, auth_headers, audit_caplog):
     sid, token, frag = _create_and_get_reveal_parts(client, auth_headers)
     r = client.post(
         f"/s/{token}/reveal",
@@ -161,10 +157,7 @@ def test_reveal_success_emits_event_with_secret_id(
     )
     assert r.status_code == 200
     events = _events(audit_caplog)
-    assert any(
-        e["event"] == "reveal.success" and e["secret_id"] == sid
-        for e in events
-    )
+    assert any(e["event"] == "reveal.success" and e["secret_id"] == sid for e in events)
 
 
 def test_reveal_wrong_passphrase_emits_event_with_attempts(
@@ -202,14 +195,11 @@ def test_secret_canceled_emits_event(client, auth_headers, audit_caplog):
     assert c.status_code == 204
     events = _events(audit_caplog)
     assert any(
-        e["event"] == "secret.canceled" and e["secret_id"] == sid
-        for e in events
+        e["event"] == "secret.canceled" and e["secret_id"] == sid for e in events
     )
 
 
-def test_tracked_cleared_emits_event_with_count(
-    client, auth_headers, audit_caplog
-):
+def test_tracked_cleared_emits_event_with_count(client, auth_headers, audit_caplog):
     # Create one tracked secret and consume it so the clear actually removes something.
     r = client.post(
         "/api/secrets",
@@ -220,7 +210,8 @@ def test_tracked_cleared_emits_event_with_count(
     url = r.json()["url"]
     token, frag = url.rsplit("/", 1)[-1].split("#", 1)
     client.post(
-        f"/s/{token}/reveal", json={"key": frag},
+        f"/s/{token}/reveal",
+        json={"key": frag},
         headers={"Origin": "http://testserver"},
     )
     resp = client.post("/api/secrets/tracked/clear", headers=auth_headers)

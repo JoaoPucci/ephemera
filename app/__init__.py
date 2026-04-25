@@ -1,6 +1,7 @@
 """Ephemera FastAPI app factory."""
+
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -9,12 +10,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import get_settings
 from . import cleanup, models
+from .config import get_settings
 from .dependencies import verify_api_token_or_session
 from .i18n import current_locale, resolve_locale
 from .routes import prefs, receiver, sender
-
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -31,34 +31,38 @@ TEMPLATES.env.add_extension("jinja2.ext.i18n")
 # two non-'self' sources are (1) `data:` images for the reveal payload and
 # the inline SVG chevrons in style.css, and (2) base-uri/form-action pinned
 # to 'self' to blunt <base href> and form-repoint attacks.
-CSP = "; ".join([
-    "default-src 'none'",
-    "script-src 'self'",
-    "style-src 'self'",
-    "img-src 'self' data:",
-    "connect-src 'self'",
-    "font-src 'self'",
-    "manifest-src 'self'",
-    "frame-ancestors 'none'",
-    "form-action 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-])
+CSP = "; ".join(
+    [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "font-src 'self'",
+        "manifest-src 'self'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+    ]
+)
 
 # Camera/mic/geo/payment/USB/sensors aren't used anywhere. An empty allow-list
 # is the cheapest defence-in-depth against a future regression that quietly
 # adds such an API.
-PERMISSIONS_POLICY = ", ".join([
-    "camera=()",
-    "microphone=()",
-    "geolocation=()",
-    "payment=()",
-    "usb=()",
-    "accelerometer=()",
-    "gyroscope=()",
-    "magnetometer=()",
-    "interest-cohort=()",
-])
+PERMISSIONS_POLICY = ", ".join(
+    [
+        "camera=()",
+        "microphone=()",
+        "geolocation=()",
+        "payment=()",
+        "usb=()",
+        "accelerometer=()",
+        "gyroscope=()",
+        "magnetometer=()",
+        "interest-cohort=()",
+    ]
+)
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": CSP,
@@ -84,10 +88,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 def create_app() -> FastAPI:

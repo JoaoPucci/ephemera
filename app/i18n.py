@@ -26,19 +26,19 @@ request, so module-level constants (validator messages, schema field
 descriptions) evaluate in the right locale at str()-coerce time without
 the caller having to thread a Request through.
 """
+
 from __future__ import annotations
 
 import contextvars
 import json
-from functools import lru_cache
+from collections.abc import Callable
+from functools import cache, lru_cache
 from pathlib import Path
-from typing import Callable, Optional
 
 from babel import Locale
 from babel.core import UnknownLocaleError
 from babel.support import LazyProxy, Translations
 from fastapi import Request
-
 
 DEFAULT: str = "en"
 
@@ -173,7 +173,7 @@ current_locale: contextvars.ContextVar[str] = contextvars.ContextVar(
 # ---------------------------------------------------------------------------
 
 
-def _validate(tag: Optional[str]) -> Optional[str]:
+def _validate(tag: str | None) -> str | None:
     """Return the canonical SUPPORTED form of a candidate tag (case-
     insensitive), or None if it isn't supported."""
     if not tag:
@@ -209,7 +209,7 @@ _CHINESE_ROUTING: dict[str, str] = {
 }
 
 
-def negotiate(accept_language: Optional[str]) -> str:
+def negotiate(accept_language: str | None) -> str:
     """Best-match a SUPPORTED locale from an Accept-Language header. Scans
     entries in order (browsers emit the preferred locale first) and returns
     the first exact-or-aliased-or-primary-subtag hit. No q-value weighting
@@ -284,7 +284,7 @@ def get_locale(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=None)
+@cache
 def _translations_for(posix: str) -> Translations:
     """Load the gettext catalog for a POSIX locale. Cached forever -- messages
     don't change at runtime. A missing .mo yields Babel's null Translations,
@@ -316,7 +316,7 @@ def lazy_gettext(message: str) -> LazyProxy:
     return LazyProxy(_resolve_lazy, message, enable_cache=False)
 
 
-@lru_cache(maxsize=None)
+@cache
 def js_catalog(locale: str) -> dict:
     """Load the JS-side JSON catalog for a locale, falling back to an empty
     dict when the file is missing or malformed. The English catalog is the

@@ -12,10 +12,10 @@ endpoint with `response_model=...`. FastAPI then:
 Keep this module small and import-only. No I/O, no DB access. Route-specific
 logic stays in `app/routes/`.
 """
-from typing import Literal, Optional, Union
+
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
-
 
 # Exposed here because it drives validation of CreateTextSecret.expires_in
 # (and the equivalent multipart path in the create route handles the same set).
@@ -32,10 +32,12 @@ class CreateTextSecret(BaseModel):
 
     content: str = Field(min_length=1, max_length=1_000_000)
     content_type: Literal["text"]
-    expires_in: int = Field(description="Seconds from now. Must be one of EXPIRY_PRESETS.")
-    passphrase: Optional[str] = Field(default=None, max_length=200)
+    expires_in: int = Field(
+        description="Seconds from now. Must be one of EXPIRY_PRESETS."
+    )
+    passphrase: str | None = Field(default=None, max_length=200)
     track: bool = False
-    label: Optional[str] = Field(default=None, max_length=60)
+    label: str | None = Field(default=None, max_length=60)
 
     @field_validator("expires_in")
     @classmethod
@@ -48,8 +50,12 @@ class CreateTextSecret(BaseModel):
 class RevealBody(BaseModel):
     """JSON body for POST /s/{token}/reveal."""
 
-    key: str = Field(min_length=1, max_length=256, description="Client half of the Fernet key (base64url).")
-    passphrase: Optional[str] = Field(default=None, max_length=200)
+    key: str = Field(
+        min_length=1,
+        max_length=256,
+        description="Client half of the Fernet key (base64url).",
+    )
+    passphrase: str | None = Field(default=None, max_length=200)
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +75,7 @@ class LogoutResponse(BaseModel):
 class ApiMeResponse(BaseModel):
     id: int
     username: str
-    email: Optional[str] = None
+    email: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -87,18 +93,18 @@ class SecretStatusResponse(BaseModel):
     status: Literal["pending", "viewed", "burned", "canceled", "expired"]
     created_at: str
     expires_at: str
-    viewed_at: Optional[str] = None
+    viewed_at: str | None = None
 
 
 class TrackedSecretItem(BaseModel):
     id: str
     content_type: Literal["text", "image"]
-    mime_type: Optional[str] = None
-    label: Optional[str] = None
+    mime_type: str | None = None
+    label: str | None = None
     status: Literal["pending", "viewed", "burned", "canceled", "expired"]
     created_at: str
     expires_at: str
-    viewed_at: Optional[str] = None
+    viewed_at: str | None = None
 
 
 class TrackedListResponse(BaseModel):
@@ -131,4 +137,4 @@ class RevealImageResponse(BaseModel):
 
 # Discriminated union: the client switches on content_type to know which
 # fields to expect. FastAPI serializes this correctly at the boundary.
-RevealResponse = Union[RevealTextResponse, RevealImageResponse]
+RevealResponse = RevealTextResponse | RevealImageResponse

@@ -5,8 +5,13 @@
   const KEY = 'ephemera_theme_v1';
 
   function systemPref() {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark' : 'light';
+    // Both `?.` are load-bearing: the first guards the function call (older
+    // browsers / test runtimes may not expose matchMedia); the second guards
+    // the property access (the call returns undefined on those same
+    // environments, so reading `.matches` directly would throw TypeError
+    // and abort theme init). Falsy result = light fallback, which is what
+    // we want when prefs can't be detected.
+    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
   }
 
   function current() {

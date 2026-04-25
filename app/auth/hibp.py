@@ -11,21 +11,24 @@ degrade to "couldn't check, skipping" rather than blocking password
 setup on an offline host. The online behaviour is to reject on a >0
 count.
 """
+
 import hashlib
 import urllib.error
 import urllib.request
-from typing import Optional
-
 
 _HIBP_RANGE_URL = "https://api.pwnedpasswords.com/range/{}"
 _DEFAULT_TIMEOUT = 5.0
 
 
-def pwned_count(password: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Optional[int]:
-    """Return the breach count for `password`. 0 = not seen in any corpus,
+def pwned_count(candidate: str, *, timeout: float = _DEFAULT_TIMEOUT) -> int | None:
+    """Return the breach count for `candidate`. 0 = not seen in any corpus,
     >0 = appeared N times across known breaches, None = the API could not
     be reached."""
-    sha1 = hashlib.sha1(password.encode("utf-8")).hexdigest().upper()
+    # SHA-1 is the HIBP range API's wire format; the digest is a query
+    # identifier, not a password hash. Password storage uses bcrypt
+    # (app/auth/password.py).
+    digest = hashlib.sha1(candidate.encode("utf-8"))
+    sha1 = digest.hexdigest().upper()
     prefix, suffix = sha1[:5], sha1[5:]
     req = urllib.request.Request(
         _HIBP_RANGE_URL.format(prefix),

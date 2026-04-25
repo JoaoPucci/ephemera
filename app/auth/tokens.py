@@ -1,11 +1,10 @@
 """API tokens: DB-backed, per-user, revocable. Replaces the old static
 EPHEMERA_API_KEY env var. Only SHA-256(plaintext) is stored server-side."""
+
 import hashlib
 import secrets
-from typing import Optional
 
 from .. import models
-
 
 TOKEN_PREFIX = "eph_"
 
@@ -18,7 +17,7 @@ def mint_api_token() -> tuple[str, str]:
     return plaintext, digest
 
 
-def lookup_api_token(plaintext: str) -> Optional[dict]:
+def lookup_api_token(plaintext: str) -> dict | None:
     """Return the token row (with user_id) if valid; None otherwise.
 
     On hit, touches last_used_at.

@@ -11,6 +11,7 @@
     "test": "npm run test:unit && npm run test:e2e"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.13",
     "@playwright/test": "^1.48.0",
     "jsdom": "^29.0.2",
     "otplib": "^13.4.0",

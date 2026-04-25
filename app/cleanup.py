@@ -1,11 +1,11 @@
 """Background cleanup: purge expired secrets, old tracked metadata,
 and aged-out rate-limiter buckets."""
+
 import asyncio
 import logging
 
-from .config import get_settings
 from . import limiter, models
-
+from .config import get_settings
 
 log = logging.getLogger("ephemera.cleanup")
 
@@ -19,7 +19,8 @@ def run_once() -> tuple[int, int, int]:
     # the limiter once and never returns (the in-check lazy GC handles
     # returning IPs; this handles the never-returning case).
     evicted = sum(
-        lim.sweep() for lim in (
+        lim.sweep()
+        for lim in (
             limiter.reveal_limiter,
             limiter.login_limiter,
             limiter.create_limiter,
@@ -29,7 +30,9 @@ def run_once() -> tuple[int, int, int]:
     if expired or tracked or evicted:
         log.info(
             "cleanup purged expired=%d tracked=%d limiter-evicted=%d",
-            expired, tracked, evicted,
+            expired,
+            tracked,
+            evicted,
         )
     return expired, tracked, evicted
 

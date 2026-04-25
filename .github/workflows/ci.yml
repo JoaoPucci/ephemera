@@ -207,7 +207,13 @@ jobs:
           matches=$(printf '%s\n' "$files" | grep -E "$forbidden_re" || true)
           if [[ -n "$matches" ]]; then
             echo "::error::Forbidden filename(s) in diff:"
-            printf '  %s\n' $matches
+            # Read line-by-line so we never word-split filenames that could
+            # contain spaces. Quoting "$matches" through printf alone would
+            # collapse the list onto one line; this loop preserves both
+            # safety (no SC2086 unquoted expansion) and per-line formatting.
+            while IFS= read -r m; do
+              printf '  %s\n' "$m"
+            done <<< "$matches"
             echo ""
             echo "These names are on the commit-time blocklist because they"
             echo "almost always contain secrets or local state. If this is a"

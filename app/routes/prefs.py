@@ -7,7 +7,6 @@ client-side JS writes before issuing the request. The picker widget in
 i18n.js short-circuits the network call when no session is present, so
 the 401 path is only taken on malicious or misconfigured callers.
 """
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel
@@ -17,12 +16,11 @@ from ..errors import http_error
 from ..i18n import SUPPORTED
 from ..models import users as users_model
 
-
 router = APIRouter()
 
 
 class LanguagePatch(BaseModel):
-    language: Optional[str] = None
+    language: str | None = None
 
 
 @router.patch("/api/me/language", status_code=204)

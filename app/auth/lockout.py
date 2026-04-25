@@ -1,13 +1,13 @@
 """Per-user failure tracking + lockout. After MAX_FAILURES wrong attempts,
 the account is locked for LOCKOUT_DURATION_SECONDS; any success resets."""
+
 from datetime import timedelta
-from typing import Optional
 
 from .. import models
 from ._core import (
     LOCKOUT_DURATION_SECONDS,
-    LockoutError,
     MAX_FAILURES,
+    LockoutError,
     _parse_iso,
     _utcnow,
 )
@@ -20,7 +20,7 @@ def check_not_locked(user: dict) -> None:
             raise LockoutError(user["lockout_until"])
 
 
-def record_failure(user: dict) -> Optional[str]:
+def record_failure(user: dict) -> str | None:
     """Tick the failure counter; if it crosses MAX_FAILURES, lock the account
     and return the ISO `lockout_until` string. Returns None otherwise.
 
@@ -28,7 +28,7 @@ def record_failure(user: dict) -> Optional[str]:
     DB state change happens either way."""
     new_attempts = int(user.get("failed_attempts", 0)) + 1
     updates = {"failed_attempts": new_attempts}
-    lockout_until: Optional[str] = None
+    lockout_until: str | None = None
     if new_attempts >= MAX_FAILURES:
         until = _utcnow() + timedelta(seconds=LOCKOUT_DURATION_SECONDS)
         lockout_until = until.strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -16,10 +16,8 @@ session, which silently breaks anyone who string-matches on the English
 text. Routing translation through the JS layer keeps the server's JSON
 shape locale-independent.
 """
-from typing import Optional
 
 from fastapi import HTTPException
-
 
 ERROR_MESSAGES: dict[str, str] = {
     # Auth / session / CSRF
@@ -60,7 +58,7 @@ def http_error(
     status_code: int,
     code: str,
     *,
-    message: Optional[str] = None,
+    message: str | None = None,
     **extra,
 ) -> HTTPException:
     """Build an HTTPException with the standard {code, message, **extra}

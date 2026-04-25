@@ -29,14 +29,13 @@ password, totp_code, server_key, ciphertext, recovery codes, api-token
 plaintext. Field values are logged verbatim; the filter is at the
 call-site.
 """
+
 import json
 import logging
 import sys
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import Request
-
 
 # Uvicorn's default LOGGING_CONFIG only configures `uvicorn`, `uvicorn.error`,
 # and `uvicorn.access`; it leaves the root logger with no handler. Records
@@ -53,7 +52,7 @@ _EPHEMERA_ROOT.setLevel(logging.INFO)
 if not any(getattr(h, "_ephemera_installed", False) for h in _EPHEMERA_ROOT.handlers):
     _handler = logging.StreamHandler(sys.stderr)
     _handler.setFormatter(logging.Formatter("%(message)s"))
-    setattr(_handler, "_ephemera_installed", True)
+    _handler._ephemera_installed = True
     _EPHEMERA_ROOT.addHandler(_handler)
 
 
@@ -63,14 +62,14 @@ _logger = logging.getLogger("ephemera.security")
 def emit(event: str, **fields) -> None:
     """Write one structured security event as a single JSON line."""
     payload = {
-        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "event": event,
         **fields,
     }
     _logger.info(json.dumps(payload, default=str, separators=(",", ":")))
 
 
-def client_ip(request: Optional[Request]) -> str:
+def client_ip(request: Request | None) -> str:
     """Best-effort client IP for an HTTP event. Returns 'cli' for off-request
     contexts (admin CLI) and 'unknown' if the request has no client tuple."""
     if request is None:

@@ -3,6 +3,7 @@
 Stdin prompts are stubbed via monkeypatch; sys.exit raises SystemExit
 which we catch with pytest.raises.
 """
+
 import pytest
 
 from app import admin, models
@@ -30,7 +31,9 @@ def test_force_removal_rejects_empty_username(provisioned_user, monkeypatch, cap
     assert "empty" in capsys.readouterr().err.lower()
 
 
-def test_force_removal_rejects_unknown_authenticator(provisioned_user, monkeypatch, capsys):
+def test_force_removal_rejects_unknown_authenticator(
+    provisioned_user, monkeypatch, capsys
+):
     """Typing a username that doesn't exist fails fast."""
     _patch_input(monkeypatch, "ghost-nobody-here")
     with pytest.raises(SystemExit) as exc:
@@ -44,7 +47,9 @@ def test_force_removal_reauths_as_named_user(provisioned_user, make_user, monkey
     bob = make_user("bob")
     _patch_input(monkeypatch, "bob")
     reauth_calls = []
-    monkeypatch.setattr(admin, "_reauth", lambda user: reauth_calls.append(user["username"]))
+    monkeypatch.setattr(
+        admin, "_reauth", lambda user: reauth_calls.append(user["username"])
+    )
     admin._reauth_for_force_removal(provisioned_user)
     assert reauth_calls == ["bob"]
 
@@ -64,7 +69,14 @@ def test_prompt_new_password_rejects_pwned_password(monkeypatch, capsys):
     from app import admin
     from app.auth import hibp
 
-    passwords = iter(["breachedpwned1!", "breachedpwned1!", "freshphrase-unique", "freshphrase-unique"])
+    passwords = iter(
+        [
+            "breachedpwned1!",
+            "breachedpwned1!",
+            "freshphrase-unique",
+            "freshphrase-unique",
+        ]
+    )
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: next(passwords))
     counts = iter([99999, 0])
     monkeypatch.setattr(hibp, "pwned_count", lambda p, **kw: next(counts))
@@ -97,7 +109,9 @@ def test_remove_user_with_force_deletes_target_and_cascades(
     """End-to-end in force mode: target is dropped, cascade fires, other user survives."""
     bob = make_user("bob")
     _patch_input(monkeypatch, "bob")
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)  # skip password/TOTP prompt
+    monkeypatch.setattr(
+        admin, "_reauth", lambda user: None
+    )  # skip password/TOTP prompt
 
     # Give the target something to cascade.
     created = models.create_secret(
@@ -170,9 +184,14 @@ def test_diagnose_defaults_show_secret_false_when_called_via_main(
 def test_diagnose_main_recognises_show_secret_flag(provisioned_user, capsys):
     """Dispatcher strips --show-secret from argv (so the arity check
     doesn't see it as a positional) and passes show_secret=True."""
-    admin.main([
-        "diagnose", "--user", provisioned_user["username"], "--show-secret",
-    ])
+    admin.main(
+        [
+            "diagnose",
+            "--user",
+            provisioned_user["username"],
+            "--show-secret",
+        ]
+    )
     out = capsys.readouterr().out
 
     assert provisioned_user["totp_secret"] in out

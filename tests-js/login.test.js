@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushAsync, jsonResponse, loadModule, neverResolveFetch } from './helpers.js';
 
 function mountLoginForm() {
@@ -37,9 +37,9 @@ function submitBtn() {
 }
 
 function submitForm() {
-  document.getElementById('login-form').dispatchEvent(
-    new Event('submit', { cancelable: true, bubbles: true })
-  );
+  document
+    .getElementById('login-form')
+    .dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
 }
 
 describe('login.js — submit in-flight guard', () => {
@@ -184,7 +184,7 @@ describe('login.js — recovery-code input masking', () => {
     const codeToggle = document.getElementById('toggle-code');
 
     toggleCodeMode.click(); // recovery mode
-    codeToggle.click();     // unmasked
+    codeToggle.click(); // unmasked
     expect(codeToggle.getAttribute('aria-pressed')).toBe('true');
 
     toggleCodeMode.click(); // back to TOTP

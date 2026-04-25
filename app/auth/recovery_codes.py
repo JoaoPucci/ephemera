@@ -5,15 +5,14 @@ Stored as a JSON list on the user row: each entry is
 On consumption, we flip `used_at` on the matching entry and return the new
 JSON so the caller can persist it.
 """
+
 import json
 import secrets
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import bcrypt
 
 from ._core import BCRYPT_ROUNDS, RECOVERY_CODE_COUNT, RECOVERY_CODE_LENGTH
-
 
 _RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
 
@@ -26,14 +25,21 @@ _DUMMY_BCRYPT_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS
 
 
 def _random_recovery_code() -> str:
-    raw = "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(RECOVERY_CODE_LENGTH))
+    raw = "".join(
+        secrets.choice(_RECOVERY_ALPHABET) for _ in range(RECOVERY_CODE_LENGTH)
+    )
     return raw[:5] + "-" + raw[5:]
 
 
 def generate_recovery_codes() -> tuple[list[str], str]:
     codes = [_random_recovery_code() for _ in range(RECOVERY_CODE_COUNT)]
     hashes = [
-        {"hash": bcrypt.hashpw(c.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode(), "used_at": None}
+        {
+            "hash": bcrypt.hashpw(
+                c.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+            ).decode(),
+            "used_at": None,
+        }
         for c in codes
     ]
     return codes, json.dumps(hashes)
@@ -46,7 +52,7 @@ def _normalize_backup_code(code: str) -> str:
     return code
 
 
-def consume_backup_code(code: str, stored_json: str) -> Optional[str]:
+def consume_backup_code(code: str, stored_json: str) -> str | None:
     """Mark the matching code as used and return the updated JSON; or None if
     the code doesn't match / was already used / the JSON is malformed.
 
@@ -66,9 +72,9 @@ def consume_backup_code(code: str, stored_json: str) -> Optional[str]:
         return None
     if not isinstance(entries, list):
         return None
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    matched_index: Optional[int] = None
+    matched_index: int | None = None
     code_bytes = code.encode()
 
     for i, entry in enumerate(entries):

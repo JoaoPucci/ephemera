@@ -11,7 +11,9 @@ const codeToggleBtn = document.getElementById('toggle-code');
 // Browsers often restore form values on reload. A TOTP code is one-shot
 // by definition, so wipe it on page load. Also wipe if the page is
 // restored from the bfcache (back button).
-const clearOneShotFields = () => { codeInput.value = ''; };
+const clearOneShotFields = () => {
+  codeInput.value = '';
+};
 clearOneShotFields();
 window.addEventListener('pageshow', clearOneShotFields);
 
@@ -31,7 +33,7 @@ pwToggle.addEventListener('click', () => {
   pwToggle.setAttribute('aria-pressed', String(!showing));
   pwToggle.setAttribute(
     'aria-label',
-    window.i18n.t(showing ? 'login.aria_show_password' : 'login.aria_hide_password'),
+    window.i18n.t(showing ? 'login.aria_show_password' : 'login.aria_hide_password')
   );
 });
 
@@ -82,7 +84,7 @@ if (codeToggleBtn) {
     codeToggleBtn.setAttribute('aria-pressed', String(!showing));
     codeToggleBtn.setAttribute(
       'aria-label',
-      window.i18n.t(showing ? 'login.aria_show_code' : 'login.aria_hide_code'),
+      window.i18n.t(showing ? 'login.aria_show_code' : 'login.aria_hide_code')
     );
   });
 }
@@ -127,9 +129,11 @@ form.addEventListener('submit', async (e) => {
   }
   if (res.status === 423) {
     const data = await res.json().catch(() => ({}));
-    const until = data.detail && data.detail.until;
+    const until = data.detail?.until;
     err.textContent = until
-      ? window.i18n.t('error.locked_with_until', { until: new Date(until).toLocaleString(window.i18n.currentLocale) })
+      ? window.i18n.t('error.locked_with_until', {
+          until: new Date(until).toLocaleString(window.i18n.currentLocale),
+        })
       : window.i18n.t('error.locked');
   } else if (res.status === 429) {
     err.textContent = window.i18n.t('error.too_many_attempts');
