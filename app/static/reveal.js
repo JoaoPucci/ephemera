@@ -24,9 +24,11 @@ if (passphraseInput && passphraseToggle) {
   passphraseToggle.addEventListener('click', () => {
     const showing = passphraseInput.getAttribute('type') === 'text';
     passphraseInput.setAttribute('type', showing ? 'password' : 'text');
-    passphraseToggle.textContent = showing ? 'show' : 'hide';
+    passphraseToggle.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
     passphraseToggle.setAttribute('aria-pressed', String(!showing));
-    passphraseToggle.setAttribute('aria-label', showing ? 'show passphrase' : 'hide passphrase');
+    // aria-label stays at its template-rendered (gettext) value; aria-pressed
+    // carries the state per the ARIA Authoring Practices toggle pattern, so
+    // screen readers don't need a label swap.
   });
 }
 
