@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-24 04:11+0900\n"
+"POT-Creation-Date: 2026-04-26 00:53+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: ko\n"
@@ -18,40 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:49 app/templates/_layout.html:50
+#: app/templates/_layout.html:46 app/templates/_layout.html:47
 msgid "open menu"
 msgstr "메뉴 열기"
 
-#: app/templates/_layout.html:51
+#: app/templates/_layout.html:48
 msgid "close menu"
 msgstr "메뉴 닫기"
 
-#: app/templates/_layout.html:70
+#: app/templates/_layout.html:67
 msgid "signed in as"
 msgstr "로그인한 계정"
 
-#: app/templates/_layout.html:77
+#: app/templates/_layout.html:74
 msgid "settings"
 msgstr "설정"
 
-#: app/templates/_layout.html:89 app/templates/_layout.html:94
+#: app/templates/_layout.html:86 app/templates/_layout.html:91
 msgid "language"
 msgstr "언어"
 
-#: app/templates/_layout.html:121
+#: app/templates/_layout.html:118
 msgid "dark mode"
 msgstr "다크 모드"
 
-#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/_layout.html:135 app/templates/_layout.html:140
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
 msgstr "로그아웃"
 
-#: app/templates/_layout.html:151
+#: app/templates/_layout.html:148
 msgid "Language"
 msgstr "언어"
 
-#: app/templates/_layout.html:157
+#: app/templates/_layout.html:154
 msgid "toggle theme"
 msgstr "테마 전환"
 
@@ -69,16 +69,17 @@ msgid ""
 "permanently destroyed."
 msgstr "이 메시지는 한 번만 볼 수 있습니다. 확인하면 영구적으로 삭제됩니다."
 
-#: app/templates/landing.html:13
+#: app/templates/landing.html:13 app/templates/sender.html:112
 msgid "Passphrase"
 msgstr "패스프레이즈"
 
 #: app/templates/landing.html:17 app/templates/sender.html:79
+#: app/templates/sender.html:116
 msgid "show passphrase"
 msgstr "패스프레이즈 표시"
 
 #: app/templates/landing.html:17 app/templates/login.html:14
-#: app/templates/login.html:22 app/templates/sender.html:79
+#: app/templates/login.html:22 app/templates/sender.html:80
 msgid "show"
 msgstr "표시"
 
@@ -234,41 +235,53 @@ msgstr "7일"
 msgid "Passphrase (optional)"
 msgstr "패스프레이즈 (선택)"
 
-#: app/templates/sender.html:85
+#: app/templates/sender.html:86
 msgid "Track viewing status"
 msgstr "열람 상태 추적"
 
-#: app/templates/sender.html:89
+#: app/templates/sender.html:90
 msgid "Label (for your tracked list)"
 msgstr "레이블 (추적 목록용)"
 
-#: app/templates/sender.html:90
+#: app/templates/sender.html:91
 msgid "e.g. API key for Acme"
 msgstr "예: Acme API 키"
 
-#: app/templates/sender.html:94
+#: app/templates/sender.html:95
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
 msgstr "만든 후에는 본인도 내용을 다시 읽을 수 없습니다. 필요할 경우 다른 곳에 복사본을 보관하세요."
 
-#: app/templates/sender.html:96
+#: app/templates/sender.html:97
 msgid "Create Secret"
 msgstr "비밀 만들기"
 
-#: app/templates/sender.html:102
+#: app/templates/sender.html:103
 msgid "Secret created."
 msgstr "비밀이 생성되었습니다."
 
-#: app/templates/sender.html:104
+#: app/templates/sender.html:106
+msgid "URL"
+msgstr "URL"
+
+#: app/templates/sender.html:108
 msgid "Copy URL"
 msgstr "URL 복사"
 
-#: app/templates/sender.html:107
+#: app/templates/sender.html:119
+msgid "Copy passphrase"
+msgstr "패스프레이즈 복사"
+
+#: app/templates/sender.html:120
+msgid "Share with the receiver"
+msgstr "수신자와 공유하세요"
+
+#: app/templates/sender.html:125
 msgid "Status"
 msgstr "상태"
 
-#: app/templates/sender.html:111
+#: app/templates/sender.html:129
 msgid "Create another"
 msgstr "하나 더 만들기"
 

@@ -32,9 +32,13 @@ if (ppInput && ppToggle) {
   ppToggle.addEventListener('click', () => {
     const showing = ppInput.getAttribute('type') === 'text';
     ppInput.setAttribute('type', showing ? 'password' : 'text');
-    ppToggle.textContent = showing ? 'show' : 'hide';
+    // Read i18n keys from data-i18n-* on the button so the same handler shape
+    // can serve any toggle that opts in via attributes.
+    ppToggle.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
     ppToggle.setAttribute('aria-pressed', String(!showing));
-    ppToggle.setAttribute('aria-label', showing ? 'show passphrase' : 'hide passphrase');
+    // aria-label stays at its template-rendered (gettext) value; aria-pressed
+    // carries the state per the ARIA Authoring Practices toggle pattern, so
+    // screen readers don't need a label swap.
   });
 }
 
@@ -183,6 +187,29 @@ let statusPoll = null;
 function showResult({ url, id, expires_at }) {
   compose.hidden = true;
   document.getElementById('result-url').textContent = url;
+
+  // Passphrase isn't in the API response by design -- the server never
+  // returns it. Lift it from the still-populated compose-form input,
+  // hand it off to the result row, then let form.reset() in
+  // create-another wipe the input on the next round.
+  const passphrase = document.getElementById('passphrase').value || '';
+  const passphraseRow = document.getElementById('result-passphrase-row');
+  const passphraseEl = document.getElementById('result-passphrase');
+  const passphraseToggle = document.getElementById('toggle-result-passphrase');
+  if (passphrase) {
+    passphraseEl.dataset.real = passphrase;
+    passphraseEl.dataset.masked = 'true';
+    // Cap the dot count so a shoulder-surfer can't infer real length.
+    passphraseEl.textContent = '•'.repeat(Math.min(passphrase.length, 16));
+    passphraseToggle.setAttribute('aria-pressed', 'false');
+    passphraseToggle.textContent = window.i18n.t('button.show');
+    passphraseRow.hidden = false;
+  } else {
+    passphraseEl.dataset.real = '';
+    passphraseEl.textContent = '';
+    passphraseRow.hidden = true;
+  }
+
   const expiry = new Date(expires_at);
   document.getElementById('result-expiry').textContent =
     window.i18n.t('sender.expires_prefix') + expiry.toLocaleString(window.i18n.currentLocale);

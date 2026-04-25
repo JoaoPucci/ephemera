@@ -13,6 +13,36 @@ document.getElementById('copy-url').addEventListener('click', (e) => {
   copyWithFeedback(e.currentTarget, url);
 });
 
+// "Copy passphrase" reads the unmasked value from data-real, regardless of
+// whether the screen is currently showing dots or the real string -- copying
+// the dots would be a frustrating footgun.
+document.getElementById('copy-passphrase').addEventListener('click', (e) => {
+  const real = document.getElementById('result-passphrase').dataset.real || '';
+  copyWithFeedback(e.currentTarget, real);
+});
+
+// Show/hide on the result-screen passphrase. Mirrors the compose-form pattern:
+// data-masked carries the visual state; aria-pressed carries the ARIA state.
+{
+  const toggle = document.getElementById('toggle-result-passphrase');
+  const passphraseEl = document.getElementById('result-passphrase');
+  toggle.addEventListener('click', () => {
+    const masked = passphraseEl.dataset.masked === 'true';
+    if (masked) {
+      passphraseEl.textContent = passphraseEl.dataset.real || '';
+      passphraseEl.dataset.masked = 'false';
+      toggle.setAttribute('aria-pressed', 'true');
+      toggle.textContent = window.i18n.t('button.hide');
+    } else {
+      const real = passphraseEl.dataset.real || '';
+      passphraseEl.textContent = '•'.repeat(Math.min(real.length, 16));
+      passphraseEl.dataset.masked = 'true';
+      toggle.setAttribute('aria-pressed', 'false');
+      toggle.textContent = window.i18n.t('button.show');
+    }
+  });
+}
+
 // Top-left user pill: shows the signed-in username. Two-click confirm
 // for sign-out so accidental clicks don't blow away the session. Same
 // shape as the tracked-list cancel button: first click arms (adds

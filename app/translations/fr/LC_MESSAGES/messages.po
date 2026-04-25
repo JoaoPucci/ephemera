@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-24 04:11+0900\n"
+"POT-Creation-Date: 2026-04-26 00:53+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: fr\n"
@@ -18,40 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:49 app/templates/_layout.html:50
+#: app/templates/_layout.html:46 app/templates/_layout.html:47
 msgid "open menu"
 msgstr "ouvrir le menu"
 
-#: app/templates/_layout.html:51
+#: app/templates/_layout.html:48
 msgid "close menu"
 msgstr "fermer le menu"
 
-#: app/templates/_layout.html:70
+#: app/templates/_layout.html:67
 msgid "signed in as"
 msgstr "connecté en tant que"
 
-#: app/templates/_layout.html:77
+#: app/templates/_layout.html:74
 msgid "settings"
 msgstr "paramètres"
 
-#: app/templates/_layout.html:89 app/templates/_layout.html:94
+#: app/templates/_layout.html:86 app/templates/_layout.html:91
 msgid "language"
 msgstr "langue"
 
-#: app/templates/_layout.html:121
+#: app/templates/_layout.html:118
 msgid "dark mode"
 msgstr "mode sombre"
 
-#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/_layout.html:135 app/templates/_layout.html:140
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
 msgstr "se déconnecter"
 
-#: app/templates/_layout.html:151
+#: app/templates/_layout.html:148
 msgid "Language"
 msgstr "Langue"
 
-#: app/templates/_layout.html:157
+#: app/templates/_layout.html:154
 msgid "toggle theme"
 msgstr "changer le thème"
 
@@ -71,16 +71,17 @@ msgstr ""
 "Ce message ne peut être lu qu'une seule fois. Une fois révélé, il sera "
 "détruit définitivement."
 
-#: app/templates/landing.html:13
+#: app/templates/landing.html:13 app/templates/sender.html:112
 msgid "Passphrase"
 msgstr "Phrase secrète"
 
 #: app/templates/landing.html:17 app/templates/sender.html:79
+#: app/templates/sender.html:116
 msgid "show passphrase"
 msgstr "afficher la phrase secrète"
 
 #: app/templates/landing.html:17 app/templates/login.html:14
-#: app/templates/login.html:22 app/templates/sender.html:79
+#: app/templates/login.html:22 app/templates/sender.html:80
 msgid "show"
 msgstr "afficher"
 
@@ -240,19 +241,19 @@ msgstr "7 jours"
 msgid "Passphrase (optional)"
 msgstr "Phrase secrète (facultatif)"
 
-#: app/templates/sender.html:85
+#: app/templates/sender.html:86
 msgid "Track viewing status"
 msgstr "Suivre l'état de consultation"
 
-#: app/templates/sender.html:89
+#: app/templates/sender.html:90
 msgid "Label (for your tracked list)"
 msgstr "Libellé (pour votre liste de suivi)"
 
-#: app/templates/sender.html:90
+#: app/templates/sender.html:91
 msgid "e.g. API key for Acme"
 msgstr "ex. clé API pour Acme"
 
-#: app/templates/sender.html:94
+#: app/templates/sender.html:95
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
@@ -260,23 +261,35 @@ msgstr ""
 "Une fois créé, vous ne pourrez plus lire le contenu — pas même de votre "
 "côté. Conservez une copie ailleurs si vous en aurez besoin."
 
-#: app/templates/sender.html:96
+#: app/templates/sender.html:97
 msgid "Create Secret"
 msgstr "Créer le secret"
 
-#: app/templates/sender.html:102
+#: app/templates/sender.html:103
 msgid "Secret created."
 msgstr "Secret créé."
 
-#: app/templates/sender.html:104
+#: app/templates/sender.html:106
+msgid "URL"
+msgstr "URL"
+
+#: app/templates/sender.html:108
 msgid "Copy URL"
 msgstr "Copier l'URL"
 
-#: app/templates/sender.html:107
+#: app/templates/sender.html:119
+msgid "Copy passphrase"
+msgstr "Copier la phrase secrète"
+
+#: app/templates/sender.html:120
+msgid "Share with the receiver"
+msgstr "À partager avec le destinataire"
+
+#: app/templates/sender.html:125
 msgid "Status"
 msgstr "État"
 
-#: app/templates/sender.html:111
+#: app/templates/sender.html:129
 msgid "Create another"
 msgstr "En créer un autre"
 

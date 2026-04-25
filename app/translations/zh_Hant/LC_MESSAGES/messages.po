@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-24 04:11+0900\n"
+"POT-Creation-Date: 2026-04-26 00:53+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: zh_Hant\n"
@@ -18,40 +18,40 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app/templates/_layout.html:49 app/templates/_layout.html:50
+#: app/templates/_layout.html:46 app/templates/_layout.html:47
 msgid "open menu"
 msgstr "開啟選單"
 
-#: app/templates/_layout.html:51
+#: app/templates/_layout.html:48
 msgid "close menu"
 msgstr "關閉選單"
 
-#: app/templates/_layout.html:70
+#: app/templates/_layout.html:67
 msgid "signed in as"
 msgstr "目前登入帳號"
 
-#: app/templates/_layout.html:77
+#: app/templates/_layout.html:74
 msgid "settings"
 msgstr "設定"
 
-#: app/templates/_layout.html:89 app/templates/_layout.html:94
+#: app/templates/_layout.html:86 app/templates/_layout.html:91
 msgid "language"
 msgstr "語言"
 
-#: app/templates/_layout.html:121
+#: app/templates/_layout.html:118
 msgid "dark mode"
 msgstr "深色模式"
 
-#: app/templates/_layout.html:138 app/templates/_layout.html:143
+#: app/templates/_layout.html:135 app/templates/_layout.html:140
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
 msgstr "登出"
 
-#: app/templates/_layout.html:151
+#: app/templates/_layout.html:148
 msgid "Language"
 msgstr "語言"
 
-#: app/templates/_layout.html:157
+#: app/templates/_layout.html:154
 msgid "toggle theme"
 msgstr "切換主題"
 
@@ -69,16 +69,17 @@ msgid ""
 "permanently destroyed."
 msgstr "此訊息只能檢視一次。檢視後將被永久銷毀。"
 
-#: app/templates/landing.html:13
+#: app/templates/landing.html:13 app/templates/sender.html:112
 msgid "Passphrase"
 msgstr "密語"
 
 #: app/templates/landing.html:17 app/templates/sender.html:79
+#: app/templates/sender.html:116
 msgid "show passphrase"
 msgstr "顯示密語"
 
 #: app/templates/landing.html:17 app/templates/login.html:14
-#: app/templates/login.html:22 app/templates/sender.html:79
+#: app/templates/login.html:22 app/templates/sender.html:80
 msgid "show"
 msgstr "顯示"
 
@@ -234,41 +235,53 @@ msgstr "7 天"
 msgid "Passphrase (optional)"
 msgstr "密語（選填）"
 
-#: app/templates/sender.html:85
+#: app/templates/sender.html:86
 msgid "Track viewing status"
 msgstr "追蹤檢視狀態"
 
-#: app/templates/sender.html:89
+#: app/templates/sender.html:90
 msgid "Label (for your tracked list)"
 msgstr "標籤（用於你的追蹤清單）"
 
-#: app/templates/sender.html:90
+#: app/templates/sender.html:91
 msgid "e.g. API key for Acme"
 msgstr "例如：Acme 的 API 金鑰"
 
-#: app/templates/sender.html:94
+#: app/templates/sender.html:95
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
 msgstr "建立後，你將無法再次讀取內容 — 即使是你自己這一端也一樣。若日後還會用到，請另外保存一份副本。"
 
-#: app/templates/sender.html:96
+#: app/templates/sender.html:97
 msgid "Create Secret"
 msgstr "建立祕密"
 
-#: app/templates/sender.html:102
+#: app/templates/sender.html:103
 msgid "Secret created."
 msgstr "祕密已建立。"
 
-#: app/templates/sender.html:104
+#: app/templates/sender.html:106
+msgid "URL"
+msgstr "URL"
+
+#: app/templates/sender.html:108
 msgid "Copy URL"
 msgstr "複製連結"
 
-#: app/templates/sender.html:107
+#: app/templates/sender.html:119
+msgid "Copy passphrase"
+msgstr "複製密語"
+
+#: app/templates/sender.html:120
+msgid "Share with the receiver"
+msgstr "與接收者分享"
+
+#: app/templates/sender.html:125
 msgid "Status"
 msgstr "狀態"
 
-#: app/templates/sender.html:111
+#: app/templates/sender.html:129
 msgid "Create another"
 msgstr "再建立一個"
 
