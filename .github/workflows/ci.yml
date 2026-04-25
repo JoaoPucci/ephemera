@@ -21,6 +21,14 @@ jobs:
     # runners roughly double that and occasionally spike. GH Actions is
     # free for public repos, so there's no reason to keep the cap tight.
     timeout-minutes: 45
+    # id-token: write lets the Codecov upload step below mint an OIDC
+    # token, avoiding any need for a CODECOV_TOKEN secret. contents: read
+    # is the minimum needed for actions/checkout. Declaring permissions
+    # explicitly drops everything else off the GITHUB_TOKEN's default
+    # set (least-privilege).
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -53,19 +61,27 @@ jobs:
           retention-days: 14
 
       - name: Upload Python coverage to Codecov
-        # Tokenless mode for public repos. fail_ci_if_error=false so a
-        # transient Codecov outage doesn't block the merge -- the artifact
-        # above is the authoritative copy.
+        # use_oidc=true: mint a GitHub OIDC token instead of relying on
+        # tokenless mode, which is unreliable on push events to main
+        # (Codecov's default org settings reject uploads without an
+        # explicit auth path). fail_ci_if_error=false so a transient
+        # Codecov outage doesn't block the merge -- the artifact above
+        # is the authoritative copy.
         uses: codecov/codecov-action@v5
         with:
           files: coverage.xml
           flags: python
+          use_oidc: true
           fail_ci_if_error: false
 
   frontend-unit:
     name: Frontend unit tests (Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # See backend job above: OIDC for Codecov uploads, no token secret.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -92,10 +108,12 @@ jobs:
           retention-days: 14
 
       - name: Upload JS coverage to Codecov
+        # use_oidc=true: see backend job above for rationale.
         uses: codecov/codecov-action@v5
         with:
           directory: coverage/
           flags: javascript
+          use_oidc: true
           fail_ci_if_error: false
 
   e2e:
