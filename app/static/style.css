@@ -12,11 +12,15 @@
   box-sizing: border-box;
 }
 
-/* The browser's default [hidden] { display: none } is loses to any author rule
-   that sets `display` on the same element (e.g. our #tracked-list has display:flex).
-   Enforce "hidden means hidden" across the whole app. */
+/* The browser's default [hidden] { display: none } loses to any author rule
+   that sets `display` on the same element (e.g. our #tracked-list has
+   display:flex, #chrome-menu-scrim has display:flex, etc.). Enforce "hidden
+   means hidden" across the whole app with !important -- this is the one
+   place a blanket !important is the correct tool, and without it [hidden]
+   on the chrome-menu scrim fails to hide the overlay on every page. */
 [hidden] {
-  display: none;
+  /* biome-ignore lint/complexity/noImportantStyles: load-bearing per comment above. */
+  display: none !important;
 }
 
 html,
