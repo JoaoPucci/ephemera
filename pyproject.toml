@@ -61,3 +61,28 @@ extend-immutable-calls = [
 [tool.ruff.format]
 # Ruff's default format rules already match Black, which is what the
 # existing code was loosely written in. No overrides needed.
+
+[tool.coverage.run]
+# Coverage data is generated on demand: CI invokes pytest with --cov;
+# local runs are unaffected unless the developer opts in. The config
+# here controls what gets measured, not whether it runs.
+source = ["app"]
+branch = true
+omit = [
+  "app/templates/*",       # Jinja, not Python -- extracted via babel.cfg
+  "app/translations/*",    # gettext .po/.mo data files
+  "app/static/swagger/*",  # vendored Swagger UI assets
+]
+
+[tool.coverage.report]
+# Lines that coverage.py can't usefully reason about. Anything matching
+# these patterns is excluded from the "missed" tally without needing a
+# `# pragma: no cover` annotation in source.
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+  "\\.\\.\\.",  # bare `...` body in Protocol / ABC stubs
+]
+show_missing = true
+precision = 1
