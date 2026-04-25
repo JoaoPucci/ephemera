@@ -25,6 +25,8 @@
     "confirm": "よろしいですか？",
     "sign_out_confirm": "本当にサインアウトしますか？",
     "canceling": "取り消し中…",
+    "show": "表示",
+    "hide": "非表示",
     "clear_past": {
       "other": "過去のエントリー {{n}} 件を消去"
     },
@@ -50,8 +52,6 @@
     "code_label_recovery": "リカバリーコード",
     "toggle_to_recovery": "リカバリーコードを使う",
     "toggle_to_totp": "6桁のコードを使う",
-    "show": "表示",
-    "hide": "非表示",
     "aria_show_password": "パスワードを表示",
     "aria_hide_password": "パスワードを非表示",
     "aria_show_code": "コードを表示",

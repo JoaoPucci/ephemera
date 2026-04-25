@@ -51,8 +51,19 @@ function mountSender() {
       </form>
     </div>
     <section id="result" hidden>
-      <code id="result-url"></code>
-      <button type="button" id="copy-url" class="copy-btn">Copy URL</button>
+      <div class="result-row">
+        <span class="result-eyebrow">URL</span>
+        <code id="result-url"></code>
+        <button type="button" id="copy-url" class="copy-btn">Copy URL</button>
+      </div>
+      <div class="result-row" id="result-passphrase-row" hidden>
+        <span class="result-eyebrow">Passphrase</span>
+        <code id="result-passphrase" data-masked="true"></code>
+        <button type="button" id="toggle-result-passphrase"
+                aria-label="show passphrase" aria-pressed="false"
+                data-i18n-show="button.show" data-i18n-hide="button.hide"></button>
+        <button type="button" id="copy-passphrase" class="copy-btn">Copy passphrase</button>
+      </div>
       <p id="result-expiry"></p>
       <div id="status-widget" hidden>
         <span id="status-value">pending</span>
@@ -299,5 +310,185 @@ describe('sender.js — user button sign-out two-click confirm', () => {
     expect(logoutCalls.length).toBe(0);
 
     vi.useRealTimers();
+  });
+});
+
+describe('sender.js — copy passphrase + show/hide on the result screen', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  function fillPassphraseAndSubmit(value) {
+    document.getElementById('passphrase').value = value;
+    document.getElementById('content').value = 'hello';
+    submitForm();
+  }
+
+  function passphraseRow() {
+    return document.getElementById('result-passphrase-row');
+  }
+  function passphraseEl() {
+    return document.getElementById('result-passphrase');
+  }
+  function toggleBtn() {
+    return document.getElementById('toggle-result-passphrase');
+  }
+  function copyBtn() {
+    return document.getElementById('copy-passphrase');
+  }
+
+  function stubCreateSuccess() {
+    return stubSenderFetch(() =>
+      Promise.resolve(
+        jsonResponse({
+          url: 'https://example/s/tok#key',
+          id: 'deadbeef',
+          expires_at: '2099-01-01T00:00:00Z',
+        })
+      )
+    );
+  }
+
+  it('keeps the passphrase row hidden when no passphrase was entered', async () => {
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('');
+    await flushAsync();
+    await flushAsync();
+
+    expect(passphraseRow().hidden).toBe(true);
+    expect(passphraseEl().dataset.real).toBe('');
+  });
+
+  it('unhides the passphrase row and masks the value when a passphrase was entered', async () => {
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('hunter2');
+    await flushAsync();
+    await flushAsync();
+
+    expect(passphraseRow().hidden).toBe(false);
+    expect(passphraseEl().dataset.real).toBe('hunter2');
+    expect(passphraseEl().dataset.masked).toBe('true');
+    expect(passphraseEl().textContent).toBe('•'.repeat(7));
+    expect(toggleBtn().getAttribute('aria-pressed')).toBe('false');
+    expect(toggleBtn().textContent).toBe('show');
+  });
+
+  it("caps the mask at 16 dots so the real passphrase length isn't leaked", async () => {
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('a'.repeat(40));
+    await flushAsync();
+    await flushAsync();
+
+    expect(passphraseEl().textContent.length).toBe(16);
+    // Real value is preserved verbatim regardless of the mask cap.
+    expect(passphraseEl().dataset.real.length).toBe(40);
+  });
+
+  it('toggles between dots and real value, and back', async () => {
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('correct horse');
+    await flushAsync();
+    await flushAsync();
+
+    toggleBtn().click();
+    expect(passphraseEl().textContent).toBe('correct horse');
+    expect(passphraseEl().dataset.masked).toBe('false');
+    expect(toggleBtn().getAttribute('aria-pressed')).toBe('true');
+    expect(toggleBtn().textContent).toBe('hide');
+
+    toggleBtn().click();
+    expect(passphraseEl().textContent).toBe('•'.repeat(13));
+    expect(passphraseEl().dataset.masked).toBe('true');
+    expect(toggleBtn().getAttribute('aria-pressed')).toBe('false');
+    expect(toggleBtn().textContent).toBe('show');
+  });
+
+  it('copy-passphrase always reads the real value, never the masked dots', async () => {
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...globalThis.navigator, clipboard: { writeText } });
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('s3cret!');
+    await flushAsync();
+    await flushAsync();
+
+    // Stays masked on screen.
+    expect(passphraseEl().textContent).toBe('•'.repeat(7));
+
+    copyBtn().click();
+    await flushAsync();
+
+    expect(writeText).toHaveBeenCalledWith('s3cret!');
+  });
+
+  it('uses the passphrase as it was at submit time, not as it is when the response lands', async () => {
+    // Regression guard for the in-flight edit race: the submit button gets
+    // disabled but the passphrase input doesn't, so nothing prevented the
+    // user from editing it during the bcrypt cost-12 hash window. Before
+    // this fix, the result row read the input on response landing, ending
+    // up with a different value than what the server stored.
+    let resolveCreate;
+    const fetchMock = vi.fn((url) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse({ id: 1, username: 'admin' }));
+      if (url === '/api/secrets/tracked') return Promise.resolve(jsonResponse({ items: [] }));
+      if (url === '/api/secrets')
+        return new Promise((resolve) => {
+          resolveCreate = resolve;
+        });
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('original');
+    await flushAsync(); // submit handler now awaiting fetch
+
+    // Simulate the user editing the input mid-flight.
+    document.getElementById('passphrase').value = 'edited';
+
+    resolveCreate(
+      jsonResponse({
+        url: 'https://example/s/tok#key',
+        id: 'deadbeef',
+        expires_at: '2099-01-01T00:00:00Z',
+      })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    expect(passphraseEl().dataset.real).toBe('original');
+  });
+
+  it('"Create another" clears the result-row dataset so the previous passphrase doesn\'t outlive the UI', async () => {
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    fillPassphraseAndSubmit('hunter2');
+    await flushAsync();
+    await flushAsync();
+
+    expect(passphraseEl().dataset.real).toBe('hunter2');
+
+    document.getElementById('create-another').click();
+
+    expect(passphraseEl().dataset.real).toBe('');
+    expect(passphraseEl().textContent).toBe('');
+    expect(passphraseRow().hidden).toBe(true);
   });
 });

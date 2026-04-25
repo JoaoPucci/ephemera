@@ -733,6 +733,49 @@ button.copy-error:hover {
   font-size: 0.88rem;
 }
 
+/* Variant of .url-box that hosts an inline action (show/hide). Mirrors the
+   .input-with-action pattern used on form inputs so the value box reads
+   visually identical to the compose-form passphrase field. */
+.url-box--with-action {
+  position: relative;
+  padding-inline-end: 4rem;
+}
+.url-box--with-action > .input-action {
+  inset-inline-end: 6px;
+}
+
+/* Result rows on the sender success screen: labeled stacks. Eyebrow above
+   value, action(s) below. The eyebrow carries the noun ("URL", "Passphrase")
+   so the helper text can stay short. */
+.result-row {
+  margin-top: 1.25rem;
+}
+.result-row + .result-row {
+  margin-top: 1.5rem;
+}
+.result-eyebrow {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.4rem;
+}
+.result-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0.6rem 0 0;
+}
+
+/* Masked passphrase: the dots read as deliberate, not as a font glitch. Length
+   is capped in JS (see sender.js) so a shoulder-surfer can't infer the real
+   passphrase length from the bullet count. */
+#result-passphrase[data-masked="true"] {
+  letter-spacing: 0.15em;
+}
+
 .revealed-text {
   background: var(--bg);
   padding: 1rem;
