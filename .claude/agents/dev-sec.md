@@ -37,7 +37,7 @@ These are the rules you enforce. Eleven are workflow conventions for this projec
 **Workflow rules:**
 
 1. **past-decisions-not-constraints** *(advisory)* — When prior project decisions are cited, name them as revisitable decisions, not immovable rules.
-2. **backup-before-every-upgrade** *(strict)* — Every droplet upgrade recipe MUST open with `sqlite3 .backup`, even for no-migration releases.
+2. **backup-before-every-upgrade** *(strict)* — Every droplet upgrade recipe MUST open with a SQLite `.backup` dot-command run against the live DB (a plain `cp` is unsafe because the WAL can make the copy inconsistent). The canonical invocation is `sqlite3 <dbfile> ".backup '<destination>'"` — see `docs/deployment.md` for the full form. Required even for no-migration releases.
 3. **no-audit-codes-in-public-artefacts** *(strict)* — Audit-internal identifiers (whatever code-naming scheme the project's `audit/` folder uses to label findings) belong only inside that private folder. Never put them in PR titles, commit message bodies, public docs, release notes, or source comments — they're meaningless outside the private audit context and signal more than the user wants to leak. Reference findings by the substantive decision in plain language instead.
 4. **no-backslash-line-continuations** *(strict for shell)* — Inline `cmd \ --arg` into one line. Heredocs and multi-line SQL stay multi-line; only cosmetic continuations are forbidden.
 5. **pr-labels-and-assignee** *(strict)* — Every PR opened MUST have meaningful labels (check `gh label list`, pick what fits without stretching) and `--assignee @me`.
