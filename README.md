@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/JoaoPucci/ephemera/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPucci/ephemera/actions/workflows/ci.yml)
 [![Deploy](https://github.com/JoaoPucci/ephemera/actions/workflows/deploy.yml/badge.svg)](https://github.com/JoaoPucci/ephemera/actions/workflows/deploy.yml)
+[![codecov](https://codecov.io/gh/JoaoPucci/ephemera/branch/main/graph/badge.svg)](https://codecov.io/gh/JoaoPucci/ephemera)
 [![Release](https://img.shields.io/github/v/release/JoaoPucci/ephemera?sort=semver&color=blue)](https://github.com/JoaoPucci/ephemera/releases/latest)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](.github/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)

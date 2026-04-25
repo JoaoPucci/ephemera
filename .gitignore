@@ -37,6 +37,7 @@ audit/
 # Coverage
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 
 # Node (Vitest + Playwright)

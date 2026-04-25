@@ -39,7 +39,28 @@ jobs:
 
       - name: Run pytest
         # bcrypt cost 12 is intentional -- ~5 minutes is expected.
-        run: pytest -q
+        # --cov runs against the live app code; the report lands as both
+        # terminal output (visible in the job log) and coverage.xml (kept
+        # as an artifact and uploaded to Codecov for the README badge).
+        run: pytest -q --cov --cov-report=xml --cov-report=term
+
+      - name: Upload Python coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-python
+          path: coverage.xml
+          retention-days: 14
+
+      - name: Upload Python coverage to Codecov
+        # Tokenless mode for public repos. fail_ci_if_error=false so a
+        # transient Codecov outage doesn't block the merge -- the artifact
+        # above is the authoritative copy.
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          flags: python
+          fail_ci_if_error: false
 
   frontend-unit:
     name: Frontend unit tests (Vitest)
@@ -58,7 +79,24 @@ jobs:
         run: npm ci
 
       - name: Run vitest
-        run: npm run test:unit
+        # --coverage emits terminal summary, an HTML browseable report under
+        # coverage/, and lcov.info that Codecov ingests below.
+        run: npm run test:unit -- --coverage
+
+      - name: Upload JS coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-js
+          path: coverage/
+          retention-days: 14
+
+      - name: Upload JS coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          directory: coverage/
+          flags: javascript
+          fail_ci_if_error: false
 
   e2e:
     name: End-to-end smoke (Playwright)
