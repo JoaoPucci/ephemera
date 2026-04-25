@@ -25,6 +25,8 @@
     "confirm": "bestätigen?",
     "sign_out_confirm": "wirklich abmelden?",
     "canceling": "Abbrechen…",
+    "show": "anzeigen",
+    "hide": "verbergen",
     "clear_past": {
       "one": "{{n}} vergangenen Eintrag löschen",
       "other": "{{n}} vergangene Einträge löschen"
@@ -51,8 +53,6 @@
     "code_label_recovery": "Wiederherstellungscode",
     "toggle_to_recovery": "Wiederherstellungscode verwenden",
     "toggle_to_totp": "6-stelligen Code verwenden",
-    "show": "anzeigen",
-    "hide": "verbergen",
     "aria_show_password": "Passwort anzeigen",
     "aria_hide_password": "Passwort verbergen",
     "aria_show_code": "Code anzeigen",

@@ -25,6 +25,8 @@
     "confirm": "确认？",
     "sign_out_confirm": "确定要退出登录？",
     "canceling": "撤销中…",
+    "show": "显示",
+    "hide": "隐藏",
     "clear_past": {
       "other": "清除 {{n}} 条历史条目"
     },
@@ -50,8 +52,6 @@
     "code_label_recovery": "恢复码",
     "toggle_to_recovery": "使用恢复码",
     "toggle_to_totp": "使用 6 位数字验证码",
-    "show": "显示",
-    "hide": "隐藏",
     "aria_show_password": "显示密码",
     "aria_hide_password": "隐藏密码",
     "aria_show_code": "显示验证码",

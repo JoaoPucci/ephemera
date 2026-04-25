@@ -29,7 +29,7 @@ const pwToggle = document.getElementById('toggle-password');
 pwToggle.addEventListener('click', () => {
   const showing = pwInput.getAttribute('type') === 'text';
   pwInput.setAttribute('type', showing ? 'password' : 'text');
-  pwToggle.textContent = window.i18n.t(showing ? 'login.show' : 'login.hide');
+  pwToggle.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
   pwToggle.setAttribute('aria-pressed', String(!showing));
   pwToggle.setAttribute(
     'aria-label',
@@ -66,7 +66,7 @@ function setMode(backup) {
   // Reset the show/hide button's internal state whenever the mode flips.
   codeToggleBtn.setAttribute('aria-pressed', 'false');
   codeToggleBtn.setAttribute('aria-label', window.i18n.t('login.aria_show_code'));
-  codeToggleBtn.textContent = window.i18n.t('login.show');
+  codeToggleBtn.textContent = window.i18n.t('button.show');
   codeInput.value = '';
   codeInput.focus();
 }
@@ -80,7 +80,7 @@ if (codeToggleBtn) {
   codeToggleBtn.addEventListener('click', () => {
     const showing = codeInput.getAttribute('type') === 'text';
     codeInput.setAttribute('type', showing ? 'password' : 'text');
-    codeToggleBtn.textContent = window.i18n.t(showing ? 'login.show' : 'login.hide');
+    codeToggleBtn.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
     codeToggleBtn.setAttribute('aria-pressed', String(!showing));
     codeToggleBtn.setAttribute(
       'aria-label',

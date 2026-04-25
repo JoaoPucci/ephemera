@@ -25,6 +25,8 @@
     "confirm": "confirm?",
     "sign_out_confirm": "really sign out?",
     "canceling": "canceling…",
+    "show": "show",
+    "hide": "hide",
     "clear_past": {
       "one": "Clear {{n}} past entry",
       "other": "Clear {{n}} past entries"
@@ -51,8 +53,6 @@
     "code_label_recovery": "Recovery code",
     "toggle_to_recovery": "Use a recovery code",
     "toggle_to_totp": "Use 6-digit code",
-    "show": "show",
-    "hide": "hide",
     "aria_show_password": "show password",
     "aria_hide_password": "hide password",
     "aria_show_code": "show code",

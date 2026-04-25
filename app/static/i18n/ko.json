@@ -25,6 +25,8 @@
     "confirm": "확인?",
     "sign_out_confirm": "정말 로그아웃할까요?",
     "canceling": "취소 중…",
+    "show": "표시",
+    "hide": "숨김",
     "clear_past": {
       "other": "지난 항목 {{n}}개 지우기"
     },
@@ -50,8 +52,6 @@
     "code_label_recovery": "복구 코드",
     "toggle_to_recovery": "복구 코드 사용",
     "toggle_to_totp": "6자리 코드 사용",
-    "show": "표시",
-    "hide": "숨김",
     "aria_show_password": "비밀번호 표시",
     "aria_hide_password": "비밀번호 숨김",
     "aria_show_code": "코드 표시",

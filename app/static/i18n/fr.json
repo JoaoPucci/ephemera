@@ -25,6 +25,8 @@
     "confirm": "confirmer ?",
     "sign_out_confirm": "vraiment se déconnecter ?",
     "canceling": "annulation…",
+    "show": "afficher",
+    "hide": "masquer",
     "clear_past": {
       "one": "Effacer {{n}} entrée passée",
       "many": "Effacer {{n}} entrées passées",
@@ -52,8 +54,6 @@
     "code_label_recovery": "Code de récupération",
     "toggle_to_recovery": "Utiliser un code de récupération",
     "toggle_to_totp": "Utiliser un code à 6 chiffres",
-    "show": "afficher",
-    "hide": "masquer",
     "aria_show_password": "afficher le mot de passe",
     "aria_hide_password": "masquer le mot de passe",
     "aria_show_code": "afficher le code",
