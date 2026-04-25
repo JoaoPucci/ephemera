@@ -28,6 +28,11 @@ concurrency:
 
 permissions:
   contents: read
+  # actionlint via reviewdog uses reporter: github-check below, which
+  # writes a separate check run. With `permissions:` declared, every
+  # unspecified scope defaults to `none`, so `checks: write` has to be
+  # named explicitly for the step to be able to post.
+  checks: write
 
 jobs:
   lint:

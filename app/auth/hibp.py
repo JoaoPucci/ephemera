@@ -27,12 +27,17 @@ def pwned_count(password: str, *, timeout: float = _DEFAULT_TIMEOUT) -> int | No
     # SHA-1 here is NOT a password-storage primitive; it's the HIBP range
     # API's fixed wire format. Only the first 5 hex chars of the digest
     # leave the process (k-anonymity); the remaining suffix is matched
-    # locally. Password storage in this project uses bcrypt
-    # (see app/auth/password.py); SHA-1 is never used defensively.
-    # CodeQL flags weak-crypto on password bytes without knowing the
-    # digest is an API protocol field rather than a stored credential.
+    # locally. Password storage in this project uses bcrypt (see
+    # app/auth/password.py); SHA-1 is never used defensively.
+    #
+    # CodeQL flags this as `py/weak-cryptographic-algorithm` because its
+    # taint analysis sees `password` reach a SHA-1 call and can't tell
+    # that the digest is a protocol field rather than a stored credential.
+    # The alert is dismissed (false positive) on the Security tab; this
+    # comment documents the rationale so any future reviewer reading the
+    # code arrives at the same conclusion without having to retrace it.
     encoded = password.encode("utf-8")
-    digest = hashlib.sha1(encoded)  # lgtm[py/weak-cryptographic-algorithm]
+    digest = hashlib.sha1(encoded)
     sha1 = digest.hexdigest().upper()
     prefix, suffix = sha1[:5], sha1[5:]
     req = urllib.request.Request(
