@@ -46,6 +46,14 @@ playwright-report/
 test-results/
 /playwright/.cache/
 
-# Claude Code local state (scheduled-task lock files, etc.). Per-checkout,
-# per-session; nothing in here should ever be committed.
-.claude/
+# Claude Code state. Mixed: some subdirs are shareable team config that
+# encodes how Claude works on this codebase (agents, skills, commands)
+# and should travel with the repo; the rest is per-checkout / per-session
+# (memory caches, lockfiles, local settings) and must never be committed.
+# Default-deny: explicit allowlist for the shareable subdirs only, so
+# any new private path Claude Code adds in the future stays blocked
+# unless we opt into it.
+.claude/*
+!.claude/agents/
+!.claude/skills/
+!.claude/commands/
