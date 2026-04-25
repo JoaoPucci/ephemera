@@ -445,7 +445,10 @@ describe('sender.js — copy passphrase + show/hide on the result screen', () =>
     const fetchMock = vi.fn((url) => {
       if (url === '/api/me') return Promise.resolve(jsonResponse({ id: 1, username: 'admin' }));
       if (url === '/api/secrets/tracked') return Promise.resolve(jsonResponse({ items: [] }));
-      if (url === '/api/secrets') return new Promise((resolve) => { resolveCreate = resolve; });
+      if (url === '/api/secrets')
+        return new Promise((resolve) => {
+          resolveCreate = resolve;
+        });
       return Promise.resolve(new Response(null, { status: 404 }));
     });
     vi.stubGlobal('fetch', fetchMock);
