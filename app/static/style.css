@@ -150,7 +150,7 @@ label {
   display: block;
   font-size: 0.85rem;
   color: var(--muted);
-  margin: 1rem 0 0.4rem;
+  margin: var(--space-4) 0 var(--space-2);
   letter-spacing: 0.01em;
 }
 
@@ -165,8 +165,8 @@ label {
      float up next to it when #label-wrap is hidden. */
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  margin-top: 1rem;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
   cursor: pointer;
   color: var(--text);
   font-size: 0.95rem;
