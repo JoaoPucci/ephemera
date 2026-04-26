@@ -967,15 +967,15 @@ button.copy-error:hover {
    =================================================================== */
 
 #tracked-section {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-5);
 }
 
 .tracked-panel-header {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
   width: 100%;
-  padding: 0.7rem 0.9rem;
+  padding: var(--space-3);
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
@@ -1011,6 +1011,8 @@ button.copy-error:hover {
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--muted);
+  /* Off-scale by design: badge padding is tuned to the digit width at
+     0.72rem; --space-* horizontals would make the pill ovular. */
   padding: 0.1rem 0.5rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1072,23 +1074,23 @@ button.copy-error:hover {
   background: var(--muted);
 }
 .tracked-panel-inner {
-  padding: 0.25rem 0.25rem 0;
+  padding: var(--space-1) var(--space-1) 0;
 }
 
 #tracked-list {
   list-style: none;
   padding: 0;
-  margin: 0.6rem 0.25rem 0;
+  margin: var(--space-2) var(--space-1) 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .tracked-panel-footer {
   display: flex;
   justify-content: flex-end;
-  padding: 0.5rem 0.25rem 0.6rem;
-  margin-top: 0.6rem;
+  padding: var(--space-2) var(--space-1);
+  margin-top: var(--space-2);
   border-top: 1px dashed var(--border);
 }
 .tracked-panel-footer:empty,
@@ -1100,8 +1102,8 @@ button.copy-error:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.8rem;
+  gap: var(--space-3);
+  padding: var(--space-3);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1169,12 +1171,18 @@ button.copy-error:hover {
   color: var(--muted);
   font-style: italic;
   letter-spacing: 0.01em;
+  /* Off-scale: optical baseline correction. Italic descenders sit
+     ~1px high; this 0.8px push pulls the hint visually onto the same
+     baseline as the row's primary label above it. */
   margin-top: 0.05rem;
 }
 
 .tracked-meta {
   display: flex;
   flex-direction: column;
+  /* Off-scale by design: deliberately super-tight intra-meta gap so
+     the label + time stack reads as a single visual block, not as two
+     siblings. --space-1 (4px) opens it up too much. */
   gap: 0.15rem;
   min-width: 0;
 }
@@ -1209,13 +1217,15 @@ button.copy-error:hover {
 .tracked-right {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .tracked-remove {
   background: none;
   color: var(--muted);
   border: none;
+  /* Off-scale: icon-only "x" button, padding tuned to the glyph
+     footprint rather than the spacing scale. */
   padding: 0.2rem 0.45rem;
   min-height: auto;
   margin: 0;
@@ -1243,10 +1253,13 @@ button.copy-error:hover {
 .tracked-clear {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-2);
   background: transparent;
   color: var(--muted);
   border: 1px solid transparent;
+  /* Off-scale: pill-button padding tuned to the 0.78rem font + the
+     idle/armed state transition. .tracked-clear bumps this slightly
+     (see below) to carry an icon. */
   padding: 0.3rem 0.7rem;
   min-height: auto;
   margin: 0;
@@ -1295,7 +1308,7 @@ button.copy-error:hover {
 .tracked-header-actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 /* ===================================================================
