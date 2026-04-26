@@ -841,6 +841,9 @@ def test_v4_analytics_events_table_present_on_fresh_db(tmp_db_path):
         }
     assert "analytics_events" in names
     assert "idx_analytics_events_type_time" in idx_names
+    # FK child-column index: without this, ON DELETE SET NULL full-scans
+    # analytics_events on every remove-user.
+    assert "idx_analytics_events_user_id" in idx_names
 
 
 def test_v4_analytics_events_columns_match_design(tmp_db_path):
@@ -936,8 +939,20 @@ def test_v3_legacy_db_upgrades_to_v4(tmp_path, monkeypatch):
             secrets_sql = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='secrets'"
             ).fetchone()[0]
+            idx_names = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index'"
+                ).fetchall()
+            }
         assert ver == 4
         assert "analytics_events" in names
+        # Both indices on analytics_events land via the v4 migration AND
+        # via INDICES_SCRIPT (which init_db re-runs after migrations).
+        # Either path alone is sufficient; assert from a legacy v3 fixture
+        # that the post-upgrade DB has them.
+        assert "idx_analytics_events_type_time" in idx_names
+        assert "idx_analytics_events_user_id" in idx_names
         # v3 CHECK clauses survive: the v4 migration is pure-create and
         # does not touch the secrets/users tables.
         assert "CHECK" in secrets_sql

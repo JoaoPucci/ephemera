@@ -119,6 +119,13 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_user_name ON api_tokens(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_analytics_events_type_time
     ON analytics_events(event_type, occurred_at);
+-- analytics_events.user_id is FK with ON DELETE SET NULL. SQLite's FK
+-- cascade has to find every child row referencing the parent id; without
+-- an index that's a full scan, which makes `remove-user` arbitrarily slow
+-- as telemetry accumulates and holds write locks longer than necessary.
+-- Mirrors idx_secrets_user_id and idx_api_tokens_user_id.
+CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id
+    ON analytics_events(user_id);
 """
 
 
@@ -437,6 +444,14 @@ def _migrate_to_v4(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_analytics_events_type_time "
         "ON analytics_events(event_type, occurred_at)"
+    )
+    # Index the FK child column so ON DELETE SET NULL doesn't full-scan
+    # the table on every remove-user. Redundant with INDICES_SCRIPT (which
+    # init_db runs after migrations), but kept inline for symmetry with the
+    # type-time index above.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id "
+        "ON analytics_events(user_id)"
     )
 
 
