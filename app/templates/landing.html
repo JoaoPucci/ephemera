@@ -3,7 +3,7 @@
 {% block body %}
   <main class="card" id="main-card">
     <section id="state-loading">
-      <p class="muted">{{ _("Loading…") }}</p>
+      <p class="muted text-center">{{ _("Loading…") }}</p>
     </section>
 
     <section id="state-ready" hidden>
@@ -24,18 +24,18 @@
     <section id="state-text" hidden>
       <pre id="revealed-text" class="revealed-text"></pre>
       <button type="button" id="copy-btn" class="copy-btn" hidden>{{ _("Copy to clipboard") }}</button>
-      <p class="muted">{{ _("This secret has been destroyed.") }}</p>
+      <p class="muted text-center">{{ _("This secret has been destroyed.") }}</p>
     </section>
 
     <section id="state-image" hidden>
       <img id="revealed-image" alt="" tabindex="0" role="button"
            aria-label="{{ _('Click to view full size') }}">
-      <p class="muted">{{ _("Click the image for full size · this secret has been destroyed.") }}</p>
+      <p class="muted text-center">{{ _("Click the image for full size · this secret has been destroyed.") }}</p>
     </section>
 
     <section id="state-gone" hidden>
       <h1>{{ _("This secret is no longer available.") }}</h1>
-      <p class="muted">{{ _("It may have already been viewed or has expired.") }}</p>
+      <p class="muted text-center">{{ _("It may have already been viewed or has expired.") }}</p>
     </section>
   </main>
 
