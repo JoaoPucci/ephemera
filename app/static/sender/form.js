@@ -44,7 +44,17 @@ const PASTE_LARGE_THRESHOLD = 10_000; // soft warning for >10KB chunk
 // Telemetry session state -- persists across paste/typing until form reset
 // or successful submit. submit handler reads these and includes them in
 // the request body when intendedContentSize >= TELEMETRY_THRESHOLD.
+//
+// Two parallel counters: chars (intendedContentSize) drives the threshold
+// gate and the user-facing counter UX; bytes (intendedContentSizeBytes) is
+// what the analytics payload reports. Both are MAX-tracked across the
+// compose session: once the user crosses 95% of cap, the reported size
+// stays at the high-water mark even if they edit down before submitting.
+// Submitting `TextEncoder().encode(content).length` of the FINAL value
+// would have collapsed over-cap pastes to the truncated size and erased
+// edit-down attempts -- both signals the metric exists to capture.
 let intendedContentSize = 0;
+let intendedContentSizeBytes = 0;
 let contentWasPaste = false;
 const TELEMETRY_THRESHOLD = MAX_CONTENT * 0.95;
 
@@ -81,9 +91,13 @@ function _setHint(hintEl, content, modifier) {
 //   useShortTrimMessage     true on the label field (omits the "(was X)"
 //                           parenthetical from the trim message; the field is
 //                           short enough that the original size is implicit)
-//   onIntendedSize(size, wasPaste)    telemetry callback, called on every
-//                           intended-size observation (post-paste OR per
-//                           keystroke); caller does max-tracking
+//   onIntendedSize(sizeChars, sizeBytes, wasPaste)
+//                           telemetry callback, fired on every intended-size
+//                           observation (post-paste OR per keystroke). The
+//                           caller does max-tracking. sizeBytes is the UTF-8
+//                           byte length of the SAME intended value -- which
+//                           for over-cap pastes is the simulated pre-truncation
+//                           string, not what landed in input.value.
 function _bindCounterHint(input, hintEl, max, opts = {}) {
   const counterAt = (opts.counterAt ?? 0.75) * max;
   const warningAt = (opts.warningAt ?? 0.95) * max;
@@ -110,6 +124,10 @@ function _bindCounterHint(input, hintEl, max, opts = {}) {
     const selEnd = input.selectionEnd ?? 0;
     const currentLen = input.value.length;
     const intendedAfter = currentLen - (selEnd - selStart) + pasted.length;
+    // For both over-cap and large-paste branches we want to telemeter the
+    // size of what the user TRIED to paste, not the truncated remainder.
+    // Reconstruct the simulated full string to get its UTF-8 byte length.
+    const simulated = input.value.slice(0, selStart) + pasted + input.value.slice(selEnd);
 
     if (intendedAfter > max) {
       // Browser will silently truncate at maxlength. Show paste-trim error.
@@ -120,13 +138,17 @@ function _bindCounterHint(input, hintEl, max, opts = {}) {
             original: _formatNumber(intendedAfter),
           });
       pasteOverrideModifier = 'error';
-      if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter, true);
+      if (opts.onIntendedSize) {
+        opts.onIntendedSize(intendedAfter, new TextEncoder().encode(simulated).length, true);
+      }
     } else if (pasted.length >= pasteLargeThreshold) {
       pasteOverrideMessage = window.i18n.t('hint.content_paste_large', {
         size: _formatBytes(pasted.length),
       });
       pasteOverrideModifier = 'warning';
-      if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter, true);
+      if (opts.onIntendedSize) {
+        opts.onIntendedSize(intendedAfter, new TextEncoder().encode(simulated).length, true);
+      }
     } else {
       pasteOverrideMessage = null;
     }
@@ -141,7 +163,9 @@ function _bindCounterHint(input, hintEl, max, opts = {}) {
     pasteOverrideMessage = null;
 
     const len = input.value.length;
-    if (opts.onIntendedSize && len > 0) opts.onIntendedSize(len, false);
+    if (opts.onIntendedSize && len > 0) {
+      opts.onIntendedSize(len, new TextEncoder().encode(input.value).length, false);
+    }
 
     if (len >= max) {
       // Frozen counter at ceiling. The frozen-ness IS the signal.
@@ -202,9 +226,10 @@ if (contentInput && contentHint) {
     counterAt: 0.75,
     warningAt: 0.95,
     pasteLargeThreshold: PASTE_LARGE_THRESHOLD,
-    onIntendedSize: (size, wasPaste) => {
-      if (size > intendedContentSize) {
-        intendedContentSize = size;
+    onIntendedSize: (sizeChars, sizeBytes, wasPaste) => {
+      if (sizeChars > intendedContentSize) {
+        intendedContentSize = sizeChars;
+        intendedContentSizeBytes = sizeBytes;
         contentWasPaste = wasPaste;
       }
     },
@@ -339,14 +364,15 @@ form.addEventListener('submit', async (e) => {
         track,
       };
       if (label) body.label = label;
-      // Cap-proximity telemetry. We measure intent in characters (matches
-      // the textarea's HTML maxlength and the JS string length the user
-      // sees), but the analytics field is named in bytes -- so when we
-      // do emit, we report the actual UTF-8 byte length of what's about
-      // to be sent. The backend emits a content.limit_hit event keyed on
-      // the threshold crossing (>=95% of cap during composition).
+      // Cap-proximity telemetry. The threshold gate is in chars (matches
+      // the textarea's HTML maxlength and the JS string-length the user
+      // sees); the reported value is the high-water UTF-8 byte size from
+      // when that threshold was crossed -- which for over-cap pastes is
+      // the simulated pre-truncation string, and which is preserved across
+      // edit-down so a user who typed 100K and then deleted to 50K still
+      // reports the 100K intent.
       if (intendedContentSize >= TELEMETRY_THRESHOLD) {
-        body.intended_content_size_bytes = new TextEncoder().encode(content).length;
+        body.intended_content_size_bytes = intendedContentSizeBytes;
         body.was_paste = contentWasPaste;
       }
       res = await fetch('/api/secrets', {
@@ -513,6 +539,7 @@ document.getElementById('create-another').addEventListener('click', () => {
   // fresh -- otherwise a previous near-cap session would re-emit on every
   // subsequent submit, even if the new content is small.
   intendedContentSize = 0;
+  intendedContentSizeBytes = 0;
   contentWasPaste = false;
   // Wipe the previous passphrase from the result-row's dataset so it
   // doesn't outlive the visible UI. Without this, a user who clicks

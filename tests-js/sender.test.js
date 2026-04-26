@@ -687,17 +687,16 @@ describe('sender.js — telemetry fields on submit body', () => {
     expect(body.was_paste).toBeUndefined();
   });
 
-  it('includes telemetry fields when a typed/pasted intended size crossed >=95% of the cap', async () => {
+  it('over-cap paste reports the FULL intended bytes, not the truncated remainder', async () => {
+    // Codex P2 regression guard. Submitting `TextEncoder().encode(content)` of
+    // the post-truncation value would have collapsed a 150K-byte paste to the
+    // 100K that survived maxlength -- losing exactly the signal this metric
+    // exists to capture.
     const getBody = captureCreateBody();
     await loadModule('sender');
     await flushAsync();
 
     const input = document.getElementById('content');
-    // Trigger a paste that overflows the cap. The form.js paste branch
-    // records intendedAfter (pre-truncation size) into the telemetry session
-    // state; the textarea visible value gets truncated to the cap by the
-    // paste simulator, but we have a non-empty post-truncation value to
-    // submit.
     const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
     pasteEvent.clipboardData = { getData: () => 'a'.repeat(150_000) };
     input.dispatchEvent(pasteEvent);
@@ -712,8 +711,41 @@ describe('sender.js — telemetry fields on submit body', () => {
     const body = getBody();
     expect(body).not.toBeNull();
     expect(typeof body.intended_content_size_bytes).toBe('number');
-    expect(body.intended_content_size_bytes).toBeGreaterThanOrEqual(100_000);
+    // ASCII-only paste => byte count == char count, so we can pin to the
+    // exact intent value. 150_000, not the truncated 100_000.
+    expect(body.intended_content_size_bytes).toBe(150_000);
     expect(body.was_paste).toBe(true);
+  });
+
+  it('edit-down preserves the high-water mark from when the threshold was crossed', async () => {
+    // Codex P2 regression guard: submitting the FINAL value's byte count would
+    // have erased the threshold-crossing signal whenever the user typed up to
+    // 95K and then deleted back down before submitting.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    // Type up to 96K (over the 95K threshold).
+    input.value = 'a'.repeat(96_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    // Edit back down to 50K before submitting.
+    input.value = 'a'.repeat(50_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(
+      new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
+    );
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const body = getBody();
+    expect(body).not.toBeNull();
+    // ASCII => bytes == chars. 96_000 (the high-water mark), not 50_000.
+    expect(body.intended_content_size_bytes).toBe(96_000);
+    expect(body.was_paste).toBe(false);
   });
 
   it('"Create another" resets telemetry state so the next session starts clean', async () => {
