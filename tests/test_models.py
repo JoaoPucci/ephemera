@@ -740,7 +740,14 @@ def test_v2_legacy_db_clean_upgrades_to_v3(tmp_path, monkeypatch):
                     "SELECT name FROM sqlite_master WHERE type='index'"
                 ).fetchall()
             }
-        assert ver == 3
+        from app.models._core import CURRENT_SCHEMA_VERSION
+
+        # init_db() runs all registered migrations to land at the current
+        # version; assert the v3 work in particular survived the chain
+        # (CHECK clauses present, indices rebuilt). The version-stamp
+        # assertion uses CURRENT_SCHEMA_VERSION so future v5+ migrations
+        # don't require touching this test.
+        assert ver == CURRENT_SCHEMA_VERSION
         assert "CHECK" in secrets_sql
         assert "CHECK" in users_sql
         assert "idx_secrets_token" in idx_names
@@ -805,6 +812,135 @@ def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypat
             f"new user got id {new_id}, expected 4 (id 3 belonged to a "
             "deleted user and must not be reused)"
         )
+    finally:
+        config.get_settings.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# Schema v4 -- analytics_events table
+# ---------------------------------------------------------------------------
+
+
+def test_v4_analytics_events_table_present_on_fresh_db(tmp_db_path):
+    """Fresh DBs land at v4 directly via TABLES_SCRIPT, which now includes
+    the analytics_events table. The v4 migration is a pure-create no-op
+    on fresh DBs (CREATE TABLE IF NOT EXISTS) and only fires meaningfully
+    on legacy v3 DBs."""
+    with sqlite3.connect(str(tmp_db_path)) as conn:
+        names = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        idx_names = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+    assert "analytics_events" in names
+    assert "idx_analytics_events_type_time" in idx_names
+
+
+def test_v4_analytics_events_columns_match_design(tmp_db_path):
+    with sqlite3.connect(str(tmp_db_path)) as conn:
+        cols = {
+            r[1]: r[2]  # name -> type
+            for r in conn.execute("PRAGMA table_info(analytics_events)").fetchall()
+        }
+    assert cols == {
+        "id": "INTEGER",
+        "event_type": "TEXT",
+        "occurred_at": "TIMESTAMP",
+        "user_id": "INTEGER",
+        "payload": "TEXT",
+    }
+
+
+def test_v3_legacy_db_upgrades_to_v4(tmp_path, monkeypatch):
+    """Seed a v3 DB (CHECK clauses present, no analytics_events table,
+    schema_version stamped at 3), boot the current code, and confirm
+    the v4 migration creates the analytics_events table without
+    disturbing the v3 CHECK constraints."""
+    db = tmp_path / "v3.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL CHECK (length(username) <= 256),
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                totp_secret TEXT NOT NULL,
+                totp_last_step INTEGER NOT NULL DEFAULT 0,
+                recovery_code_hashes TEXT NOT NULL DEFAULT '[]',
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                lockout_until TEXT,
+                session_generation INTEGER NOT NULL DEFAULT 0,
+                preferred_language TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE secrets (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token TEXT UNIQUE NOT NULL,
+                server_key BLOB,
+                ciphertext BLOB,
+                content_type TEXT NOT NULL,
+                mime_type TEXT,
+                passphrase TEXT CHECK (passphrase IS NULL OR length(passphrase) <= 80),
+                track INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                label TEXT CHECK (label IS NULL OR length(label) <= 60),
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                viewed_at TEXT
+            );
+            CREATE TABLE api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT
+            );
+            CREATE TABLE schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (id, version) VALUES (1, 3);
+            """
+        )
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    from app import config
+
+    config.get_settings.cache_clear()
+    try:
+        models.init_db()
+        with sqlite3.connect(str(db)) as conn:
+            (ver,) = conn.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            names = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            secrets_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='secrets'"
+            ).fetchone()[0]
+        assert ver == 4
+        assert "analytics_events" in names
+        # v3 CHECK clauses survive: the v4 migration is pure-create and
+        # does not touch the secrets/users tables.
+        assert "CHECK" in secrets_sql
     finally:
         config.get_settings.cache_clear()
 
