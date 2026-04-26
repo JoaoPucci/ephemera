@@ -626,13 +626,15 @@ def test_v3_check_rejects_oversized_label(tmp_db_path):
 
 
 def test_v3_check_rejects_oversized_username(tmp_db_path):
-    with sqlite3.connect(str(tmp_db_path)) as conn:
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(
-                "INSERT INTO users (username, password_hash, totp_secret, "
-                "created_at, updated_at) VALUES (?, 'h', 's', 'now', 'now')",
-                ("u" * 257,),
-            )
+    with (
+        sqlite3.connect(str(tmp_db_path)) as conn,
+        pytest.raises(sqlite3.IntegrityError),
+    ):
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) VALUES (?, 'h', 's', 'now', 'now')",
+            ("u" * 257,),
+        )
 
 
 def test_v3_check_allows_null_optional_columns(tmp_db_path):
