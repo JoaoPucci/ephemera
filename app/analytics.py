@@ -49,6 +49,7 @@ the structural guarantee that "no end-user PII enters analytics."
 """
 
 import json
+import math
 import sqlite3
 from typing import Any
 
@@ -202,6 +203,19 @@ def record_event(
     )
 
 
+def _percentile_index(n: int, p: float) -> int:
+    """Zero-based nearest-rank index for percentile `p` of `n` sorted values,
+    clamped to [0, n-1]. Uses `ceil(n*p) - 1` rather than `int(n*p)` so that
+    when `n*p` is an exact integer the index doesn't overshoot by one --
+    e.g. for n=20 samples and p=0.95, `int(20*0.95)=19` returns the max
+    (the last element); `ceil(19)-1=18` correctly returns the 95th-percentile
+    sample. This biases high-tail metrics low rather than high, which is
+    the right direction for capacity-planning telemetry where
+    overestimating the tail leads to over-provisioning.
+    """
+    return max(0, min(n - 1, math.ceil(n * p) - 1))
+
+
 def summarize(event_type: str) -> dict[str, Any]:
     """Read-only aggregation over events of a given type. Returns count
     plus, for each int field in the event type's schema, p50/p95/p99 of
@@ -236,9 +250,9 @@ def summarize(event_type: str) -> dict[str, Any]:
         out["fields"][field] = {
             "count": n,
             "min": values[0],
-            "p50": values[n // 2],
-            "p95": values[min(n - 1, int(n * 0.95))],
-            "p99": values[min(n - 1, int(n * 0.99))],
+            "p50": values[_percentile_index(n, 0.50)],
+            "p95": values[_percentile_index(n, 0.95)],
+            "p99": values[_percentile_index(n, 0.99)],
             "max": values[-1],
         }
     return out

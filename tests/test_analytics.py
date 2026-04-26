@@ -246,10 +246,11 @@ def test_summarize_zero_events(tmp_db_path):
 def test_summarize_aggregates_int_field_percentiles(tmp_db_path):
     """Insert a small distribution and assert the percentile slots work.
     Uses the live tmp_db_path so summarize's `_connect()` resolves to
-    the test DB."""
+    the test DB. Percentile indexing follows nearest-rank: index =
+    max(0, min(n-1, ceil(n*p)-1))."""
     from app.models._core import _connect
 
-    sizes = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    sizes = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]  # n = 10
     with _connect() as conn:
         for sz in sizes:
             analytics.record_event(
@@ -263,8 +264,37 @@ def test_summarize_aggregates_int_field_percentiles(tmp_db_path):
     assert stats["count"] == 10
     assert stats["min"] == 10
     assert stats["max"] == 100
-    # p50 of 10 sorted values is at index 5 -> 60.
-    assert stats["p50"] == 60
+    # p50: ceil(10*0.5)-1 = 4 -> values[4] = 50
+    assert stats["p50"] == 50
+    # p95: ceil(10*0.95)-1 = 9 -> values[9] = 100 (max; expected for n=10)
+    assert stats["p95"] == 100
+
+
+def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(tmp_db_path):
+    """Regression for the int(n*p) overshoot bug. For n=20 and p=0.95,
+    n*p is exactly 19.0; the buggy formula `int(19.0) = 19` returns
+    values[19] (the max), biasing capacity-planning telemetry high.
+    The correct nearest-rank index is `ceil(19.0) - 1 = 18`, which
+    returns values[18] -- the actual 95th-percentile sample."""
+    from app.models._core import _connect
+
+    sizes = list(range(1, 21))  # 1..20, n=20
+    with _connect() as conn:
+        for sz in sizes:
+            analytics.record_event(
+                conn,
+                "content.limit_hit",
+                payload={"intended_size_bytes": sz, "was_paste": False},
+            )
+    stats = analytics.summarize("content.limit_hit")["fields"]["intended_size_bytes"]
+    assert stats["min"] == 1
+    assert stats["max"] == 20
+    # p95 must be 19, NOT 20 (the max). The old `int(n*p)` formula
+    # returned 20 here -- this assertion locks in the fix.
+    assert stats["p95"] == 19, (
+        "p95 of [1..20] should be 19 (nearest-rank); reporting 20 means "
+        "the int(n*p) overshoot regressed"
+    )
 
 
 def test_summarize_rejects_unknown_event_type(tmp_db_path):
