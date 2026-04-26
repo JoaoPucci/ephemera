@@ -671,7 +671,7 @@ describe('sender.js — telemetry fields on submit body', () => {
     return () => (captured ? JSON.parse(captured.body) : null);
   }
 
-  it('omits telemetry fields when the user stayed below the 95% threshold', async () => {
+  it('omits the near_cap flag when the user stayed below the 95% threshold', async () => {
     const getBody = captureCreateBody();
     await loadModule('sender');
     await flushAsync();
@@ -683,15 +683,14 @@ describe('sender.js — telemetry fields on submit body', () => {
 
     const body = getBody();
     expect(body).not.toBeNull();
-    expect(body.intended_content_size_bytes).toBeUndefined();
-    expect(body.was_paste).toBeUndefined();
+    expect(body.near_cap).toBeUndefined();
   });
 
-  it('over-cap paste reports the FULL intended bytes, not the truncated remainder', async () => {
-    // Codex P2 regression guard. Submitting `TextEncoder().encode(content)` of
-    // the post-truncation value would have collapsed a 150K-byte paste to the
-    // 100K that survived maxlength -- losing exactly the signal this metric
-    // exists to capture.
+  it('sets near_cap=true when an over-cap paste crossed the threshold (even after truncation)', async () => {
+    // Regression guard: the prior bytes-tracking version would have reported
+    // the post-truncation size (100K), losing the 150K intent signal. The
+    // presence-only flag captures the threshold-crossing fact regardless of
+    // the final value's size.
     const getBody = captureCreateBody();
     await loadModule('sender');
     await flushAsync();
@@ -708,29 +707,21 @@ describe('sender.js — telemetry fields on submit body', () => {
     await flushAsync();
     await flushAsync();
 
-    const body = getBody();
-    expect(body).not.toBeNull();
-    expect(typeof body.intended_content_size_bytes).toBe('number');
-    // ASCII-only paste => byte count == char count, so we can pin to the
-    // exact intent value. 150_000, not the truncated 100_000.
-    expect(body.intended_content_size_bytes).toBe(150_000);
-    expect(body.was_paste).toBe(true);
+    expect(getBody().near_cap).toBe(true);
   });
 
-  it('edit-down preserves the high-water mark from when the threshold was crossed', async () => {
-    // Codex P2 regression guard: submitting the FINAL value's byte count would
-    // have erased the threshold-crossing signal whenever the user typed up to
-    // 95K and then deleted back down before submitting.
+  it('keeps near_cap=true through edit-down (sticky once the threshold was crossed)', async () => {
+    // Regression guard: a user who typed up to 96K (crossed threshold) and
+    // then deleted back to 50K before submitting still reports the threshold
+    // crossing -- the bit is sticky for the compose session.
     const getBody = captureCreateBody();
     await loadModule('sender');
     await flushAsync();
 
     const input = document.getElementById('content');
-    // Type up to 96K (over the 95K threshold).
     input.value = 'a'.repeat(96_000);
     input.setSelectionRange(input.value.length, input.value.length);
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    // Edit back down to 50K before submitting.
     input.value = 'a'.repeat(50_000);
     input.setSelectionRange(input.value.length, input.value.length);
     input.dispatchEvent(
@@ -741,11 +732,7 @@ describe('sender.js — telemetry fields on submit body', () => {
     await flushAsync();
     await flushAsync();
 
-    const body = getBody();
-    expect(body).not.toBeNull();
-    // ASCII => bytes == chars. 96_000 (the high-water mark), not 50_000.
-    expect(body.intended_content_size_bytes).toBe(96_000);
-    expect(body.was_paste).toBe(false);
+    expect(getBody().near_cap).toBe(true);
   });
 
   it('"Create another" resets telemetry state so the next session starts clean', async () => {
@@ -754,7 +741,6 @@ describe('sender.js — telemetry fields on submit body', () => {
     await flushAsync();
 
     const input = document.getElementById('content');
-    // First submit: triggers telemetry via an over-cap paste.
     const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
     pasteEvent.clipboardData = { getData: () => 'a'.repeat(150_000) };
     input.dispatchEvent(pasteEvent);
@@ -765,7 +751,7 @@ describe('sender.js — telemetry fields on submit body', () => {
     submitForm();
     await flushAsync();
     await flushAsync();
-    expect(getBody().intended_content_size_bytes).toBeGreaterThanOrEqual(100_000);
+    expect(getBody().near_cap).toBe(true);
 
     // Reset and submit a small payload.
     document.getElementById('create-another').click();
@@ -774,8 +760,6 @@ describe('sender.js — telemetry fields on submit body', () => {
     await flushAsync();
     await flushAsync();
 
-    const body = getBody();
-    expect(body.intended_content_size_bytes).toBeUndefined();
-    expect(body.was_paste).toBeUndefined();
+    expect(getBody().near_cap).toBeUndefined();
   });
 });

@@ -42,15 +42,15 @@ class CreateTextSecret(BaseModel):
     passphrase: str | None = Field(default=None, max_length=200)
     track: bool = False
     label: str | None = Field(default=None, max_length=60)
-    # Telemetry hint from the sender form. Optional. When the user attempts
-    # to enter content at or above ~95% of the cap, the form reports the
-    # pre-truncation byte size and a was_paste flag. The route emits a
-    # `content.limit_hit` analytics event (see app/analytics.py) so we can
-    # tell whether the cap is too tight for real usage.
-    intended_content_size_bytes: int | None = Field(
-        default=None, ge=0, le=1_073_741_824
-    )
-    was_paste: bool = False
+    # Optional telemetry hint from the sender form. Set true when the user's
+    # intended content (typed or pasted, pre-truncation) crossed ~95% of the
+    # cap during the compose session -- a signal the backend can't infer
+    # post-hoc, since the textarea silently truncates over-cap pastes and
+    # edit-down erases the high-water mark. The route emits a presence-only
+    # `content.limit_hit` analytics event when this is true AND analytics is
+    # enabled in settings (see app/analytics.py + app/config.py). Aggregate-
+    # only by design: no size, no paste-vs-typed, no user identity persisted.
+    near_cap: bool = False
 
     @field_validator("expires_in")
     @classmethod

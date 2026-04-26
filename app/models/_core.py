@@ -82,17 +82,15 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     revoked_at    TEXT
 );
 
--- Lightweight event-based analytics. Generic enough to absorb future
--- event types without schema changes -- per-event-type schema lives in
--- app/analytics.py via EVENT_REGISTRY. See that module's docstring for
--- the privacy invariant ("metadata only, no end-user PII").
--- ON DELETE SET NULL preserves trend integrity through admin rotation:
--- a deleted user's events stay in the table, just anonymised.
+-- Lightweight event-based analytics. Aggregate-only by design: rows carry
+-- no user_id (audit-trail signals belong in security_log.py, not here).
+-- Per-event-type payload schema lives in app/analytics.py via EVENT_REGISTRY.
+-- See that module's docstring for the privacy invariant ("metadata only,
+-- no end-user identity, no payload that could fingerprint an individual").
 CREATE TABLE IF NOT EXISTS analytics_events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type   TEXT NOT NULL,
     occurred_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
     payload      TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -119,13 +117,6 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_user_name ON api_tokens(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_analytics_events_type_time
     ON analytics_events(event_type, occurred_at);
--- analytics_events.user_id is FK with ON DELETE SET NULL. SQLite's FK
--- cascade has to find every child row referencing the parent id; without
--- an index that's a full scan, which makes `remove-user` arbitrarily slow
--- as telemetry accumulates and holds write locks longer than necessary.
--- Mirrors idx_secrets_user_id and idx_api_tokens_user_id.
-CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id
-    ON analytics_events(user_id);
 """
 
 
@@ -207,7 +198,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 # the first boot after upgrade; fresh DBs are stamped to CURRENT on creation.
 # -----------------------------------------------------------------------------
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 
 def _migrate_to_v2(conn: sqlite3.Connection) -> None:
@@ -428,9 +419,11 @@ def _migrate_to_v4(conn: sqlite3.Connection) -> None:
     per-event-type schema lives in app/analytics.py via EVENT_REGISTRY.
 
     Idempotent via CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT
-    EXISTS; fresh DBs already have the table from TABLES_SCRIPT and the
-    index from INDICES_SCRIPT, so this fires only on legacy v3 DBs.
-    Pure-create migration: no destructive table swap, no FK gymnastics.
+    EXISTS; fresh DBs already have the table from TABLES_SCRIPT (now in
+    the v5 shape, no user_id), so this fires for-real only on legacy v3
+    DBs upgrading. The user_id column shipped with v4 and is dropped in
+    v5; we keep the v4 CREATE TABLE here unchanged so a v3 -> v5 upgrade
+    walks through the genuine v4 shape before v5 rewrites it.
     """
     conn.execute("""
         CREATE TABLE IF NOT EXISTS analytics_events (
@@ -445,13 +438,38 @@ def _migrate_to_v4(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_analytics_events_type_time "
         "ON analytics_events(event_type, occurred_at)"
     )
-    # Index the FK child column so ON DELETE SET NULL doesn't full-scan
-    # the table on every remove-user. Redundant with INDICES_SCRIPT (which
-    # init_db runs after migrations), but kept inline for symmetry with the
-    # type-time index above.
+
+
+def _migrate_to_v5(conn: sqlite3.Connection) -> None:
+    """Drop analytics_events.user_id (and its FK + index). The column was
+    added in v4 as a "default shape" for event rows; on reflection, persisting
+    user identity past a destroyed secret tensions the product's ephemeral
+    pitch and isn't load-bearing for any aggregate metric we'd actually act
+    on. Audit-trail signals belong in security_log.py, not analytics.
+
+    SQLite's ALTER TABLE DROP COLUMN can't drop FK-referenced columns cleanly
+    on every version we'd want to support, so we use the rename + recreate +
+    copy + drop pattern instead. Index drop is unconditional (it's idempotent
+    once the source column is gone).
+    """
+    conn.execute("DROP INDEX IF EXISTS idx_analytics_events_user_id")
+    conn.execute("ALTER TABLE analytics_events RENAME TO _analytics_events_v4")
+    conn.execute("""
+        CREATE TABLE analytics_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type   TEXT NOT NULL,
+            occurred_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            payload      TEXT NOT NULL DEFAULT '{}'
+        )
+    """)
+    conn.execute("""
+        INSERT INTO analytics_events (id, event_type, occurred_at, payload)
+            SELECT id, event_type, occurred_at, payload FROM _analytics_events_v4
+    """)
+    conn.execute("DROP TABLE _analytics_events_v4")
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id "
-        "ON analytics_events(user_id)"
+        "CREATE INDEX IF NOT EXISTS idx_analytics_events_type_time "
+        "ON analytics_events(event_type, occurred_at)"
     )
 
 
@@ -459,6 +477,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_to_v2,
     3: _migrate_to_v3,
     4: _migrate_to_v4,
+    5: _migrate_to_v5,
 }
 
 

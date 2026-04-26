@@ -1,5 +1,6 @@
 """Tests for sender routes: login, logout, secret creation, status endpoint, user scoping."""
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # /send page rendering
@@ -957,30 +958,46 @@ def test_cancel_rejects_cross_origin(client, auth_headers):
 
 
 # ---------------------------------------------------------------------------
-# Content-cap telemetry: optional intended_content_size_bytes + was_paste
-# fields on CreateTextSecret. Frontend sends them only when the user crossed
-# ~95% of the textarea cap; the route translates them into a content.limit_hit
-# analytics event. Telemetry write must never break the user-visible 201.
+# Content-cap telemetry: optional `near_cap: bool` flag on CreateTextSecret.
+# Frontend sets it true once the user crossed ~95% of the textarea cap during
+# the compose session; the route emits a presence-only `content.limit_hit`
+# analytics event ONLY when the flag is true AND analytics is enabled
+# operator-side. Aggregate-only by design: no payload, no user_id.
 # ---------------------------------------------------------------------------
 
 
 def _read_analytics_events():
-    """Return all rows from analytics_events as a list of dicts."""
+    """Return all rows from analytics_events as a list of dicts. v5 schema:
+    no user_id column."""
     import json
 
     from app.models._core import _connect
 
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT event_type, user_id, payload FROM analytics_events ORDER BY id"
+            "SELECT event_type, payload FROM analytics_events ORDER BY id"
         ).fetchall()
-    return [
-        {"event_type": r[0], "user_id": r[1], "payload": json.loads(r[2])} for r in rows
-    ]
+    return [{"event_type": r[0], "payload": json.loads(r[1])} for r in rows]
 
 
-def test_create_secret_omits_telemetry_when_field_absent(client, auth_headers):
-    """The steady-state path: small content, no telemetry fields, no event."""
+@pytest.fixture
+def analytics_enabled(monkeypatch):
+    """Flip settings.analytics_enabled = True for the duration of a test.
+    Off by default in production: a privacy-focused tool collects no
+    telemetry without explicit operator consent."""
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("EPHEMERA_ANALYTICS_ENABLED", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_create_secret_omits_telemetry_when_flag_absent(
+    client, auth_headers, analytics_enabled
+):
+    """Steady-state path: small content, no near_cap flag, no event."""
     r = client.post(
         "/api/secrets",
         json={"content": "small payload", "content_type": "text", "expires_in": 300},
@@ -990,19 +1007,18 @@ def test_create_secret_omits_telemetry_when_field_absent(client, auth_headers):
     assert _read_analytics_events() == []
 
 
-def test_create_secret_writes_content_limit_hit_when_field_present(
-    client, auth_headers, provisioned_user
+def test_create_secret_writes_content_limit_hit_when_near_cap_true(
+    client, auth_headers, analytics_enabled
 ):
-    """When the optional telemetry fields arrive, the route emits a
-    content.limit_hit event with the reported size + paste flag."""
+    """When near_cap=true AND analytics is enabled, the route writes a
+    presence-only event row -- no payload, no user identity."""
     r = client.post(
         "/api/secrets",
         json={
             "content": "x" * 95_000,
             "content_type": "text",
             "expires_in": 300,
-            "intended_content_size_bytes": 150_000,
-            "was_paste": True,
+            "near_cap": True,
         },
         headers=auth_headers,
     )
@@ -1012,31 +1028,30 @@ def test_create_secret_writes_content_limit_hit_when_field_present(
     assert len(events) == 1
     e = events[0]
     assert e["event_type"] == "content.limit_hit"
-    assert e["user_id"] == provisioned_user["id"]
-    assert e["payload"] == {"intended_size_bytes": 150_000, "was_paste": True}
+    assert e["payload"] == {}
 
 
-def test_create_secret_telemetry_was_paste_defaults_to_false(client, auth_headers):
-    """A submit without was_paste should record was_paste=False, not error."""
+def test_create_secret_writes_no_event_when_analytics_disabled_by_default(
+    client, auth_headers
+):
+    """The privacy default: analytics_enabled is False unless the operator
+    explicitly opts in. Even with near_cap=true on the body, no row lands."""
     r = client.post(
         "/api/secrets",
         json={
-            "content": "x" * 100,
+            "content": "x" * 95_000,
             "content_type": "text",
             "expires_in": 300,
-            "intended_content_size_bytes": 100_000,
+            "near_cap": True,
         },
         headers=auth_headers,
     )
     assert r.status_code == 201
-
-    events = _read_analytics_events()
-    assert len(events) == 1
-    assert events[0]["payload"] == {"intended_size_bytes": 100_000, "was_paste": False}
+    assert _read_analytics_events() == []
 
 
 def test_create_secret_succeeds_even_if_telemetry_write_raises(
-    client, auth_headers, monkeypatch
+    client, auth_headers, monkeypatch, analytics_enabled
 ):
     """Telemetry is fire-and-forget. A raised exception inside the analytics
     write must not change the user-visible response."""
@@ -1053,8 +1068,7 @@ def test_create_secret_succeeds_even_if_telemetry_write_raises(
             "content": "still works",
             "content_type": "text",
             "expires_in": 300,
-            "intended_content_size_bytes": 99_999,
-            "was_paste": False,
+            "near_cap": True,
         },
         headers=auth_headers,
     )
@@ -1077,22 +1091,6 @@ def test_create_secret_rejects_oversize_content_at_schema_boundary(
             "content": "x" * 100_001,
             "content_type": "text",
             "expires_in": 300,
-        },
-        headers=auth_headers,
-    )
-    assert r.status_code == 422
-
-
-def test_create_secret_rejects_negative_intended_content_size_bytes(
-    client, auth_headers
-):
-    r = client.post(
-        "/api/secrets",
-        json={
-            "content": "ok",
-            "content_type": "text",
-            "expires_in": 300,
-            "intended_content_size_bytes": -1,
         },
         headers=auth_headers,
     )

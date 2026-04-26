@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     # ("ephemera-dev", "ephemera-prod") if you run more than one instance
     # against the same authenticator so the entries don't collide.
     totp_issuer: str = Field(default="ephemera")
+    # Aggregate-only product analytics (see app/analytics.py). Off by
+    # default: a privacy-focused tool shouldn't collect any telemetry
+    # without explicit operator consent. Flip to true via env var
+    # EPHEMERA_ANALYTICS_ENABLED=true to opt in. The signal collected
+    # is presence-only (`content.limit_hit` event with empty payload),
+    # no user identity, no payload content -- enough to answer "did
+    # anyone hit the cap, how often" but nothing more.
+    analytics_enabled: bool = Field(default=False)
 
     @property
     def origins(self) -> list[str]:

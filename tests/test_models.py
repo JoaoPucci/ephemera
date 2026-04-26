@@ -821,11 +821,10 @@ def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypat
 # ---------------------------------------------------------------------------
 
 
-def test_v4_analytics_events_table_present_on_fresh_db(tmp_db_path):
-    """Fresh DBs land at v4 directly via TABLES_SCRIPT, which now includes
-    the analytics_events table. The v4 migration is a pure-create no-op
-    on fresh DBs (CREATE TABLE IF NOT EXISTS) and only fires meaningfully
-    on legacy v3 DBs."""
+def test_analytics_events_table_present_on_fresh_db(tmp_db_path):
+    """Fresh DBs land at the current version directly via TABLES_SCRIPT.
+    Schema is in v5 shape: no user_id column (aggregate-only), no FK
+    child-column index."""
     with sqlite3.connect(str(tmp_db_path)) as conn:
         names = {
             r[0]
@@ -841,12 +840,13 @@ def test_v4_analytics_events_table_present_on_fresh_db(tmp_db_path):
         }
     assert "analytics_events" in names
     assert "idx_analytics_events_type_time" in idx_names
-    # FK child-column index: without this, ON DELETE SET NULL full-scans
-    # analytics_events on every remove-user.
-    assert "idx_analytics_events_user_id" in idx_names
+    # No user_id column, so no FK child-column index either.
+    assert "idx_analytics_events_user_id" not in idx_names
 
 
-def test_v4_analytics_events_columns_match_design(tmp_db_path):
+def test_analytics_events_columns_match_v5_design(tmp_db_path):
+    """v5 dropped `user_id` (aggregate-only by design). The table now
+    carries only the bare minimum: id, event_type, occurred_at, payload."""
     with sqlite3.connect(str(tmp_db_path)) as conn:
         cols = {
             r[1]: r[2]  # name -> type
@@ -856,16 +856,17 @@ def test_v4_analytics_events_columns_match_design(tmp_db_path):
         "id": "INTEGER",
         "event_type": "TEXT",
         "occurred_at": "TIMESTAMP",
-        "user_id": "INTEGER",
         "payload": "TEXT",
     }
+    assert "user_id" not in cols
 
 
-def test_v3_legacy_db_upgrades_to_v4(tmp_path, monkeypatch):
+def test_v3_legacy_db_upgrades_to_current(tmp_path, monkeypatch):
     """Seed a v3 DB (CHECK clauses present, no analytics_events table,
     schema_version stamped at 3), boot the current code, and confirm
-    the v4 migration creates the analytics_events table without
-    disturbing the v3 CHECK constraints."""
+    migrations walk it forward through v4 (creates analytics_events with
+    user_id) and v5 (drops user_id) without disturbing the v3 CHECK
+    constraints."""
     db = tmp_path / "v3.db"
     with sqlite3.connect(str(db)) as conn:
         conn.executescript(
@@ -945,16 +946,20 @@ def test_v3_legacy_db_upgrades_to_v4(tmp_path, monkeypatch):
                     "SELECT name FROM sqlite_master WHERE type='index'"
                 ).fetchall()
             }
-        assert ver == 4
+        assert ver == 5
         assert "analytics_events" in names
-        # Both indices on analytics_events land via the v4 migration AND
-        # via INDICES_SCRIPT (which init_db re-runs after migrations).
-        # Either path alone is sufficient; assert from a legacy v3 fixture
-        # that the post-upgrade DB has them.
         assert "idx_analytics_events_type_time" in idx_names
-        assert "idx_analytics_events_user_id" in idx_names
-        # v3 CHECK clauses survive: the v4 migration is pure-create and
-        # does not touch the secrets/users tables.
+        # v5 dropped the user_id column + its index; the post-migration DB
+        # has no trace of either, regardless of the v4 intermediate state.
+        assert "idx_analytics_events_user_id" not in idx_names
+        with sqlite3.connect(str(db)) as conn2:
+            cols = {
+                r[1]
+                for r in conn2.execute("PRAGMA table_info(analytics_events)").fetchall()
+            }
+        assert "user_id" not in cols
+        # v3 CHECK clauses survive: v4/v5 migrations don't touch
+        # the secrets/users tables.
         assert "CHECK" in secrets_sql
     finally:
         config.get_settings.cache_clear()
