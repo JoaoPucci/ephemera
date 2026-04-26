@@ -122,7 +122,6 @@ p {
 .muted {
   color: var(--muted);
   font-size: 0.9rem;
-  text-align: center;
 }
 .error {
   color: var(--danger);
@@ -150,12 +149,12 @@ p {
   margin-top: var(--space-4);
 }
 
-/* Direction-aware start alignment. Composes with .muted (which defaults
-   to text-align: center) and any other rule whose centering is wrong
-   in body-text contexts. Uses `start` rather than `left` so RTL locales
-   (Arabic) flip correctly to right-aligned. */
-.text-start {
-  text-align: start;
+/* Centered text utility. Used as an explicit opt-in on page-state
+   messages (the landing page's loading / destroyed / gone states)
+   where centering reads as the design intent. Stays direction-agnostic
+   -- `center` is meaningful in both LTR and RTL writing modes. */
+.text-center {
+  text-align: center;
 }
 
 /* ===================================================================
@@ -469,7 +468,7 @@ button.copy-error:hover {
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 /* Class name retains "right" for stability against templates, but the
@@ -493,7 +492,10 @@ button.copy-error:hover {
   /* Logical padding so the asymmetric chevron room flips automatically in
      RTL: inline-end gets the 1.8rem for the chevron, inline-start gets the
      0.85rem the text hugs. Background-position for the chevron itself is
-     overridden per-direction below (no logical background-position). */
+     overridden per-direction below (no logical background-position).
+     Off the --space-* scale by design: padding-block tunes the pill's
+     vertical rhythm to match `.theme-toggle` and `.user-btn` exactly so
+     all three pills sit at identical height in the chrome row. */
   padding-block: 0.4rem;
   padding-inline: 0.85rem 1.8rem;
   /* min-width keeps the picker's width steady across locales. Without it,
@@ -614,11 +616,13 @@ button.copy-error:hover {
   inset-inline-start: 1rem;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-2);
   background: var(--surface);
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
+  /* Off-scale by design: tuned for pill-height parity with .lang-picker
+     and .theme-toggle so the three pills line up across the chrome row. */
   padding: 0.35rem 0.9rem;
   font-size: 0.8rem;
   font-weight: 500;
@@ -656,6 +660,8 @@ button.copy-error:hover {
 
 .user-sep {
   color: var(--border);
+  /* Off-scale: hairline kerning around the "·" separator, deliberately
+     sub-token to keep the glyph optically tight against its neighbours. */
   padding: 0 0.05rem;
 }
 .user-action {
@@ -707,9 +713,9 @@ button.copy-error:hover {
 
 .tabs {
   display: flex;
-  gap: 0.35rem;
-  margin-bottom: 1rem;
-  padding: 0.25rem;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-1);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -717,7 +723,7 @@ button.copy-error:hover {
 
 .tab {
   flex: 1;
-  padding: 0.5rem 0.75rem;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   font-size: 0.9rem;
   background: transparent;
@@ -753,7 +759,7 @@ button.copy-error:hover {
 .dropzone {
   border: 2px dashed var(--border);
   border-radius: 8px;
-  padding: 2rem 1rem;
+  padding: var(--space-6) var(--space-4);
   text-align: center;
   color: var(--muted);
   cursor: pointer;
@@ -776,7 +782,7 @@ button.copy-error:hover {
 
 .url-box {
   background: var(--bg);
-  padding: 0.8rem 0.9rem;
+  padding: var(--space-3);
   border-radius: 6px;
   border: 1px solid var(--border);
   word-break: break-all;
@@ -799,10 +805,7 @@ button.copy-error:hover {
    value, action(s) below. The eyebrow carries the noun ("URL", "Passphrase")
    so the helper text can stay short. */
 .result-row {
-  margin-top: 1.25rem;
-}
-.result-row + .result-row {
-  margin-top: 1.5rem;
+  margin-top: var(--space-5);
 }
 .result-eyebrow {
   display: block;
@@ -811,13 +814,13 @@ button.copy-error:hover {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  margin-bottom: 0.4rem;
+  margin-bottom: var(--space-2);
 }
 .result-hint {
   color: var(--muted);
   font-size: 0.85rem;
   line-height: 1.5;
-  margin: 0.6rem 0 0;
+  margin: var(--space-2) 0 0;
 }
 
 /* Masked passphrase: the dots read as deliberate, not as a font glitch. Length
@@ -836,7 +839,7 @@ button.copy-error:hover {
   font-size: 0.95rem;
   white-space: pre-wrap;
   word-wrap: break-word;
-  margin: 0 0 0.25rem;
+  margin: 0 0 var(--space-1);
   animation: fadein 300ms ease;
 }
 
@@ -844,11 +847,11 @@ button.copy-error:hover {
    text (which has its own bottom margin); tighter than the default
    .copy-btn gap to keep the action visually paired with its target. */
 #state-text .copy-btn {
-  margin-top: 0.6rem;
+  margin-top: var(--space-2);
 }
 #state-text .muted,
 #state-image .muted {
-  margin-top: 2rem;
+  margin-top: var(--space-6);
 }
 
 #revealed-image {
@@ -858,7 +861,7 @@ button.copy-error:hover {
   object-fit: contain;
   border-radius: 6px;
   display: block;
-  margin: 0 auto 1rem;
+  margin: 0 auto var(--space-4);
   animation: fadein 300ms ease;
   cursor: zoom-in;
   transition:
@@ -1302,9 +1305,9 @@ button.copy-error:hover {
 .status-widget {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin: 0.5rem 0 1rem;
+  margin: var(--space-2) 0 var(--space-4);
 }
 
 .status-label {
@@ -1316,6 +1319,8 @@ button.copy-error:hover {
 
 .status-pill {
   display: inline-block;
+  /* Off-scale by design: compact pill tuned to the 6px dot + 0.78rem
+     text vertical centring; --space-* values would visibly oversize it. */
   padding: 0.22rem 0.65rem;
   border-radius: 999px;
   font-size: 0.78rem;
@@ -1341,7 +1346,7 @@ button.copy-error:hover {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  margin-inline-end: 0.4rem;
+  margin-inline-end: var(--space-2);
   vertical-align: middle;
   animation: pulse 1.4s ease-in-out infinite;
 }
@@ -1372,7 +1377,7 @@ button.copy-error:hover {
 }
 
 #result-expiry {
-  margin-top: 1.25rem;
+  margin-top: var(--space-5);
 }
 
 /* ===================================================================
