@@ -150,6 +150,14 @@ p {
   margin-top: var(--space-4);
 }
 
+/* Direction-aware start alignment. Composes with .muted (which defaults
+   to text-align: center) and any other rule whose centering is wrong
+   in body-text contexts. Uses `start` rather than `left` so RTL locales
+   (Arabic) flip correctly to right-aligned. */
+.text-start {
+  text-align: start;
+}
+
 /* ===================================================================
    Form controls
    =================================================================== */
