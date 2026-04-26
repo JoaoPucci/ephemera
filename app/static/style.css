@@ -139,7 +139,15 @@ p {
   color: var(--muted);
   font-size: 0.85rem;
   line-height: 1.5;
-  margin: 1.25rem 0 0;
+  margin: var(--space-4) 0 0;
+}
+
+/* Generic "next-block, default rhythm" utility. Drops a `<p>` or any
+   block element down by the standard one-step gap so we don't have to
+   reach for inline `style="margin-top: 1rem"` when a sibling needs
+   normal vertical breathing. */
+.stack-tight {
+  margin-top: var(--space-4);
 }
 
 /* ===================================================================
@@ -230,13 +238,13 @@ label {
    visually so it reads as "child of the toggle" rather than a separate
    form row. Indent + a thin left rail does the work. */
 #label-wrap {
-  margin-inline-start: 1.6rem;
-  padding-inline-start: 0.9rem;
+  margin-inline-start: var(--space-4);
+  padding-inline-start: var(--space-3);
   border-inline-start: 2px solid var(--border);
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 #label-wrap label {
-  margin-top: 0.3rem; /* tighter than the default 1rem so it sits close to the toggle */
+  margin-top: var(--space-1); /* tighter than the default so it sits close to the toggle */
 }
 
 input[type="text"],
@@ -244,7 +252,7 @@ input[type="password"],
 select,
 textarea {
   width: 100%;
-  padding: 0.7rem 0.85rem;
+  padding: var(--space-3) var(--space-4);
   font: inherit;
   color: var(--text);
   background: var(--surface);
@@ -306,7 +314,7 @@ select {
   background: transparent;
   color: var(--muted);
   border: none;
-  padding: 0.3rem 0.55rem;
+  padding: var(--space-1) var(--space-2);
   min-height: auto;
   margin: 0;
   font-size: 0.78rem;
@@ -379,6 +387,14 @@ button.link {
   min-height: auto;
   box-shadow: none;
   font-weight: 400;
+}
+
+/* Variant: same link affordance, flush against the inline edge of its
+   container -- for cases where a link-styled button sits alongside body
+   text and its default 0.5rem inline padding would visually disconnect
+   it from the line. */
+button.link.flush {
+  padding-inline: 0;
 }
 
 button.link:hover {
