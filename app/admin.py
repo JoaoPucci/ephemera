@@ -25,6 +25,9 @@ Commands:
                                      so terminal scrollback / screen-share / chat
                                      paste don't carry the seed for routine checks).
     verify [--user <name>]           Check whether a password+code pair would authenticate.
+    analytics-summary <event_type>   Print count + p50/p95/p99 of int payload fields
+                                     for events of <event_type>. Read-only over the
+                                     analytics_events table.
 
 User-selection rules:
 - Commands without a positional user and no --user flag default to the sole
@@ -41,7 +44,7 @@ from datetime import UTC, datetime
 import pyotp
 import qrcode
 
-from . import auth, models
+from . import analytics, auth, models
 from .config import get_settings
 from .security_log import emit as audit
 
@@ -491,6 +494,34 @@ def cmd_verify(username: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 
+def cmd_analytics_summary(event_type: str) -> None:
+    """Print summary stats for events of the given type. Read-only.
+    No user flag -- analytics aggregates across all users (the user_id
+    on each row is anonymised by ON DELETE SET NULL when a user is
+    removed)."""
+    if event_type not in analytics.EVENT_REGISTRY:
+        print(
+            f"unknown event_type: {event_type!r}",
+            file=sys.stderr,
+        )
+        print(
+            f"known: {sorted(analytics.EVENT_REGISTRY.keys())}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    s = analytics.summarize(event_type)
+    print(f"event_type: {event_type}")
+    print(f"count: {s['count']}")
+    if not s["fields"]:
+        return
+    for field, stats in s["fields"].items():
+        print(
+            f"  {field}: count={stats['count']} "
+            f"min={stats['min']} p50={stats['p50']} "
+            f"p95={stats['p95']} p99={stats['p99']} max={stats['max']}"
+        )
+
+
 COMMANDS = {
     # name: (fn, positional_arity, takes_user_flag)
     "init": (cmd_init, 1, False),
@@ -505,6 +536,7 @@ COMMANDS = {
     "revoke-token": (cmd_revoke_token, 1, True),
     "diagnose": (cmd_diagnose, 0, True),
     "verify": (cmd_verify, 0, True),
+    "analytics-summary": (cmd_analytics_summary, 1, False),
 }
 
 

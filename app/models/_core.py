@@ -82,6 +82,20 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     revoked_at    TEXT
 );
 
+-- Lightweight event-based analytics. Generic enough to absorb future
+-- event types without schema changes -- per-event-type schema lives in
+-- app/analytics.py via EVENT_REGISTRY. See that module's docstring for
+-- the privacy invariant ("metadata only, no end-user PII").
+-- ON DELETE SET NULL preserves trend integrity through admin rotation:
+-- a deleted user's events stay in the table, just anonymised.
+CREATE TABLE IF NOT EXISTS analytics_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type   TEXT NOT NULL,
+    occurred_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    payload      TEXT NOT NULL DEFAULT '{}'
+);
+
 -- Schema version. Exactly one row (the CHECK pins id=1). Stamped by init_db
 -- after all migrations finish. Queried on boot so a downgrade onto a DB at
 -- a newer schema version fails loudly instead of quietly running stale code
@@ -103,6 +117,15 @@ CREATE INDEX IF NOT EXISTS idx_secrets_user_id ON secrets(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_user_name ON api_tokens(user_id, name);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_type_time
+    ON analytics_events(event_type, occurred_at);
+-- analytics_events.user_id is FK with ON DELETE SET NULL. SQLite's FK
+-- cascade has to find every child row referencing the parent id; without
+-- an index that's a full scan, which makes `remove-user` arbitrarily slow
+-- as telemetry accumulates and holds write locks longer than necessary.
+-- Mirrors idx_secrets_user_id and idx_api_tokens_user_id.
+CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id
+    ON analytics_events(user_id);
 """
 
 
@@ -184,7 +207,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 # the first boot after upgrade; fresh DBs are stamped to CURRENT on creation.
 # -----------------------------------------------------------------------------
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 def _migrate_to_v2(conn: sqlite3.Connection) -> None:
@@ -399,9 +422,43 @@ def _migrate_to_v3(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys=ON")
 
 
+def _migrate_to_v4(conn: sqlite3.Connection) -> None:
+    """Create the analytics_events table for product telemetry. Generic
+    enough to absorb future event types without schema changes -- the
+    per-event-type schema lives in app/analytics.py via EVENT_REGISTRY.
+
+    Idempotent via CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT
+    EXISTS; fresh DBs already have the table from TABLES_SCRIPT and the
+    index from INDICES_SCRIPT, so this fires only on legacy v3 DBs.
+    Pure-create migration: no destructive table swap, no FK gymnastics.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS analytics_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type   TEXT NOT NULL,
+            occurred_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            payload      TEXT NOT NULL DEFAULT '{}'
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_analytics_events_type_time "
+        "ON analytics_events(event_type, occurred_at)"
+    )
+    # Index the FK child column so ON DELETE SET NULL doesn't full-scan
+    # the table on every remove-user. Redundant with INDICES_SCRIPT (which
+    # init_db runs after migrations), but kept inline for symmetry with the
+    # type-time index above.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id "
+        "ON analytics_events(user_id)"
+    )
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_to_v2,
     3: _migrate_to_v3,
+    4: _migrate_to_v4,
 }
 
 

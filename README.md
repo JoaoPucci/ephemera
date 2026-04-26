@@ -334,6 +334,8 @@ reveal → assert content → assert a second visit shows "gone".
 - `app/dependencies.py` — bearer/session auth, session cookie, origin check
 - `app/limiter.py` — in-memory sliding-window rate limiters (login, create, reveal)
 - `app/cleanup.py` — background task purging expired + old tracked rows
+- `app/analytics.py` — append-only event table for capacity-planning telemetry
+  (sizes, counts, durations); never secret content, passphrases, or labels
 - `app/static/` — plain HTML/CSS/JS frontend with light/dark theme
 
 </details>
