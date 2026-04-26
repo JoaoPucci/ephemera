@@ -18,12 +18,28 @@ concurrency:
   group: deploy
   cancel-in-progress: false
 
+# Workflow-level grant. Most jobs only need contents:read; the verify job
+# below calls the reusable test-suite which uploads coverage to Codecov via
+# OIDC, so id-token: write has to be available. The deploy job itself
+# downgrades to contents:read explicitly (least-privilege).
 permissions:
   contents: read
+  id-token: write
 
 jobs:
+  # Re-run the full test+audit surface against the tagged ref before we
+  # touch the droplet. Tests passing on the merge PR doesn't mean tests
+  # pass NOW: a fresh CVE in pip-audit, a new npm advisory, or a stale
+  # transitive dep can fail at deploy time even when the merge that
+  # produced this tag was green. Sharing the workflow with ci.yml means
+  # the test definition can't drift between PR-time and deploy-time.
+  verify:
+    name: Re-verify tests + audit on the tagged ref
+    uses: ./.github/workflows/_test-suite.yml
+
   deploy:
     name: Tag-triggered deploy
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Environment hook. If the repo later configures required-reviewer
@@ -31,6 +47,12 @@ jobs:
     # fires here without a workflow change. Without protection rules
     # configured, this is just a label.
     environment: production
+    # Override the workflow-level id-token grant: the deploy job only
+    # needs contents:read for actions/checkout. Tailscale + SSH carry
+    # their own credentials via secrets; nothing here needs the OIDC
+    # token that the verify job above did.
+    permissions:
+      contents: read
     steps:
       - name: Join tailnet
         # Ephemeral OAuth-based join; the device disappears when the job

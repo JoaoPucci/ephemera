@@ -1,0 +1,236 @@
+# Reusable test+audit suite.
+#
+# Called by both ci.yml (PR + push-to-main verification) and deploy.yml
+# (re-verification on the tagged ref before SSH'ing to the droplet).
+# Extracting it here means the test definition can't drift between
+# PR-time and deploy-time -- both callers run the exact same jobs against
+# the exact same SHA they were invoked on.
+#
+# Forbidden-paths stays in ci.yml because its diff logic is PR-specific
+# (compares base..head, not relevant to a tag-cut). Lint stays in
+# lint.yml; lint failures don't make a deploy unsafe and gating on them
+# would slow releases for cosmetic reasons.
+
+name: test-suite
+
+on:
+  workflow_call:
+    # No inputs needed today; jobs operate on the repo at the SHA the
+    # caller was triggered against. Add inputs here if a future caller
+    # needs to skip a job or pass in alternative configuration.
+
+# Workflow-level default: the most restrictive grant any job here needs.
+# Backend and frontend-unit override per-job to add id-token: write for
+# Codecov OIDC; e2e and audit ride on this default. Reusable workflows
+# can downgrade per-job but cannot elevate above the caller's grant, so
+# the caller (ci.yml / deploy.yml) must allow id-token: write at its
+# workflow level for the OIDC uploads to succeed.
+permissions:
+  contents: read
+
+# No concurrency block: the caller controls cancellation policy. CI cancels
+# in-progress runs on a same-ref push; deploy serialises (cancel-in-progress:
+# false). Either is correct depending on context, so the called workflow
+# stays neutral.
+
+jobs:
+  backend:
+    name: Python tests (pytest)
+    runs-on: ubuntu-latest
+    # Generous cap: the suite runs a lot of real bcrypt (cost 12) to cover
+    # the constant-time auth paths. Local runs are ~8min; shared 2vCPU
+    # runners roughly double that and occasionally spike. GH Actions is
+    # free for public repos, so there's no reason to keep the cap tight.
+    timeout-minutes: 45
+    # id-token: write lets the Codecov upload step below mint an OIDC
+    # token, avoiding any need for a CODECOV_TOKEN secret. contents: read
+    # is the minimum needed for actions/checkout. Declaring permissions
+    # explicitly drops everything else off the GITHUB_TOKEN's default
+    # set (least-privilege). The caller's workflow-level permissions
+    # must allow id-token: write or this job's grant is silently
+    # downgraded.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install deps
+        # --require-hashes makes pip verify every package against the hashes
+        # in requirements-dev.txt. Any tampered wheel or unexpected transitive
+        # aborts the install rather than silently proceeding.
+        run: pip install --require-hashes -r requirements-dev.txt
+
+      - name: Run pytest
+        # bcrypt cost 12 is intentional -- ~5 minutes is expected.
+        # --cov runs against the live app code; the report lands as both
+        # terminal output (visible in the job log) and coverage.xml (kept
+        # as an artifact and uploaded to Codecov for the README badge).
+        run: pytest -q --cov --cov-report=xml --cov-report=term
+
+      - name: Upload Python coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-python
+          path: coverage.xml
+          retention-days: 14
+
+      - name: Upload Python coverage to Codecov
+        # use_oidc=true: mint a GitHub OIDC token instead of relying on
+        # tokenless mode, which is unreliable on push events to main
+        # (Codecov's default org settings reject uploads without an
+        # explicit auth path). fail_ci_if_error=false so a transient
+        # Codecov outage doesn't block the merge -- the artifact above
+        # is the authoritative copy.
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          flags: python
+          use_oidc: true
+          fail_ci_if_error: false
+
+  frontend-unit:
+    name: Frontend unit tests (Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # See backend job above: OIDC for Codecov uploads, no token secret.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run vitest
+        # --coverage emits terminal summary, an HTML browseable report under
+        # coverage/, and lcov.info that Codecov ingests below.
+        run: npm run test:unit -- --coverage
+
+      - name: Upload JS coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-js
+          path: coverage/
+          retention-days: 14
+
+      - name: Upload JS coverage to Codecov
+        # use_oidc=true: see backend job above for rationale.
+        uses: codecov/codecov-action@v5
+        with:
+          directory: coverage/
+          flags: javascript
+          use_oidc: true
+          fail_ci_if_error: false
+
+  e2e:
+    name: End-to-end smoke (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Create Python venv
+        # tests-e2e/start.sh hard-codes ./venv/bin/python -- match locally.
+        run: |
+          python -m venv venv
+          ./venv/bin/pip install --require-hashes -r requirements-dev.txt
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Install Playwright browser + system deps
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  audit:
+    name: Dependency audit (pip-audit + npm audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python deps (requirements-dev transitively includes runtime)
+        # Disable hash checking for the audit pass: pip-audit itself pulls in
+        # transitive deps that aren't in our locked set. The install that
+        # actually runs in the backend / e2e jobs uses --require-hashes and
+        # is the real integrity gate; pip-audit just needs to resolve the
+        # graph to check advisories against it.
+        #
+        # --ignore-vuln CVE-2026-3219: pip 26.0.1 (the latest on PyPI at
+        # the time of writing) is flagged -- concatenated tar+ZIP archives
+        # are installed as ZIP regardless of filename (pypa/pip#13870).
+        # Fix has merged to pip's main branch but no release has been cut
+        # yet; once pip 26.1+ is on PyPI, drop this ignore. The runtime
+        # exploitation vector against our deploys is blocked anyway:
+        # `pip install --require-hashes -r requirements.txt` rejects any
+        # archive whose SHA-256 doesn't match the committed hash.
+        run: pip-audit --disable-pip --ignore-vuln CVE-2026-3219 -r requirements-dev.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Audit npm deps
+        # --audit-level=high: fail only on HIGH or CRITICAL advisories.
+        # Low/moderate findings still appear in the job log (npm audit's
+        # stderr is always informational) but don't block merges -- those
+        # are typically toolchain-adjacent and handled via Dependabot PRs
+        # at their own pace.
+        run: npm audit --audit-level=high
