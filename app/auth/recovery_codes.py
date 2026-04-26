@@ -46,6 +46,13 @@ def generate_recovery_codes() -> tuple[list[str], str]:
 
 
 def _normalize_backup_code(code: str) -> str:
+    # Hygiene cap before any per-character work. Recovery codes are 11 chars
+    # (XXXXX-XXXXX); anything dramatically longer is an attacker probe or a
+    # paste accident. Returning "" makes consume_backup_code's bcrypt loop
+    # iterate without matching anything, preserving the constant-time
+    # iteration invariant (see consume_backup_code's docstring).
+    if len(code) > 32:
+        return ""
     code = code.strip().upper().replace(" ", "")
     if len(code) == RECOVERY_CODE_LENGTH and "-" not in code:
         code = code[:5] + "-" + code[5:]
