@@ -5,8 +5,48 @@ const form = document.getElementById('login-form');
 const err = document.getElementById('login-error');
 const codeInput = document.getElementById('code');
 const codeLabel = document.getElementById('code-label');
+const codeHint = document.getElementById('code-hint');
 const toggle = document.getElementById('toggle-code-mode');
 const codeToggleBtn = document.getElementById('toggle-code');
+
+// Recovery codes are 10 base32 chars grouped as XXXXX-XXXXX (11 visible).
+// The format helper soft-coerces input as the user types (uppercase, drop
+// non-alphanum, auto-insert dash after position 5, truncate to 10 alphanum).
+// Backend `_normalize_backup_code` is also permissive, so this is purely
+// a UX/visual nicety -- typos still go through bcrypt and miss; pasted
+// raw 10-char codes still validate without a dash. "Soft" means we never
+// reject a keystroke; we just normalize what's there.
+const RECOVERY_VISIBLE_GROUP = 5;
+const RECOVERY_ALPHANUM_TOTAL = 10;
+
+function _softFormatRecoveryCode() {
+  const before = codeInput.value;
+  const cursorOriginal = codeInput.selectionStart ?? before.length;
+  // Count alphanum chars to the left of the cursor in the raw value -- this
+  // is what we want to preserve across the format pass, regardless of whether
+  // an auto-dash is added or removed.
+  const alphanumBeforeCursor = before.slice(0, cursorOriginal).replace(/[^A-Za-z0-9]/g, '').length;
+
+  const alphanum = before
+    .replace(/[^A-Za-z0-9]/g, '')
+    .toUpperCase()
+    .slice(0, RECOVERY_ALPHANUM_TOTAL);
+
+  const formatted =
+    alphanum.length > RECOVERY_VISIBLE_GROUP
+      ? `${alphanum.slice(0, RECOVERY_VISIBLE_GROUP)}-${alphanum.slice(RECOVERY_VISIBLE_GROUP)}`
+      : alphanum;
+
+  // Step the cursor one to the right when crossing the auto-inserted dash,
+  // so typing the 6th alphanum lands the cursor *after* the dash, not on it.
+  const newCursor =
+    alphanumBeforeCursor > RECOVERY_VISIBLE_GROUP ? alphanumBeforeCursor + 1 : alphanumBeforeCursor;
+
+  if (formatted !== before) {
+    codeInput.value = formatted;
+    codeInput.setSelectionRange(newCursor, newCursor);
+  }
+}
 
 // Browsers often restore form values on reload. A TOTP code is one-shot
 // by definition, so wipe it on page load. Also wipe if the page is
@@ -48,8 +88,14 @@ function setMode(backup) {
     codeInput.setAttribute('type', 'password');
     codeInput.setAttribute('autocomplete', 'off');
     codeInput.setAttribute('inputmode', 'text');
-    codeInput.setAttribute('pattern', '[0-9A-Za-z\\-]*');
+    codeInput.setAttribute('pattern', '[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}');
+    codeInput.setAttribute('minlength', '10');
+    codeInput.setAttribute('maxlength', '11');
+    codeInput.setAttribute('autocapitalize', 'characters');
     codeInput.placeholder = 'XXXXX-XXXXX';
+    codeInput.addEventListener('input', _softFormatRecoveryCode);
+    codeHint.hidden = false;
+    codeHint.textContent = window.i18n.t('hint.recovery_format');
     codeToggleBtn.hidden = false;
     toggle.textContent = window.i18n.t('login.toggle_to_totp');
   } else {
@@ -59,7 +105,14 @@ function setMode(backup) {
     codeInput.setAttribute('type', 'text');
     codeInput.setAttribute('autocomplete', 'one-time-code');
     codeInput.setAttribute('inputmode', 'numeric');
+    codeInput.setAttribute('pattern', '[0-9]{6}');
+    codeInput.setAttribute('minlength', '6');
+    codeInput.setAttribute('maxlength', '6');
+    codeInput.setAttribute('autocapitalize', 'off');
     codeInput.placeholder = '';
+    codeInput.removeEventListener('input', _softFormatRecoveryCode);
+    codeHint.hidden = true;
+    codeHint.textContent = '';
     codeToggleBtn.hidden = true;
     toggle.textContent = window.i18n.t('login.toggle_to_recovery');
   }

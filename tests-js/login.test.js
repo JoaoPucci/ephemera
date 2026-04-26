@@ -16,10 +16,18 @@ function mountLoginForm() {
 
       <label for="code" id="code-label">6-digit code</label>
       <div class="input-with-action">
-        <input type="text" id="code" name="code" required>
+        <input type="text" id="code" name="code"
+               autocomplete="one-time-code"
+               inputmode="numeric" pattern="[0-9]{6}"
+               minlength="6" maxlength="6"
+               enterkeyhint="go"
+               autocapitalize="off" spellcheck="false"
+               aria-describedby="code-hint"
+               required>
         <button type="button" id="toggle-code" class="input-action"
                 aria-label="show code" aria-pressed="false" hidden>show</button>
       </div>
+      <p class="form-hint" id="code-hint" hidden aria-live="polite" aria-atomic="true"></p>
 
       <button type="submit">Sign in</button>
 
@@ -193,5 +201,123 @@ describe('login.js — recovery-code input masking', () => {
     expect(codeToggle.getAttribute('aria-pressed')).toBe('false');
     expect(codeToggle.textContent).toBe('show');
     expect(document.getElementById('code').getAttribute('type')).toBe('password');
+  });
+});
+
+describe('login.js — code field attribute swap on mode change', () => {
+  beforeEach(() => {
+    mountLoginForm();
+  });
+
+  it('TOTP mode keeps the field shaped for a 6-digit numeric code', async () => {
+    vi.stubGlobal('fetch', vi.fn(neverResolveFetch()));
+    await loadModule('login');
+
+    const code = document.getElementById('code');
+    expect(code.getAttribute('inputmode')).toBe('numeric');
+    expect(code.getAttribute('pattern')).toBe('[0-9]{6}');
+    expect(code.getAttribute('maxlength')).toBe('6');
+    expect(code.getAttribute('minlength')).toBe('6');
+    expect(code.getAttribute('autocomplete')).toBe('one-time-code');
+    expect(document.getElementById('code-hint').hidden).toBe(true);
+  });
+
+  it('switching to recovery mode rewrites the field for the 11-char dashed format', async () => {
+    vi.stubGlobal('fetch', vi.fn(neverResolveFetch()));
+    await loadModule('login');
+
+    document.getElementById('toggle-code-mode').click();
+
+    const code = document.getElementById('code');
+    expect(code.getAttribute('inputmode')).toBe('text');
+    expect(code.getAttribute('pattern')).toBe('[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}');
+    expect(code.getAttribute('maxlength')).toBe('11');
+    expect(code.getAttribute('minlength')).toBe('10');
+    expect(code.getAttribute('autocapitalize')).toBe('characters');
+    expect(code.getAttribute('autocomplete')).toBe('off');
+    // Hint reveals an "10 characters, dash optional" nudge in recovery mode.
+    const hint = document.getElementById('code-hint');
+    expect(hint.hidden).toBe(false);
+    expect(hint.textContent.length).toBeGreaterThan(0);
+  });
+
+  it('flipping back to TOTP restores the numeric attributes and hides the hint', async () => {
+    vi.stubGlobal('fetch', vi.fn(neverResolveFetch()));
+    await loadModule('login');
+
+    const toggleCodeMode = document.getElementById('toggle-code-mode');
+    toggleCodeMode.click(); // recovery
+    toggleCodeMode.click(); // back to TOTP
+
+    const code = document.getElementById('code');
+    expect(code.getAttribute('inputmode')).toBe('numeric');
+    expect(code.getAttribute('pattern')).toBe('[0-9]{6}');
+    expect(code.getAttribute('maxlength')).toBe('6');
+    expect(document.getElementById('code-hint').hidden).toBe(true);
+  });
+});
+
+describe('login.js — recovery code soft-format on input', () => {
+  beforeEach(() => {
+    mountLoginForm();
+  });
+
+  // Helper: type a value into the code input and dispatch a synthetic
+  // 'input' event so the soft-format listener runs. Cursor goes to end --
+  // matches the steady-state of typing left-to-right.
+  function typeIntoCode(value) {
+    const code = document.getElementById('code');
+    code.value = value;
+    code.setSelectionRange(value.length, value.length);
+    code.dispatchEvent(new Event('input', { bubbles: true }));
+    return code;
+  }
+
+  async function enterRecoveryMode() {
+    vi.stubGlobal('fetch', vi.fn(neverResolveFetch()));
+    await loadModule('login');
+    document.getElementById('toggle-code-mode').click();
+  }
+
+  it('uppercases lowercase letters as the user types', async () => {
+    await enterRecoveryMode();
+    const code = typeIntoCode('abc');
+    expect(code.value).toBe('ABC');
+  });
+
+  it('strips characters outside [A-Za-z0-9]', async () => {
+    await enterRecoveryMode();
+    const code = typeIntoCode('ab*c! 1');
+    expect(code.value).toBe('ABC1');
+  });
+
+  it('auto-inserts the dash after the 5th alphanumeric character', async () => {
+    await enterRecoveryMode();
+    const code = typeIntoCode('ABCDE6');
+    expect(code.value).toBe('ABCDE-6');
+  });
+
+  it('truncates to 10 alphanumeric characters (11 visible with the dash)', async () => {
+    await enterRecoveryMode();
+    const code = typeIntoCode('ABCDEFGHIJKL');
+    expect(code.value).toBe('ABCDE-FGHIJ');
+    expect(code.value.length).toBe(11);
+  });
+
+  it('preserves an already-dashed paste exactly as written (after uppercasing)', async () => {
+    await enterRecoveryMode();
+    const code = typeIntoCode('abcde-fghij');
+    expect(code.value).toBe('ABCDE-FGHIJ');
+  });
+
+  it('does not transform input in TOTP mode', async () => {
+    vi.stubGlobal('fetch', vi.fn(neverResolveFetch()));
+    await loadModule('login');
+    // Stay in TOTP mode (no toggle click). HTML5 maxlength would normally
+    // cap a 6-digit field, but jsdom does not enforce it on .value
+    // assignment -- so the assertion here is "the listener does not
+    // mutate the value", which is the actual contract.
+    const code = typeIntoCode('abc-123');
+    expect(code.value).toBe('abc-123'); // unchanged: soft-format listener inactive
   });
 });

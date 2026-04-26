@@ -45,7 +45,11 @@
       <form id="secret-form">
       <section id="panel-text" class="panel">
         <label for="content">{{ _("Enter your secret") }}</label>
-        <textarea id="content" name="content" rows="8" placeholder="{{ _('Type your message...') }}"></textarea>
+        <textarea id="content" name="content" rows="8"
+                  maxlength="100000"
+                  aria-describedby="content-hint"
+                  placeholder="{{ _('Type your message...') }}"></textarea>
+        <p class="form-hint" id="content-hint" hidden aria-live="polite" aria-atomic="true"></p>
       </section>
 
       <section id="panel-image" class="panel" hidden>
@@ -74,11 +78,15 @@
 
       <label for="passphrase">{{ _("Passphrase (optional)") }}</label>
       <div class="input-with-action">
-        <input type="password" id="passphrase" name="passphrase" autocomplete="new-password">
+        <input type="password" id="passphrase" name="passphrase"
+               maxlength="200"
+               aria-describedby="passphrase-hint"
+               autocomplete="new-password">
         <button type="button" id="toggle-passphrase" class="input-action"
                 aria-label="{{ _('show passphrase') }}" aria-pressed="false"
                 data-i18n-show="button.show" data-i18n-hide="button.hide">{{ _("show") }}</button>
       </div>
+      <p class="form-hint" id="passphrase-hint" hidden aria-live="polite" aria-atomic="true"></p>
 
       <label class="toggle">
         <input type="checkbox" id="track" name="track">
@@ -88,7 +96,10 @@
 
       <div id="label-wrap" hidden>
         <label for="label">{{ _("Label (for your tracked list)") }}</label>
-        <input type="text" id="label" maxlength="60" placeholder="{{ _('e.g. API key for Acme') }}">
+        <input type="text" id="label" maxlength="60"
+               aria-describedby="label-hint"
+               placeholder="{{ _('e.g. API key for Acme') }}">
+        <p class="form-hint" id="label-hint" aria-live="polite" aria-atomic="true">{{ _("Up to 60 characters. Shown only to you.") }}</p>
       </div>
 
       <p class="form-hint">

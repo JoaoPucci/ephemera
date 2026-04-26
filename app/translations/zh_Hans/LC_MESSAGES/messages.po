@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-26 00:53+0900\n"
+"POT-Creation-Date: 2026-04-26 21:36+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: zh_Hans\n"
@@ -69,57 +69,57 @@ msgid ""
 "permanently destroyed."
 msgstr "此消息只能查看一次。查看后将被永久销毁。"
 
-#: app/templates/landing.html:13 app/templates/sender.html:112
+#: app/templates/landing.html:13 app/templates/sender.html:123
 msgid "Passphrase"
 msgstr "密码短语"
 
-#: app/templates/landing.html:17 app/templates/sender.html:79
-#: app/templates/sender.html:116
+#: app/templates/landing.html:20 app/templates/sender.html:86
+#: app/templates/sender.html:127
 msgid "show passphrase"
 msgstr "显示密码短语"
 
-#: app/templates/landing.html:17 app/templates/login.html:14
-#: app/templates/login.html:22 app/templates/sender.html:80
+#: app/templates/landing.html:20 app/templates/login.html:14
+#: app/templates/login.html:33 app/templates/sender.html:87
 msgid "show"
 msgstr "显示"
 
-#: app/templates/landing.html:20
+#: app/templates/landing.html:24
 msgid "Reveal Secret"
 msgstr "查看秘密"
 
-#: app/templates/landing.html:26
+#: app/templates/landing.html:30
 msgid "Copy to clipboard"
 msgstr "复制到剪贴板"
 
-#: app/templates/landing.html:27
+#: app/templates/landing.html:31
 msgid "This secret has been destroyed."
 msgstr "此秘密已被销毁。"
 
-#: app/templates/landing.html:32
+#: app/templates/landing.html:36
 msgid "Click to view full size"
 msgstr "点击查看原图"
 
-#: app/templates/landing.html:33
+#: app/templates/landing.html:37
 msgid "Click the image for full size · this secret has been destroyed."
 msgstr "点击图片查看原图 · 此秘密已被销毁。"
 
-#: app/templates/landing.html:37
+#: app/templates/landing.html:41
 msgid "This secret is no longer available."
 msgstr "此秘密已不可用。"
 
-#: app/templates/landing.html:38
+#: app/templates/landing.html:42
 msgid "It may have already been viewed or has expired."
 msgstr "它可能已被查看或已过期。"
 
-#: app/templates/landing.html:42
+#: app/templates/landing.html:46
 msgid "Full-size image"
 msgstr "原始大小图片"
 
-#: app/templates/landing.html:44
+#: app/templates/landing.html:48
 msgid "Close full-size view"
 msgstr "关闭原图视图"
 
-#: app/templates/landing.html:44
+#: app/templates/landing.html:48
 msgid "close"
 msgstr "关闭"
 
@@ -143,15 +143,15 @@ msgstr "显示密码"
 msgid "6-digit code"
 msgstr "6 位数字验证码"
 
-#: app/templates/login.html:22
+#: app/templates/login.html:33
 msgid "show code"
 msgstr "显示验证码"
 
-#: app/templates/login.html:25
+#: app/templates/login.html:37
 msgid "Sign in"
 msgstr "登录"
 
-#: app/templates/login.html:29
+#: app/templates/login.html:41
 msgid "Use a recovery code"
 msgstr "使用恢复码"
 
@@ -175,7 +175,7 @@ msgstr "清除历史条目"
 msgid "Text"
 msgstr "文本"
 
-#: app/templates/sender.html:42 app/templates/sender.html:52
+#: app/templates/sender.html:42 app/templates/sender.html:56
 msgid "Image"
 msgstr "图片"
 
@@ -183,105 +183,109 @@ msgstr "图片"
 msgid "Enter your secret"
 msgstr "输入你的秘密"
 
-#: app/templates/sender.html:48
+#: app/templates/sender.html:51
 msgid "Type your message..."
 msgstr "输入你的消息..."
 
-#: app/templates/sender.html:54
+#: app/templates/sender.html:58
 msgid "Drop image here or click to browse"
 msgstr "将图片拖到此处或点击浏览"
 
-#: app/templates/sender.html:58
+#: app/templates/sender.html:62
 msgid "clear"
 msgstr "清除"
 
-#: app/templates/sender.html:63
+#: app/templates/sender.html:67
 msgid "Expires in"
 msgstr "过期时间"
 
-#: app/templates/sender.html:65
+#: app/templates/sender.html:69
 msgid "5 minutes"
 msgstr "5 分钟"
 
-#: app/templates/sender.html:66
+#: app/templates/sender.html:70
 msgid "30 minutes"
 msgstr "30 分钟"
 
-#: app/templates/sender.html:67
+#: app/templates/sender.html:71
 msgid "1 hour"
 msgstr "1 小时"
 
-#: app/templates/sender.html:68
+#: app/templates/sender.html:72
 msgid "4 hours"
 msgstr "4 小时"
 
-#: app/templates/sender.html:69
+#: app/templates/sender.html:73
 msgid "12 hours"
 msgstr "12 小时"
 
-#: app/templates/sender.html:70
+#: app/templates/sender.html:74
 msgid "24 hours"
 msgstr "24 小时"
 
-#: app/templates/sender.html:71
+#: app/templates/sender.html:75
 msgid "3 days"
 msgstr "3 天"
 
-#: app/templates/sender.html:72
+#: app/templates/sender.html:76
 msgid "7 days"
 msgstr "7 天"
 
-#: app/templates/sender.html:75
+#: app/templates/sender.html:79
 msgid "Passphrase (optional)"
 msgstr "密码短语（可选）"
 
-#: app/templates/sender.html:86
+#: app/templates/sender.html:94
 msgid "Track viewing status"
 msgstr "跟踪查看状态"
 
-#: app/templates/sender.html:90
+#: app/templates/sender.html:98
 msgid "Label (for your tracked list)"
 msgstr "标签（用于你的跟踪列表）"
 
-#: app/templates/sender.html:91
+#: app/templates/sender.html:101
 msgid "e.g. API key for Acme"
 msgstr "例如：Acme 的 API 密钥"
 
-#: app/templates/sender.html:95
+#: app/templates/sender.html:102
+msgid "Up to 60 characters. Shown only to you."
+msgstr "最多 60 个字符。仅自己可见。"
+
+#: app/templates/sender.html:106
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
 msgstr "创建后，你将无法再次读取内容 — 即使从你自己这一侧也无法。若日后还需要，请另外保存一份副本。"
 
-#: app/templates/sender.html:97
+#: app/templates/sender.html:108
 msgid "Create Secret"
 msgstr "创建秘密"
 
-#: app/templates/sender.html:103
+#: app/templates/sender.html:114
 msgid "Secret created."
 msgstr "秘密已创建。"
 
-#: app/templates/sender.html:106
+#: app/templates/sender.html:117
 msgid "URL"
 msgstr "URL"
 
-#: app/templates/sender.html:108
+#: app/templates/sender.html:119
 msgid "Copy URL"
 msgstr "复制链接"
 
-#: app/templates/sender.html:119
+#: app/templates/sender.html:130
 msgid "Copy passphrase"
 msgstr "复制密码短语"
 
-#: app/templates/sender.html:120
+#: app/templates/sender.html:131
 msgid "Share with the receiver"
 msgstr "与接收者分享"
 
-#: app/templates/sender.html:125
+#: app/templates/sender.html:136
 msgid "Status"
 msgstr "状态"
 
-#: app/templates/sender.html:129
+#: app/templates/sender.html:140
 msgid "Create another"
 msgstr "再创建一个"
 

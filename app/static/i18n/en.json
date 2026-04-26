@@ -58,6 +58,15 @@
     "aria_show_code": "show code",
     "aria_hide_code": "hide code"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "Maximum length reached.",
+    "passphrase_approaching": "Approaching maximum length",
+    "paste_trimmed": "Paste trimmed to {{max}} characters (was {{original}}).",
+    "label_trimmed": "Paste trimmed to {{max}} characters.",
+    "content_paste_large": "Pasted {{size}}. Confirm this is what you meant to send.",
+    "recovery_format": "10 characters, dash optional."
+  },
   "tracked": {
     "image_secret": "Image secret",
     "text_secret": "Text secret",

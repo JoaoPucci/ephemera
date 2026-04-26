@@ -954,3 +954,146 @@ def test_cancel_rejects_cross_origin(client, auth_headers):
     }
     c = client.post(f"/api/secrets/{sid}/cancel", headers=bad)
     assert c.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Content-cap telemetry: optional intended_content_size_bytes + was_paste
+# fields on CreateTextSecret. Frontend sends them only when the user crossed
+# ~95% of the textarea cap; the route translates them into a content.limit_hit
+# analytics event. Telemetry write must never break the user-visible 201.
+# ---------------------------------------------------------------------------
+
+
+def _read_analytics_events():
+    """Return all rows from analytics_events as a list of dicts."""
+    import json
+
+    from app.models._core import _connect
+
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT event_type, user_id, payload FROM analytics_events ORDER BY id"
+        ).fetchall()
+    return [
+        {"event_type": r[0], "user_id": r[1], "payload": json.loads(r[2])} for r in rows
+    ]
+
+
+def test_create_secret_omits_telemetry_when_field_absent(client, auth_headers):
+    """The steady-state path: small content, no telemetry fields, no event."""
+    r = client.post(
+        "/api/secrets",
+        json={"content": "small payload", "content_type": "text", "expires_in": 300},
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    assert _read_analytics_events() == []
+
+
+def test_create_secret_writes_content_limit_hit_when_field_present(
+    client, auth_headers, provisioned_user
+):
+    """When the optional telemetry fields arrive, the route emits a
+    content.limit_hit event with the reported size + paste flag."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x" * 95_000,
+            "content_type": "text",
+            "expires_in": 300,
+            "intended_content_size_bytes": 150_000,
+            "was_paste": True,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201, r.text
+
+    events = _read_analytics_events()
+    assert len(events) == 1
+    e = events[0]
+    assert e["event_type"] == "content.limit_hit"
+    assert e["user_id"] == provisioned_user["id"]
+    assert e["payload"] == {"intended_size_bytes": 150_000, "was_paste": True}
+
+
+def test_create_secret_telemetry_was_paste_defaults_to_false(client, auth_headers):
+    """A submit without was_paste should record was_paste=False, not error."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x" * 100,
+            "content_type": "text",
+            "expires_in": 300,
+            "intended_content_size_bytes": 100_000,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+
+    events = _read_analytics_events()
+    assert len(events) == 1
+    assert events[0]["payload"] == {"intended_size_bytes": 100_000, "was_paste": False}
+
+
+def test_create_secret_succeeds_even_if_telemetry_write_raises(
+    client, auth_headers, monkeypatch
+):
+    """Telemetry is fire-and-forget. A raised exception inside the analytics
+    write must not change the user-visible response."""
+    from app import analytics
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic telemetry failure")
+
+    monkeypatch.setattr(analytics, "record_event_standalone", boom)
+
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "still works",
+            "content_type": "text",
+            "expires_in": 300,
+            "intended_content_size_bytes": 99_999,
+            "was_paste": False,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert "url" in body and "id" in body
+    # No event was persisted because the writer was monkeypatched to raise
+    # before the underlying record_event call.
+    assert _read_analytics_events() == []
+
+
+def test_create_secret_rejects_oversize_content_at_schema_boundary(
+    client, auth_headers
+):
+    """The pydantic max_length on `content` matches the textarea cap (100 KB).
+    A direct API caller bypassing the form must hit the same ceiling."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x" * 100_001,
+            "content_type": "text",
+            "expires_in": 300,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+
+
+def test_create_secret_rejects_negative_intended_content_size_bytes(
+    client, auth_headers
+):
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "ok",
+            "content_type": "text",
+            "expires_in": 300,
+            "intended_content_size_bytes": -1,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 422

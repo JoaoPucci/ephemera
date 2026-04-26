@@ -16,11 +16,23 @@
 
       <label for="code" id="code-label">{{ _("6-digit code") }}</label>
       <div class="input-with-action">
-        <input type="text" id="code" name="code" autocomplete="one-time-code"
-               inputmode="numeric" pattern="[0-9A-Za-z\-]*" required>
+        <!-- Default attributes are TOTP-shaped (numeric, exactly 6 digits).
+             login.js setMode() rewrites the attribute set when the user
+             swaps to recovery-code mode (alphanumeric, 11 chars with dash).
+             autocomplete="one-time-code" surfaces SMS/Authenticator-app
+             suggestions on iOS Safari + macOS Safari; harmless otherwise. -->
+        <input type="text" id="code" name="code"
+               autocomplete="one-time-code"
+               inputmode="numeric" pattern="[0-9]{6}"
+               minlength="6" maxlength="6"
+               enterkeyhint="go"
+               autocapitalize="off" spellcheck="false"
+               aria-describedby="code-hint"
+               required>
         <button type="button" id="toggle-code" class="input-action"
                 aria-label="{{ _('show code') }}" aria-pressed="false" hidden>{{ _("show") }}</button>
       </div>
+      <p class="form-hint" id="code-hint" hidden aria-live="polite" aria-atomic="true"></p>
 
       <button type="submit">{{ _("Sign in") }}</button>
 

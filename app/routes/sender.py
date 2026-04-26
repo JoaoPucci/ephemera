@@ -1,5 +1,7 @@
 """Sender routes: login, logout, secret creation, status lookup."""
 
+import logging
+
 import bcrypt
 from fastapi import (
     APIRouter,
@@ -9,8 +11,8 @@ from fastapi import (
     Response,
 )
 
+from .. import analytics, crypto, models, security_log, validation
 from .. import auth as auth_mod
-from .. import crypto, models, security_log, validation
 from ..auth import BCRYPT_ROUNDS
 from ..config import Settings, get_settings
 from ..dependencies import (
@@ -35,6 +37,7 @@ from ..schemas import (
 )
 
 router = APIRouter()
+_logger = logging.getLogger("ephemera.analytics")
 
 # Caps on untyped Form(...) fields. Caddy already limits the body to ~11MB,
 # but these save us from spending bcrypt/multipart parsing on obviously
@@ -164,6 +167,8 @@ async def create_secret(
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
 
     label: str | None = None
+    intended_content_size_bytes: int | None = None
+    was_paste = False
     if ctype == "application/json":
         try:
             raw = await request.json()
@@ -179,6 +184,8 @@ async def create_secret(
         passphrase = payload.passphrase
         track = payload.track
         label = _clean_label(payload.label)
+        intended_content_size_bytes = payload.intended_content_size_bytes
+        was_paste = payload.was_paste
 
     elif ctype == "multipart/form-data":
         form = await request.form()
@@ -236,6 +243,24 @@ async def create_secret(
         expires_in=int(expires_in),
         label=label if track else None,  # labels are meaningless without tracking
     )
+
+    # Optional `content.limit_hit` analytics emit. The sender form sends
+    # intended_content_size_bytes only when the user crossed ~95% of the
+    # 100KB cap, so absence here is the steady-state. Telemetry is fire-
+    # and-forget: a write failure (validation bug, DB locked, disk full)
+    # must never break the user-visible secret-create response.
+    if intended_content_size_bytes is not None:
+        try:
+            analytics.record_event_standalone(
+                "content.limit_hit",
+                payload={
+                    "intended_size_bytes": intended_content_size_bytes,
+                    "was_paste": was_paste,
+                },
+                user_id=user["id"],
+            )
+        except Exception:
+            _logger.warning("content.limit_hit telemetry write failed", exc_info=True)
 
     return CreateSecretResponse(
         url=_build_url(row["token"], client_half),

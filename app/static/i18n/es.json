@@ -59,6 +59,15 @@
     "aria_show_code": "mostrar código",
     "aria_hide_code": "ocultar código"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "Longitud máxima alcanzada.",
+    "passphrase_approaching": "Cerca del máximo",
+    "paste_trimmed": "Texto pegado recortado a {{max}} caracteres (era {{original}}).",
+    "label_trimmed": "Texto pegado recortado a {{max}} caracteres.",
+    "content_paste_large": "Pegado: {{size}}. Confirma que querías enviar tanto.",
+    "recovery_format": "10 caracteres; el guion es opcional."
+  },
   "tracked": {
     "image_secret": "Secreto de imagen",
     "text_secret": "Secreto de texto",

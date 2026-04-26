@@ -57,6 +57,15 @@
     "aria_show_code": "コードを表示",
     "aria_hide_code": "コードを非表示"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "上限に達しました。",
+    "passphrase_approaching": "上限が近づいています",
+    "paste_trimmed": "貼り付けを {{max}} 文字に切り詰めました（元は {{original}} 文字）。",
+    "label_trimmed": "貼り付けを {{max}} 文字に切り詰めました。",
+    "content_paste_large": "{{size}} を貼り付けました。本当にこの量を送るかご確認ください。",
+    "recovery_format": "10 文字。ハイフンは任意です。"
+  },
   "tracked": {
     "image_secret": "画像の秘密",
     "text_secret": "テキストの秘密",

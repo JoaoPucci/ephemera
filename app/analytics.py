@@ -203,6 +203,22 @@ def record_event(
     )
 
 
+def record_event_standalone(
+    event_type: str,
+    *,
+    payload: dict | None = None,
+    user_id: int | None = None,
+) -> None:
+    """Convenience wrapper that opens a fresh connection, records one event,
+    commits, and closes. Use this when the call site has no transaction of
+    its own and doesn't need atomicity with surrounding writes -- e.g., the
+    sender route's post-create `content.limit_hit` emitter. Use record_event()
+    with an explicit conn when joining an existing transaction.
+    """
+    with _core._connect() as conn:
+        record_event(conn, event_type, payload=payload, user_id=user_id)
+
+
 def _percentile_index(n: int, p: float) -> int:
     """Zero-based nearest-rank index for percentile `p` of `n` sorted values,
     clamped to [0, n-1]. Uses `ceil(n*p) - 1` rather than `int(n*p)` so that

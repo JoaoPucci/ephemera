@@ -19,10 +19,14 @@ function mountLanding() {
         <div id="passphrase-wrap" hidden>
           <label for="passphrase">Passphrase</label>
           <div class="input-with-action">
-            <input type="password" id="passphrase" autocomplete="off">
+            <input type="password" id="passphrase"
+                   maxlength="200"
+                   aria-describedby="passphrase-hint"
+                   autocomplete="off">
             <button type="button" id="toggle-passphrase" class="input-action"
                     aria-label="show passphrase" aria-pressed="false">show</button>
           </div>
+          <p class="form-hint" id="passphrase-hint" hidden aria-live="polite" aria-atomic="true"></p>
         </div>
         <button id="reveal-btn" type="button">Reveal Secret</button>
         <p class="error" id="reveal-error" hidden></p>
@@ -205,5 +209,69 @@ describe('reveal.js — passphrase visibility toggle', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(toggle.textContent).toBe('show');
     expect(toggle.getAttribute('aria-label')).toBe('show passphrase');
+  });
+});
+
+describe('reveal.js — receiver passphrase approaching-max hint', () => {
+  beforeEach(() => {
+    stubLocation();
+    mountLanding();
+  });
+
+  async function loadWithPassphraseRequired() {
+    const fetchMock = vi.fn((url) => {
+      if (url.endsWith('/meta')) {
+        return Promise.resolve(jsonResponse({ passphrase_required: true }));
+      }
+      return new Promise(() => {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+  }
+
+  it('stays hidden while the passphrase is short', async () => {
+    await loadWithPassphraseRequired();
+
+    const input = document.getElementById('passphrase');
+    input.value = 'short value';
+    input.dispatchEvent(new Event('input'));
+
+    const hint = document.getElementById('passphrase-hint');
+    expect(hint.hidden).toBe(true);
+    expect(hint.textContent).toBe('');
+    expect(hint.classList.contains('is-warning')).toBe(false);
+  });
+
+  it('reveals the warning hint at >=90% of the 200-char cap', async () => {
+    await loadWithPassphraseRequired();
+
+    const input = document.getElementById('passphrase');
+    // 180 = 0.9 * 200, the documented warn-at threshold.
+    input.value = 'a'.repeat(180);
+    input.dispatchEvent(new Event('input'));
+
+    const hint = document.getElementById('passphrase-hint');
+    expect(hint.hidden).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(true);
+    // Source-of-truth string from app/static/i18n/en.json hint.passphrase_approaching.
+    expect(hint.textContent.length).toBeGreaterThan(0);
+  });
+
+  it('disappears again when the user backspaces below the threshold', async () => {
+    await loadWithPassphraseRequired();
+
+    const input = document.getElementById('passphrase');
+    input.value = 'a'.repeat(180);
+    input.dispatchEvent(new Event('input'));
+    expect(document.getElementById('passphrase-hint').hidden).toBe(false);
+
+    input.value = 'a'.repeat(50);
+    input.dispatchEvent(new Event('input'));
+
+    const hint = document.getElementById('passphrase-hint');
+    expect(hint.hidden).toBe(true);
+    expect(hint.classList.contains('is-warning')).toBe(false);
   });
 });

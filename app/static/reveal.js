@@ -13,6 +13,7 @@ const states = {
 const passphraseWrap = document.getElementById('passphrase-wrap');
 const passphraseInput = document.getElementById('passphrase');
 const passphraseToggle = document.getElementById('toggle-passphrase');
+const passphraseHint = document.getElementById('passphrase-hint');
 const revealBtn = document.getElementById('reveal-btn');
 const errBox = document.getElementById('reveal-error');
 
@@ -29,6 +30,27 @@ if (passphraseInput && passphraseToggle) {
     // aria-label stays at its template-rendered (gettext) value; aria-pressed
     // carries the state per the ARIA Authoring Practices toggle pattern, so
     // screen readers don't need a label swap.
+  });
+}
+
+// Approaching-max hint. Mirrors sender/form.js's _bindPassphraseHint shape:
+// at 90% of the 200-char cap (180 chars), surface a quiet warning. No counter
+// and no error flip at the ceiling -- a sender-chosen passphrase is bounded by
+// design, and this hint exists to catch "I'm pasting something way too long"
+// rather than to scold normal use.
+const RECV_PASSPHRASE_MAX = 200;
+const RECV_PASSPHRASE_WARN_AT = 0.9 * RECV_PASSPHRASE_MAX;
+if (passphraseInput && passphraseHint) {
+  passphraseInput.addEventListener('input', () => {
+    if (passphraseInput.value.length >= RECV_PASSPHRASE_WARN_AT) {
+      passphraseHint.hidden = false;
+      passphraseHint.textContent = window.i18n.t('hint.passphrase_approaching');
+      passphraseHint.classList.add('is-warning');
+    } else {
+      passphraseHint.hidden = true;
+      passphraseHint.textContent = '';
+      passphraseHint.classList.remove('is-warning');
+    }
   });
 }
 

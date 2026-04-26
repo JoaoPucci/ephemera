@@ -30,7 +30,11 @@ EXPIRY_PRESETS: set[int] = {300, 1800, 3600, 14400, 43200, 86400, 259200, 604800
 class CreateTextSecret(BaseModel):
     """JSON body for POST /api/secrets when content_type=text."""
 
-    content: str = Field(min_length=1, max_length=1_000_000)
+    # Cap matches the textarea's HTML maxlength. The frontend stops at this
+    # length client-side; this is the matching server-side guarantee for
+    # callers hitting the API directly. The previous 1MB ceiling was an
+    # arbitrary safety stop from before there was a deliberate product cap.
+    content: str = Field(min_length=1, max_length=100_000)
     content_type: Literal["text"]
     expires_in: int = Field(
         description="Seconds from now. Must be one of EXPIRY_PRESETS."
@@ -38,6 +42,15 @@ class CreateTextSecret(BaseModel):
     passphrase: str | None = Field(default=None, max_length=200)
     track: bool = False
     label: str | None = Field(default=None, max_length=60)
+    # Telemetry hint from the sender form. Optional. When the user attempts
+    # to enter content at or above ~95% of the cap, the form reports the
+    # pre-truncation byte size and a was_paste flag. The route emits a
+    # `content.limit_hit` analytics event (see app/analytics.py) so we can
+    # tell whether the cap is too tight for real usage.
+    intended_content_size_bytes: int | None = Field(
+        default=None, ge=0, le=1_073_741_824
+    )
+    was_paste: bool = False
 
     @field_validator("expires_in")
     @classmethod
