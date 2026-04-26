@@ -352,7 +352,6 @@ button {
   display: inline-block;
   min-height: 44px;
   padding: 0.7rem 1.75rem;
-  margin-top: 1.25rem;
   font: inherit;
   font-weight: 500;
   color: var(--accent-fg);
@@ -366,6 +365,23 @@ button {
     background 150ms ease,
     transform 150ms ease,
     box-shadow 150ms ease;
+}
+
+/* Primary-CTA spacing: opt-in. The base `button` rule used to ship with
+   `margin-top: 1.25rem`, but only ~3 of ~24 buttons across the project
+   actually wanted it; every variant (icon button, link, copy-btn,
+   chrome-menu-btn, tab) had to fight it back to 0. Now the gap is
+   explicit on the CTAs that want it.
+   - `form > button[type="submit"]` covers every form's primary submit
+     by structure (no template churn) -- login, sender, anything future.
+   - `.cta` is the escape hatch for a primary CTA that isn't a form
+     submit (e.g. landing's #reveal-btn, which is a click-handler-driven
+     button, not a form).
+   Note: a submit button wrapped in a <div> won't match the structural
+   selector -- that's by design; button rows want their own spacing rule. */
+form > button[type="submit"],
+button.cta {
+  margin-top: var(--space-5);
 }
 
 button:hover {
@@ -414,6 +430,17 @@ button.link:hover {
 
 button.copy-btn {
   min-width: 9rem;
+  /* The copy button always sits below the value it copies (URL box,
+     passphrase row, revealed text). Make the gap-from-content explicit
+     rather than accidentally inherited. */
+  margin-top: var(--space-3);
+}
+
+/* "Create another" lives at the foot of the result section as a low-key
+   restart affordance. .link kills its visual weight; the explicit gap
+   here separates it from the final result row. */
+#create-another {
+  margin-top: var(--space-4);
 }
 
 button.copied,
@@ -813,13 +840,9 @@ button.copy-error:hover {
   animation: fadein 300ms ease;
 }
 
-/* Tighten button -> content gap on the receiver pages, and widen the gap
-   before the "This secret has been destroyed." footer line.
-   Direct-child only so the show/hide toggle nested inside
-   .input-with-action keeps its centerline alignment -- the bare
-   `#state-ready button` form was specific enough to override the
-   .input-action class's `margin: 0` reset. */
-#state-ready > button,
+/* The receiver text-reveal copy button sits very close to the revealed
+   text (which has its own bottom margin); tighter than the default
+   .copy-btn gap to keep the action visually paired with its target. */
 #state-text .copy-btn {
   margin-top: 0.6rem;
 }
