@@ -257,6 +257,33 @@ def _migrate_to_v3(conn: sqlite3.Connection) -> None:
             "pre-migration backup) and retry.\n  - " + "\n  - ".join(violations)
         )
 
+    # users.id is AUTOINCREMENT; capture the historical max-issued id from
+    # sqlite_sequence BEFORE the destructive swap below. The four-step
+    # swap pattern resets the autoincrement counter to MAX(id) of the
+    # COPIED rows, which loses the no-reuse guarantee for ids of
+    # previously-deleted users. We restore it after RENAME so a future
+    # signup never gets recycled into a historical (deleted) user's id --
+    # session cookies in this codebase are keyed by user_id+
+    # session_generation, so id reuse opens a cookie-replay window.
+    #
+    # sqlite_sequence is auto-created by SQLite the first time any
+    # AUTOINCREMENT column is touched. Pre-multi-user legacy DBs declared
+    # `id INTEGER PRIMARY KEY` without AUTOINCREMENT, so the table may
+    # not exist on a v0/v1 fixture. Treat its absence as orig_seq=0.
+    seq_table_exists = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'"
+        ).fetchone()
+        is not None
+    )
+    if seq_table_exists:
+        row = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name='users'"
+        ).fetchone()
+        orig_users_seq = int(row[0]) if row else 0
+    else:
+        orig_users_seq = 0
+
     # Disable FK enforcement for the swap. The intermediate state (where
     # `secrets_new` references `users` and `users_new` exists alongside)
     # would otherwise trip FK checks. _connect re-enables FK on every
@@ -335,6 +362,26 @@ def _migrate_to_v3(conn: sqlite3.Connection) -> None:
         """)
         conn.execute("DROP TABLE users")
         conn.execute("ALTER TABLE users_new RENAME TO users")
+
+        # Restore AUTOINCREMENT counter to historical max. ALTER TABLE
+        # RENAME updates sqlite_sequence's name field, so the post-RENAME
+        # entry for 'users' carries MAX(id) of inserted rows -- which may
+        # be lower than orig_users_seq if rows were deleted before the
+        # migration. Using UPDATE then INSERT-if-no-row rather than
+        # INSERT OR REPLACE because sqlite_sequence has no UNIQUE
+        # constraint on `name` (it's a system-managed table); OR REPLACE
+        # would silently behave like a plain INSERT and leave duplicate
+        # rows behind.
+        if orig_users_seq > 0:
+            cursor = conn.execute(
+                "UPDATE sqlite_sequence SET seq = ? WHERE name = 'users'",
+                (orig_users_seq,),
+            )
+            if cursor.rowcount == 0:
+                conn.execute(
+                    "INSERT INTO sqlite_sequence (name, seq) VALUES ('users', ?)",
+                    (orig_users_seq,),
+                )
 
         # Belt-and-braces: foreign_key_check raises if any FK is dangling
         # after the swap (it shouldn't, since we kept column names + types,

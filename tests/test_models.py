@@ -749,6 +749,66 @@ def test_v2_legacy_db_clean_upgrades_to_v3(tmp_path, monkeypatch):
         config.get_settings.cache_clear()
 
 
+def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypatch):
+    """Regression guard: the four-step table swap MUST preserve sqlite_sequence
+    for the users table so AUTOINCREMENT keeps its no-reuse guarantee. Without
+    the explicit restore, the post-migration counter collapses to MAX(id) of
+    surviving rows, and a deleted user's id can be reissued to a new signup.
+    Session cookies in this codebase are keyed by user_id+session_generation,
+    so id reuse is a real cookie-replay risk -- not just a hygiene concern."""
+    db = tmp_path / "v2_seq.db"
+    _seed_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        # Insert three users with sequential ids, then delete the highest.
+        # Pre-migration sqlite_sequence tracks 3 (the historical max), even
+        # though only ids 1 and 2 remain in the users table.
+        for username in ["u1", "u2", "u3"]:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, totp_secret, "
+                "created_at, updated_at) VALUES (?, 'h', 's', 'now', 'now')",
+                (username,),
+            )
+        conn.execute("DELETE FROM users WHERE username = 'u3'")
+        seq = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name='users'"
+        ).fetchone()
+        assert seq is not None and seq[0] == 3, (
+            "fixture sanity: sqlite_sequence should track 3 after delete"
+        )
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    from app import config
+
+    config.get_settings.cache_clear()
+    try:
+        models.init_db()
+        with sqlite3.connect(str(db)) as conn:
+            seq = conn.execute(
+                "SELECT seq FROM sqlite_sequence WHERE name='users'"
+            ).fetchone()
+            # Insert a new user via AUTOINCREMENT (omit id). It must get
+            # id=4, NOT id=3 (the deleted user's id).
+            conn.execute(
+                "INSERT INTO users (username, password_hash, totp_secret, "
+                "created_at, updated_at) "
+                "VALUES ('u4', 'h', 's', 'now', 'now')"
+            )
+            (new_id,) = conn.execute(
+                "SELECT id FROM users WHERE username = 'u4'"
+            ).fetchone()
+        assert seq is not None and seq[0] >= 3, (
+            f"sqlite_sequence collapsed to {seq[0] if seq else None}; "
+            "AUTOINCREMENT no-reuse guarantee was lost across the migration"
+        )
+        assert new_id == 4, (
+            f"new user got id {new_id}, expected 4 (id 3 belonged to a "
+            "deleted user and must not be reused)"
+        )
+    finally:
+        config.get_settings.cache_clear()
+
+
 def test_v2_legacy_db_with_violating_rows_aborts_v3_migration(tmp_path, monkeypatch):
     """A v2 DB with a row that exceeds a new CHECK ceiling must abort the
     migration with a remediable error message rather than failing mid-INSERT
