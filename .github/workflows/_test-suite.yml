@@ -19,6 +19,15 @@ on:
     # caller was triggered against. Add inputs here if a future caller
     # needs to skip a job or pass in alternative configuration.
 
+# Workflow-level default: the most restrictive grant any job here needs.
+# Backend and frontend-unit override per-job to add id-token: write for
+# Codecov OIDC; e2e and audit ride on this default. Reusable workflows
+# can downgrade per-job but cannot elevate above the caller's grant, so
+# the caller (ci.yml / deploy.yml) must allow id-token: write at its
+# workflow level for the OIDC uploads to succeed.
+permissions:
+  contents: read
+
 # No concurrency block: the caller controls cancellation policy. CI cancels
 # in-progress runs on a same-ref push; deploy serialises (cancel-in-progress:
 # false). Either is correct depending on context, so the called workflow
@@ -134,6 +143,8 @@ jobs:
     name: End-to-end smoke (Playwright)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
 
@@ -177,6 +188,8 @@ jobs:
     name: Dependency audit (pip-audit + npm audit)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
 
