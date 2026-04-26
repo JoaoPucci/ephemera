@@ -90,7 +90,12 @@ def _validate_payload(event_type: str, payload: dict | None) -> dict:
             f"unknown event_type {event_type!r}; not in EVENT_REGISTRY"
         )
     schema = EVENT_REGISTRY[event_type]
-    payload = payload or {}
+    # Only None normalizes to {}. Other falsy non-dicts (`[]`, `''`, `0`,
+    # `False`, ...) MUST raise -- silently coercing them via `payload or {}`
+    # would weaken the schema contract and hide bad call sites that meant
+    # to pass real data but somehow ended up with a falsy non-dict.
+    if payload is None:
+        payload = {}
     if not isinstance(payload, dict):
         raise AnalyticsValidationError(
             f"payload must be a dict, got {type(payload).__name__}"

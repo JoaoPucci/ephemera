@@ -49,6 +49,19 @@ def test_validate_payload_allows_none_or_empty():
     assert analytics._validate_payload("content.limit_hit", {}) == {}
 
 
+@pytest.mark.parametrize("falsy_non_dict", [[], "", 0, False, set(), ()])
+def test_validate_rejects_falsy_non_dict_payload(falsy_non_dict):
+    """Only `None` normalizes to `{}`. Other falsy values that happen to
+    not be dicts (`[]`, `''`, `0`, `False`, set(), ()) MUST raise --
+    silently coercing them weakens the schema contract and hides bad
+    call sites that intended to pass real data but ended up with a
+    falsy non-dict."""
+    with pytest.raises(
+        analytics.AnalyticsValidationError, match="payload must be a dict"
+    ):
+        analytics._validate_payload("content.limit_hit", falsy_non_dict)
+
+
 # ---------------------------------------------------------------------------
 # _validate_payload: rejection paths (privacy + schema invariants)
 # ---------------------------------------------------------------------------
