@@ -728,12 +728,10 @@ def test_v2_legacy_db_clean_upgrades_to_v3(tmp_path, monkeypatch):
                 "SELECT version FROM schema_version WHERE id = 1"
             ).fetchone()
             secrets_sql = conn.execute(
-                "SELECT sql FROM sqlite_master "
-                "WHERE type='table' AND name='secrets'"
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='secrets'"
             ).fetchone()[0]
             users_sql = conn.execute(
-                "SELECT sql FROM sqlite_master "
-                "WHERE type='table' AND name='users'"
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
             ).fetchone()[0]
             # Indices got rebuilt by INDICES_SCRIPT after the migration.
             idx_names = {
@@ -751,9 +749,7 @@ def test_v2_legacy_db_clean_upgrades_to_v3(tmp_path, monkeypatch):
         config.get_settings.cache_clear()
 
 
-def test_v2_legacy_db_with_violating_rows_aborts_v3_migration(
-    tmp_path, monkeypatch
-):
+def test_v2_legacy_db_with_violating_rows_aborts_v3_migration(tmp_path, monkeypatch):
     """A v2 DB with a row that exceeds a new CHECK ceiling must abort the
     migration with a remediable error message rather than failing mid-INSERT
     inside the table-rebuild step."""

@@ -249,15 +249,12 @@ def _migrate_to_v3(conn: sqlite3.Connection) -> None:
         "SELECT COUNT(*) FROM users WHERE length(username) > 256"
     ).fetchone()[0]
     if over_username:
-        violations.append(
-            f"users.username: {over_username} row(s) exceed 256 chars"
-        )
+        violations.append(f"users.username: {over_username} row(s) exceed 256 chars")
     if violations:
         raise SchemaVersionError(
             "Cannot apply schema v3: existing rows would violate new "
             "CHECK constraints. Investigate manually (or restore a "
-            "pre-migration backup) and retry.\n  - "
-            + "\n  - ".join(violations)
+            "pre-migration backup) and retry.\n  - " + "\n  - ".join(violations)
         )
 
     # Disable FK enforcement for the swap. The intermediate state (where
