@@ -571,4 +571,277 @@ def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
         ).fetchone()
     assert int(stamped) == CURRENT_SCHEMA_VERSION
 
+
+# ---------------------------------------------------------------------------
+# Schema v3 -- CHECK constraints on user-controlled TEXT columns
+# ---------------------------------------------------------------------------
+
+
+def test_v3_check_constraints_present_on_fresh_db(tmp_db_path):
+    """Fresh DBs land at v3 directly via TABLES_SCRIPT, which now embeds the
+    CHECK clauses inline. The migration's table-rebuild path is for legacy
+    v2 DBs and is exercised in test_v2_legacy_db_clean_upgrades_to_v3 below.
+    """
+    with sqlite3.connect(str(tmp_db_path)) as conn:
+        secrets_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='secrets'"
+        ).fetchone()[0]
+        users_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+        ).fetchone()[0]
+    assert "length(passphrase) <= 80" in secrets_sql
+    assert "length(label) <= 60" in secrets_sql
+    assert "length(username) <= 256" in users_sql
+
+
+def test_v3_check_rejects_oversized_passphrase(tmp_db_path):
+    with sqlite3.connect(str(tmp_db_path)) as conn:
+        # Insert a user first so the FK has a target.
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) VALUES ('u', 'h', 's', 'now', 'now')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO secrets (id, user_id, token, content_type, "
+                "passphrase, created_at, expires_at) "
+                "VALUES ('s1', 1, 't1', 'text', ?, 'now', 'later')",
+                ("X" * 81,),
+            )
+
+
+def test_v3_check_rejects_oversized_label(tmp_db_path):
+    with sqlite3.connect(str(tmp_db_path)) as conn:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) VALUES ('u', 'h', 's', 'now', 'now')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO secrets (id, user_id, token, content_type, "
+                "label, created_at, expires_at) "
+                "VALUES ('s2', 1, 't2', 'text', ?, 'now', 'later')",
+                ("X" * 61,),
+            )
+
+
+def test_v3_check_rejects_oversized_username(tmp_db_path):
+    with (
+        sqlite3.connect(str(tmp_db_path)) as conn,
+        pytest.raises(sqlite3.IntegrityError),
+    ):
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) VALUES (?, 'h', 's', 'now', 'now')",
+            ("u" * 257,),
+        )
+
+
+def test_v3_check_allows_null_optional_columns(tmp_db_path):
+    """passphrase and label are nullable; the CHECK clauses must not fire
+    on NULL values (the IS NULL OR length(...) form preserves nullability)."""
+    with sqlite3.connect(str(tmp_db_path)) as conn:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) VALUES ('u', 'h', 's', 'now', 'now')"
+        )
+        # Both passphrase and label NULL: must not raise.
+        conn.execute(
+            "INSERT INTO secrets (id, user_id, token, content_type, "
+            "created_at, expires_at) "
+            "VALUES ('s3', 1, 't3', 'text', 'now', 'later')"
+        )
+
+
+def _seed_v2_db(db_path):
+    """Hand-roll a v2 DB shape (tables WITHOUT CHECK clauses, schema_version
+    stamped to 2). Used by the v2->v3 migration tests below."""
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                username              TEXT NOT NULL,
+                email                 TEXT,
+                password_hash         TEXT NOT NULL,
+                totp_secret           TEXT NOT NULL,
+                totp_last_step        INTEGER NOT NULL DEFAULT 0,
+                recovery_code_hashes  TEXT NOT NULL DEFAULT '[]',
+                failed_attempts       INTEGER NOT NULL DEFAULT 0,
+                lockout_until         TEXT,
+                session_generation    INTEGER NOT NULL DEFAULT 0,
+                preferred_language    TEXT,
+                created_at            TEXT NOT NULL,
+                updated_at            TEXT NOT NULL
+            );
+            CREATE TABLE secrets (
+                id            TEXT PRIMARY KEY,
+                user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token         TEXT UNIQUE NOT NULL,
+                server_key    BLOB,
+                ciphertext    BLOB,
+                content_type  TEXT NOT NULL,
+                mime_type     TEXT,
+                passphrase    TEXT,
+                track         INTEGER NOT NULL DEFAULT 0,
+                status        TEXT NOT NULL DEFAULT 'pending',
+                attempts      INTEGER NOT NULL DEFAULT 0,
+                label         TEXT,
+                created_at    TEXT NOT NULL,
+                expires_at    TEXT NOT NULL,
+                viewed_at     TEXT
+            );
+            CREATE TABLE api_tokens (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name          TEXT NOT NULL,
+                token_hash    TEXT NOT NULL,
+                created_at    TEXT NOT NULL,
+                last_used_at  TEXT,
+                revoked_at    TEXT
+            );
+            CREATE TABLE schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (id, version) VALUES (1, 2);
+            """
+        )
+
+
+def test_v2_legacy_db_clean_upgrades_to_v3(tmp_path, monkeypatch):
+    """A v2 DB with no rows that violate the new CHECKs upgrades through to
+    v3. After migration: tables carry the CHECK clauses, schema_version is
+    stamped to 3, indices are present, FKs are intact."""
+    db = tmp_path / "v2.db"
+    _seed_v2_db(db)
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    from app import config
+
+    config.get_settings.cache_clear()
+    try:
+        models.init_db()
+        with sqlite3.connect(str(db)) as conn:
+            (ver,) = conn.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            secrets_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='secrets'"
+            ).fetchone()[0]
+            users_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+            ).fetchone()[0]
+            # Indices got rebuilt by INDICES_SCRIPT after the migration.
+            idx_names = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index'"
+                ).fetchall()
+            }
+        assert ver == 3
+        assert "CHECK" in secrets_sql
+        assert "CHECK" in users_sql
+        assert "idx_secrets_token" in idx_names
+        assert "idx_users_username" in idx_names
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypatch):
+    """Regression guard: the four-step table swap MUST preserve sqlite_sequence
+    for the users table so AUTOINCREMENT keeps its no-reuse guarantee. Without
+    the explicit restore, the post-migration counter collapses to MAX(id) of
+    surviving rows, and a deleted user's id can be reissued to a new signup.
+    Session cookies in this codebase are keyed by user_id+session_generation,
+    so id reuse is a real cookie-replay risk -- not just a hygiene concern."""
+    db = tmp_path / "v2_seq.db"
+    _seed_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        # Insert three users with sequential ids, then delete the highest.
+        # Pre-migration sqlite_sequence tracks 3 (the historical max), even
+        # though only ids 1 and 2 remain in the users table.
+        for username in ["u1", "u2", "u3"]:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, totp_secret, "
+                "created_at, updated_at) VALUES (?, 'h', 's', 'now', 'now')",
+                (username,),
+            )
+        conn.execute("DELETE FROM users WHERE username = 'u3'")
+        seq = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name='users'"
+        ).fetchone()
+        assert seq is not None and seq[0] == 3, (
+            "fixture sanity: sqlite_sequence should track 3 after delete"
+        )
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    from app import config
+
+    config.get_settings.cache_clear()
+    try:
+        models.init_db()
+        with sqlite3.connect(str(db)) as conn:
+            seq = conn.execute(
+                "SELECT seq FROM sqlite_sequence WHERE name='users'"
+            ).fetchone()
+            # Insert a new user via AUTOINCREMENT (omit id). It must get
+            # id=4, NOT id=3 (the deleted user's id).
+            conn.execute(
+                "INSERT INTO users (username, password_hash, totp_secret, "
+                "created_at, updated_at) "
+                "VALUES ('u4', 'h', 's', 'now', 'now')"
+            )
+            (new_id,) = conn.execute(
+                "SELECT id FROM users WHERE username = 'u4'"
+            ).fetchone()
+        assert seq is not None and seq[0] >= 3, (
+            f"sqlite_sequence collapsed to {seq[0] if seq else None}; "
+            "AUTOINCREMENT no-reuse guarantee was lost across the migration"
+        )
+        assert new_id == 4, (
+            f"new user got id {new_id}, expected 4 (id 3 belonged to a "
+            "deleted user and must not be reused)"
+        )
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_v2_legacy_db_with_violating_rows_aborts_v3_migration(tmp_path, monkeypatch):
+    """A v2 DB with a row that exceeds a new CHECK ceiling must abort the
+    migration with a remediable error message rather than failing mid-INSERT
+    inside the table-rebuild step."""
+    from app.models._core import SchemaVersionError
+
+    db = tmp_path / "v2_dirty.db"
+    _seed_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) VALUES (?, 'h', 's', 'now', 'now')",
+            ("u" * 300,),  # 300 > 256 -> would violate v3 username CHECK
+        )
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    from app import config
+
+    config.get_settings.cache_clear()
+    try:
+        with pytest.raises(SchemaVersionError) as excinfo:
+            models.init_db()
+        msg = str(excinfo.value)
+        assert "users.username" in msg
+        assert "256" in msg
+        # Verify we did not partially apply: schema_version is still 2.
+        with sqlite3.connect(str(db)) as conn:
+            (ver,) = conn.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+        assert ver == 2
+    finally:
+        config.get_settings.cache_clear()
+
     config.get_settings.cache_clear()

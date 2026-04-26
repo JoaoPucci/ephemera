@@ -121,6 +121,28 @@ def test_consume_backup_code_rejects_unknown_code(tmp_db_path):
     assert auth.consume_backup_code("WRONG-CODE1", blob) is None
 
 
+def test_normalize_backup_code_caps_oversized_input():
+    """Hygiene cap: anything dramatically longer than the legitimate
+    11-char (XXXXX-XXXXX) format is treated as no input. Returning the
+    empty string preserves the constant-time bcrypt iteration in
+    consume_backup_code (it still runs, just doesn't match anything)."""
+    from app.auth.recovery_codes import _normalize_backup_code
+
+    assert _normalize_backup_code("A" * 33) == ""
+    assert _normalize_backup_code("A" * 1000) == ""
+    # Boundary: 32 chars is still allowed through the normalizer (it's
+    # well above the 11-char real format, but the normalizer handles
+    # whitespace / case-folding / dash-insertion for anything <= 32).
+    assert _normalize_backup_code("A" * 32) != ""
+
+
+def test_consume_backup_code_with_oversized_input_returns_none(tmp_db_path):
+    """End-to-end: the hygiene cap reaches consume_backup_code as an empty
+    string, which doesn't match any stored hash."""
+    _, blob = auth.generate_recovery_codes()
+    assert auth.consume_backup_code("X" * 100, blob) is None
+
+
 # ---------------------------------------------------------------------------
 # End-to-end authenticate()
 # ---------------------------------------------------------------------------

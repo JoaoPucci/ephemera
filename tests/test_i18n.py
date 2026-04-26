@@ -549,13 +549,15 @@ def test_locale_cookie_beats_user_preference(authed_client, provisioned_user):
 # ---------------------------------------------------------------------------
 
 
-def test_fresh_db_is_at_schema_v2(tmp_db_path):
+def test_fresh_db_is_at_current_schema_version(tmp_db_path):
     import sqlite3
+
+    from app.models._core import CURRENT_SCHEMA_VERSION
 
     with sqlite3.connect(str(tmp_db_path)) as conn:
         row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
     assert row is not None
-    assert row[0] == 2
+    assert row[0] == CURRENT_SCHEMA_VERSION
 
 
 def test_fresh_db_has_preferred_language_column(tmp_db_path):
@@ -566,10 +568,11 @@ def test_fresh_db_has_preferred_language_column(tmp_db_path):
     assert "preferred_language" in cols
 
 
-def test_v1_legacy_db_upgrades_to_v2(tmp_path, monkeypatch):
+def test_v1_legacy_db_upgrades_through_to_current(tmp_path, monkeypatch):
     """Seed a v1 DB (no preferred_language column, version stamped at 1),
-    boot the current code, and confirm the migration adds the column and
-    stamps schema_version to 2."""
+    boot the current code, and confirm migrations chain through to the
+    latest stamped version. As schema_version bumps, the assertion
+    references CURRENT_SCHEMA_VERSION rather than a hard-coded number."""
     import sqlite3
 
     db = tmp_path / "legacy.db"
@@ -616,7 +619,11 @@ def test_v1_legacy_db_upgrades_to_v2(tmp_path, monkeypatch):
                 "SELECT version FROM schema_version WHERE id = 1"
             ).fetchone()[0]
         assert "preferred_language" in cols, "migration did not add the column"
-        assert ver == 2, f"schema_version should be 2, got {ver}"
+        from app.models._core import CURRENT_SCHEMA_VERSION
+
+        assert ver == CURRENT_SCHEMA_VERSION, (
+            f"schema_version should be {CURRENT_SCHEMA_VERSION}, got {ver}"
+        )
     finally:
         config.get_settings.cache_clear()
 

@@ -78,7 +78,18 @@ def reveal(
             raise http_error(401, "passphrase_required")
         import bcrypt
 
-        if not bcrypt.checkpw(body.passphrase.encode(), row["passphrase"].encode()):
+        # Defense-in-depth length check before bcrypt: Pydantic's
+        # RevealBody.passphrase max_length=200 is the primary bound and 422s
+        # at the framework boundary, so this guard rarely fires today. It
+        # short-circuits the bcrypt cost if a future schema change ever
+        # loosens the Pydantic ceiling. Folded into the same failure branch
+        # as wrong-passphrase so the wire shape and audit trail are
+        # indistinguishable -- per invariant: receiver auth surface MUST NOT
+        # differentiate "your input was malformed" from "your input was
+        # wrong".
+        if len(body.passphrase) > 200 or not bcrypt.checkpw(
+            body.passphrase.encode(), row["passphrase"].encode()
+        ):
             attempts = models.increment_attempts(row["id"])
             security_log.emit(
                 "reveal.wrong_passphrase",
