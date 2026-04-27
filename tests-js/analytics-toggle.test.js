@@ -328,12 +328,16 @@ describe('analytics-toggle.js — opt-OUT is instant + acknowledged (asymmetric)
 describe('analytics-toggle.js — race-resilience on rapid PATCH', () => {
   beforeEach(() => mountBothSurfaces({ analyticsOptIn: false }));
 
-  it('drops a stale PATCH response when a newer one was issued in flight', async () => {
-    // Two PATCH responses, each gated on its own resolver. Test forces
-    // them to land in REVERSE order: B (newer) lands first, A (older)
-    // lands second. Without a sequence guard the older response's
-    // setState() + ephemera:me-updated would clobber B's state. With
-    // the guard, A's response is dropped silently.
+  it('serializes PATCHes: a click during in-flight queues until the current resolves', async () => {
+    // Two clicks rapid-fire: A (opt-IN) starts, B (opt-OUT) clicks
+    // before A's response lands. Pre-fix the two PATCHes ran
+    // concurrently and a "drop stale response" guard couldn't recover
+    // when the newer one failed after the older one succeeded server-
+    // side ("lost update"). Post-fix: only one PATCH is ever in
+    // flight; B waits for A to resolve, then drains. Assertions:
+    //   - At-most-one PATCH on the wire while A is pending.
+    //   - After A resolves, B's PATCH fires automatically.
+    //   - Final state reflects B (the most-recent user intent).
     let resolveA;
     let resolveB;
     let callIdx = 0;
@@ -343,26 +347,12 @@ describe('analytics-toggle.js — race-resilience on rapid PATCH', () => {
       }
       if (url === '/api/me/preferences') {
         callIdx += 1;
-        if (callIdx === 1) {
-          // First call returns analytics_opt_in mirroring the requested body.
-          return new Promise((resolve) => {
-            resolveA = () =>
-              resolve(
-                jsonResponse({
-                  id: 1,
-                  analytics_opt_in: JSON.parse(opts.body).analytics_opt_in,
-                })
-              );
-          });
-        }
         return new Promise((resolve) => {
-          resolveB = () =>
-            resolve(
-              jsonResponse({
-                id: 1,
-                analytics_opt_in: JSON.parse(opts.body).analytics_opt_in,
-              })
-            );
+          const body = JSON.parse(opts.body);
+          const responder = () =>
+            resolve(jsonResponse({ id: 1, analytics_opt_in: body.analytics_opt_in }));
+          if (callIdx === 1) resolveA = responder;
+          else resolveB = responder;
         });
       }
       return Promise.resolve(new Response(null, { status: 404 }));
@@ -371,17 +361,15 @@ describe('analytics-toggle.js — race-resilience on rapid PATCH', () => {
     await loadModule('analytics-toggle');
     await flushAsync();
 
-    // Open dialog, confirm -> PATCH A in flight (would set true).
+    // Open dialog, confirm -> PATCH A starts. inFlight=true.
     document.getElementById('analytics-toggle').click();
     await flushAsync();
     document.querySelector('.analytics-popover-confirm').click();
     await flushAsync();
+    expect(patchCalls(fetchMock)).toHaveLength(1);
 
-    // While A pending, simulate a second PATCH (e.g. drawer click while
-    // desktop response is mid-flight). Force-flip the state so opt-OUT
-    // path fires PATCH B (would set false). Use the model's own state-
-    // sync hook: dispatch ephemera:me-updated to mark the toggle as on,
-    // then click triggers the opt-OUT path.
+    // While A pending: simulate the user already on (event sync), then
+    // click again -> opt-OUT path. Should QUEUE, not fire PATCH yet.
     window.dispatchEvent(
       new CustomEvent('ephemera:me-updated', {
         detail: { analytics_opt_in: true },
@@ -389,20 +377,84 @@ describe('analytics-toggle.js — race-resilience on rapid PATCH', () => {
     );
     document.getElementById('analytics-toggle').click();
     await flushAsync();
+    // Critical: at-most-one PATCH on the wire. The queued intent has
+    // NOT been sent yet.
+    expect(patchCalls(fetchMock)).toHaveLength(1);
 
-    // Land B FIRST -- newer response.
-    resolveB();
-    await flushAsync();
-    await flushAsync();
-
-    // Land A SECOND -- stale, should be dropped.
+    // Land A: PATCH B should now drain automatically.
     resolveA();
     await flushAsync();
     await flushAsync();
+    expect(patchCalls(fetchMock)).toHaveLength(2);
+    // B's body carries the queued intent (false).
+    expect(JSON.parse(patchCalls(fetchMock)[1][1].body)).toEqual({ analytics_opt_in: false });
 
-    // Final state must reflect B (the most-recently-issued PATCH),
-    // not A. Without the sequence guard, A's late response would have
-    // called setState(true) and clobbered B's setState(false).
+    // Land B: state lands as the most-recent intent (false).
+    resolveB();
+    await flushAsync();
+    await flushAsync();
     expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('a queued intent overwrites any prior queued intent (single-slot queue)', async () => {
+    // Three rapid clicks while the first PATCH is in flight: only the
+    // most recent intent should fire after the in-flight resolves.
+    // The two intermediate clicks coalesce into one tail PATCH.
+    let resolveFirst;
+    const fetchMock = vi.fn((url, opts) => {
+      if (url === '/api/me') {
+        return Promise.resolve(jsonResponse({ id: 1, analytics_opt_in: false }));
+      }
+      if (url === '/api/me/preferences') {
+        const body = JSON.parse(opts.body);
+        if (resolveFirst) {
+          // Subsequent calls (queue drain) resolve immediately.
+          return Promise.resolve(jsonResponse({ id: 1, analytics_opt_in: body.analytics_opt_in }));
+        }
+        return new Promise((resolve) => {
+          resolveFirst = () =>
+            resolve(jsonResponse({ id: 1, analytics_opt_in: body.analytics_opt_in }));
+        });
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('analytics-toggle');
+    await flushAsync();
+
+    // First PATCH (opt-IN via dialog).
+    document.getElementById('analytics-toggle').click();
+    await flushAsync();
+    document.querySelector('.analytics-popover-confirm').click();
+    await flushAsync();
+
+    // Queue intent #1 (opt-OUT).
+    window.dispatchEvent(
+      new CustomEvent('ephemera:me-updated', {
+        detail: { analytics_opt_in: true },
+      })
+    );
+    document.getElementById('analytics-toggle').click();
+    await flushAsync();
+    // Queue intent #2 (opt-IN again -- overwrites #1 in the slot).
+    window.dispatchEvent(
+      new CustomEvent('ephemera:me-updated', {
+        detail: { analytics_opt_in: false },
+      })
+    );
+    document.getElementById('analytics-toggle').click();
+    await flushAsync();
+    document.querySelector('.analytics-popover-confirm').click();
+    await flushAsync();
+
+    expect(patchCalls(fetchMock)).toHaveLength(1); // only first is in flight
+
+    // Drain. Only one tail PATCH (intent #2) -- intent #1 was overwritten.
+    resolveFirst();
+    await flushAsync();
+    await flushAsync();
+    await flushAsync();
+    expect(patchCalls(fetchMock)).toHaveLength(2);
+    expect(JSON.parse(patchCalls(fetchMock)[1][1].body)).toEqual({ analytics_opt_in: true });
   });
 });

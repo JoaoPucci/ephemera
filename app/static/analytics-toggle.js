@@ -233,42 +233,63 @@
   }
 
   // ---- PATCH + state propagation ----
-  // `patchSeq` is the latest-issued-request marker. If a user clicks
-  // rapidly (or alternates between desktop and drawer surfaces), HTTP
-  // responses can arrive out of order. Without this guard, the older
-  // response landing last would call `setState(persisted)` with stale
-  // value and broadcast `ephemera:me-updated` with a stale payload --
-  // the visible switch would flip back to a value the user already
-  // reverted away from, and form.js's analytics-opt-in cache would
-  // diverge from the server until reload. With the guard, only the
-  // response from the latest-issued PATCH is honoured; older responses
-  // are dropped silently after the network round-trip.
-  let patchSeq = 0;
+  // Serialize to one in-flight PATCH at a time; queue at most one
+  // pending intent. Rapid toggle clicks (or alternating clicks across
+  // desktop+drawer surfaces) cannot overlap on the wire -- the second
+  // click's intent waits in `queuedNext` until the current one resolves,
+  // then drains. This guarantees the FINAL setState() reflects the
+  // user's most recent click, even if intermediate requests fail (a
+  // "drop stale response" guard alone could leave aria-checked stuck
+  // on the pre-flip value when the newest request fails after an
+  // older one already succeeded server-side -- "lost update").
+  //
+  // Trade-off: a queued click's caller gets back `null` (state will
+  // land via the broadcast `ephemera:me-updated` event after the
+  // queue drains). The original (uncoalesced) caller still gets the
+  // FINAL persisted state, so the opt-OUT ack-firing logic stays
+  // correct in the common single-click case.
+  let inFlight = false;
+  let queuedNext = null;
   async function commit(next) {
-    const seq = ++patchSeq;
-    try {
-      const res = await fetch('/api/me/preferences', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analytics_opt_in: next }),
-      });
-      if (!res.ok) throw new Error(`patch failed: ${res.status}`);
-      const me = await res.json();
-      // Stale response: a newer PATCH was issued while this one was in
-      // flight. Drop this response so it doesn't overwrite the newer
-      // pending one's eventual result. The newer request is responsible
-      // for landing the correct final state.
-      if (seq !== patchSeq) return null;
-      const persisted = Boolean(me.analytics_opt_in);
-      setState(persisted);
-      window.dispatchEvent(new CustomEvent('ephemera:me-updated', { detail: me }));
-      return persisted;
-    } catch {
-      // No toast: the switch never animated (we set state from the server
-      // response, not optimistically), so the user-perceived state never
-      // diverged from the server's. Silent failure is the right shape.
+    if (inFlight) {
+      queuedNext = next;
       return null;
     }
+    inFlight = true;
+    let finalResult = null;
+    let toApply = next;
+    try {
+      while (toApply !== null) {
+        try {
+          const res = await fetch('/api/me/preferences', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ analytics_opt_in: toApply }),
+          });
+          if (!res.ok) throw new Error(`patch failed: ${res.status}`);
+          const me = await res.json();
+          const persisted = Boolean(me.analytics_opt_in);
+          setState(persisted);
+          window.dispatchEvent(new CustomEvent('ephemera:me-updated', { detail: me }));
+          finalResult = persisted;
+        } catch {
+          // No toast: the switch never animated (state comes from the
+          // server response, not optimistically), so the user-
+          // perceived state never diverged from the server's. Silent
+          // failure is the right shape -- next click can retry.
+          finalResult = null;
+        }
+        if (queuedNext !== null) {
+          toApply = queuedNext;
+          queuedNext = null;
+        } else {
+          toApply = null;
+        }
+      }
+    } finally {
+      inFlight = false;
+    }
+    return finalResult;
   }
 
   // ---- Click handlers ----
