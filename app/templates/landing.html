@@ -12,13 +12,10 @@
       <div id="passphrase-wrap" hidden>
         <label for="passphrase">{{ _("Passphrase") }}</label>
         <div class="input-with-action">
-          <input type="password" id="passphrase"
-                 aria-describedby="passphrase-hint"
-                 autocomplete="off">
+          <input type="password" id="passphrase" autocomplete="off">
           <button type="button" id="toggle-passphrase" class="input-action"
                   aria-label="{{ _('show passphrase') }}" aria-pressed="false">{{ _("show") }}</button>
         </div>
-        <p class="form-hint" id="passphrase-hint" hidden aria-live="polite" aria-atomic="true"></p>
       </div>
       <button id="reveal-btn" type="button" class="cta">{{ _("Reveal Secret") }}</button>
       <p class="error" id="reveal-error" hidden></p>
