@@ -58,7 +58,7 @@ jobs:
         # Ephemeral OAuth-based join; the device disappears when the job
         # ends. `tags: tag:ci` lets the tailnet's ACL pin what these
         # ephemeral clients are allowed to reach.
-        uses: tailscale/github-action@v2
+        uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
