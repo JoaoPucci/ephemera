@@ -57,6 +57,15 @@
     "aria_show_code": "显示验证码",
     "aria_hide_code": "隐藏验证码"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "已达到长度上限。",
+    "passphrase_approaching": "接近长度上限",
+    "paste_trimmed": "粘贴内容已裁剪至 {{max}} 个字符（原为 {{original}}）。",
+    "label_trimmed": "粘贴内容已裁剪至 {{max}} 个字符。",
+    "content_paste_large": "已粘贴 {{size}}。请确认确实要发送这么多内容。",
+    "recovery_format": "10 个字符,连字符可省略。"
+  },
   "tracked": {
     "image_secret": "图片秘密",
     "text_secret": "文本秘密",

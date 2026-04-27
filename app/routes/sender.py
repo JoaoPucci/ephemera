@@ -1,5 +1,7 @@
 """Sender routes: login, logout, secret creation, status lookup."""
 
+import logging
+
 import bcrypt
 from fastapi import (
     APIRouter,
@@ -9,8 +11,8 @@ from fastapi import (
     Response,
 )
 
+from .. import analytics, crypto, models, security_log, validation
 from .. import auth as auth_mod
-from .. import crypto, models, security_log, validation
 from ..auth import BCRYPT_ROUNDS
 from ..config import Settings, get_settings
 from ..dependencies import (
@@ -35,6 +37,7 @@ from ..schemas import (
 )
 
 router = APIRouter()
+_logger = logging.getLogger("ephemera.analytics")
 
 # Caps on untyped Form(...) fields. Caddy already limits the body to ~11MB,
 # but these save us from spending bcrypt/multipart parsing on obviously
@@ -164,6 +167,7 @@ async def create_secret(
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
 
     label: str | None = None
+    near_cap = False
     if ctype == "application/json":
         try:
             raw = await request.json()
@@ -179,6 +183,7 @@ async def create_secret(
         passphrase = payload.passphrase
         track = payload.track
         label = _clean_label(payload.label)
+        near_cap = payload.near_cap
 
     elif ctype == "multipart/form-data":
         form = await request.form()
@@ -236,6 +241,24 @@ async def create_secret(
         expires_in=int(expires_in),
         label=label if track else None,  # labels are meaningless without tracking
     )
+
+    # Presence-only `content.limit_hit` analytics emit. Two gates:
+    #   * settings.analytics_enabled (off by default; opt-in via
+    #     EPHEMERA_ANALYTICS_ENABLED=true). A privacy-focused tool collects
+    #     no telemetry without explicit operator consent.
+    #   * near_cap from the request body. The frontend sets this true when
+    #     the user's intended (pre-truncation) content size crossed ~95% of
+    #     the cap during the compose session -- a signal the backend can't
+    #     infer post-hoc, since the textarea silently truncates over-cap
+    #     pastes and edit-down erases the high-water mark.
+    # No payload, no user_id: the row's existence is the entire signal,
+    # `count(*)` over time is the only query the table is built for.
+    # Fire-and-forget: a write failure must never break the 201.
+    if near_cap and settings.analytics_enabled:
+        try:
+            analytics.record_event_standalone("content.limit_hit")
+        except Exception:
+            _logger.warning("content.limit_hit telemetry write failed", exc_info=True)
 
     return CreateSecretResponse(
         url=_build_url(row["token"], client_half),

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-26 00:53+0900\n"
+"POT-Creation-Date: 2026-04-26 21:36+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: de\n"
@@ -71,59 +71,59 @@ msgstr ""
 "Diese Nachricht kann nur einmal gelesen werden. Nach dem Aufdecken wird "
 "sie unwiderruflich zerstört."
 
-#: app/templates/landing.html:13 app/templates/sender.html:112
+#: app/templates/landing.html:13 app/templates/sender.html:123
 msgid "Passphrase"
 msgstr "Passphrase"
 
-#: app/templates/landing.html:17 app/templates/sender.html:79
-#: app/templates/sender.html:116
+#: app/templates/landing.html:20 app/templates/sender.html:86
+#: app/templates/sender.html:127
 msgid "show passphrase"
 msgstr "Passphrase anzeigen"
 
-#: app/templates/landing.html:17 app/templates/login.html:14
-#: app/templates/login.html:22 app/templates/sender.html:80
+#: app/templates/landing.html:20 app/templates/login.html:14
+#: app/templates/login.html:33 app/templates/sender.html:87
 msgid "show"
 msgstr "anzeigen"
 
-#: app/templates/landing.html:20
+#: app/templates/landing.html:24
 msgid "Reveal Secret"
 msgstr "Geheimnis anzeigen"
 
-#: app/templates/landing.html:26
+#: app/templates/landing.html:30
 msgid "Copy to clipboard"
 msgstr "In die Zwischenablage kopieren"
 
-#: app/templates/landing.html:27
+#: app/templates/landing.html:31
 msgid "This secret has been destroyed."
 msgstr "Dieses Geheimnis wurde zerstört."
 
-#: app/templates/landing.html:32
+#: app/templates/landing.html:36
 msgid "Click to view full size"
 msgstr "Für Originalgröße klicken"
 
-#: app/templates/landing.html:33
+#: app/templates/landing.html:37
 msgid "Click the image for full size · this secret has been destroyed."
 msgstr ""
 "Klicke auf das Bild für die Originalgröße · dieses Geheimnis wurde "
 "zerstört."
 
-#: app/templates/landing.html:37
+#: app/templates/landing.html:41
 msgid "This secret is no longer available."
 msgstr "Dieses Geheimnis ist nicht mehr verfügbar."
 
-#: app/templates/landing.html:38
+#: app/templates/landing.html:42
 msgid "It may have already been viewed or has expired."
 msgstr "Es wurde möglicherweise bereits angesehen oder ist abgelaufen."
 
-#: app/templates/landing.html:42
+#: app/templates/landing.html:46
 msgid "Full-size image"
 msgstr "Bild in Originalgröße"
 
-#: app/templates/landing.html:44
+#: app/templates/landing.html:48
 msgid "Close full-size view"
 msgstr "Originalansicht schließen"
 
-#: app/templates/landing.html:44
+#: app/templates/landing.html:48
 msgid "close"
 msgstr "schließen"
 
@@ -147,15 +147,15 @@ msgstr "Passwort anzeigen"
 msgid "6-digit code"
 msgstr "6-stelliger Code"
 
-#: app/templates/login.html:22
+#: app/templates/login.html:33
 msgid "show code"
 msgstr "Code anzeigen"
 
-#: app/templates/login.html:25
+#: app/templates/login.html:37
 msgid "Sign in"
 msgstr "Anmelden"
 
-#: app/templates/login.html:29
+#: app/templates/login.html:41
 msgid "Use a recovery code"
 msgstr "Wiederherstellungscode verwenden"
 
@@ -181,7 +181,7 @@ msgstr "Vergangene Einträge löschen"
 msgid "Text"
 msgstr "Text"
 
-#: app/templates/sender.html:42 app/templates/sender.html:52
+#: app/templates/sender.html:42 app/templates/sender.html:56
 msgid "Image"
 msgstr "Bild"
 
@@ -189,71 +189,75 @@ msgstr "Bild"
 msgid "Enter your secret"
 msgstr "Gib dein Geheimnis ein"
 
-#: app/templates/sender.html:48
+#: app/templates/sender.html:51
 msgid "Type your message..."
 msgstr "Nachricht eingeben..."
 
-#: app/templates/sender.html:54
+#: app/templates/sender.html:58
 msgid "Drop image here or click to browse"
 msgstr "Bild hier ablegen oder zum Durchsuchen klicken"
 
-#: app/templates/sender.html:58
+#: app/templates/sender.html:62
 msgid "clear"
 msgstr "löschen"
 
-#: app/templates/sender.html:63
+#: app/templates/sender.html:67
 msgid "Expires in"
 msgstr "Läuft ab in"
 
-#: app/templates/sender.html:65
+#: app/templates/sender.html:69
 msgid "5 minutes"
 msgstr "5 Minuten"
 
-#: app/templates/sender.html:66
+#: app/templates/sender.html:70
 msgid "30 minutes"
 msgstr "30 Minuten"
 
-#: app/templates/sender.html:67
+#: app/templates/sender.html:71
 msgid "1 hour"
 msgstr "1 Stunde"
 
-#: app/templates/sender.html:68
+#: app/templates/sender.html:72
 msgid "4 hours"
 msgstr "4 Stunden"
 
-#: app/templates/sender.html:69
+#: app/templates/sender.html:73
 msgid "12 hours"
 msgstr "12 Stunden"
 
-#: app/templates/sender.html:70
+#: app/templates/sender.html:74
 msgid "24 hours"
 msgstr "24 Stunden"
 
-#: app/templates/sender.html:71
+#: app/templates/sender.html:75
 msgid "3 days"
 msgstr "3 Tage"
 
-#: app/templates/sender.html:72
+#: app/templates/sender.html:76
 msgid "7 days"
 msgstr "7 Tage"
 
-#: app/templates/sender.html:75
+#: app/templates/sender.html:79
 msgid "Passphrase (optional)"
 msgstr "Passphrase (optional)"
 
-#: app/templates/sender.html:86
+#: app/templates/sender.html:94
 msgid "Track viewing status"
 msgstr "Ansichtsstatus verfolgen"
 
-#: app/templates/sender.html:90
+#: app/templates/sender.html:98
 msgid "Label (for your tracked list)"
 msgstr "Bezeichnung (für deine Verfolgungsliste)"
 
-#: app/templates/sender.html:91
+#: app/templates/sender.html:101
 msgid "e.g. API key for Acme"
 msgstr "z. B. API-Schlüssel für Acme"
 
-#: app/templates/sender.html:95
+#: app/templates/sender.html:102
+msgid "Up to 60 characters. Shown only to you."
+msgstr "Bis zu 60 Zeichen. Nur für dich sichtbar."
+
+#: app/templates/sender.html:106
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
@@ -262,35 +266,35 @@ msgstr ""
 " deiner Seite aus. Speichere eine Kopie an einem anderen Ort, wenn du sie"
 " noch brauchst."
 
-#: app/templates/sender.html:97
+#: app/templates/sender.html:108
 msgid "Create Secret"
 msgstr "Geheimnis erstellen"
 
-#: app/templates/sender.html:103
+#: app/templates/sender.html:114
 msgid "Secret created."
 msgstr "Geheimnis erstellt."
 
-#: app/templates/sender.html:106
+#: app/templates/sender.html:117
 msgid "URL"
 msgstr "URL"
 
-#: app/templates/sender.html:108
+#: app/templates/sender.html:119
 msgid "Copy URL"
 msgstr "URL kopieren"
 
-#: app/templates/sender.html:119
+#: app/templates/sender.html:130
 msgid "Copy passphrase"
 msgstr "Passphrase kopieren"
 
-#: app/templates/sender.html:120
+#: app/templates/sender.html:131
 msgid "Share with the receiver"
 msgstr "Mit dem Empfänger teilen"
 
-#: app/templates/sender.html:125
+#: app/templates/sender.html:136
 msgid "Status"
 msgstr "Status"
 
-#: app/templates/sender.html:129
+#: app/templates/sender.html:140
 msgid "Create another"
 msgstr "Noch eins erstellen"
 

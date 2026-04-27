@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-26 00:53+0900\n"
+"POT-Creation-Date: 2026-04-26 21:36+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: ko\n"
@@ -69,57 +69,57 @@ msgid ""
 "permanently destroyed."
 msgstr "이 메시지는 한 번만 볼 수 있습니다. 확인하면 영구적으로 삭제됩니다."
 
-#: app/templates/landing.html:13 app/templates/sender.html:112
+#: app/templates/landing.html:13 app/templates/sender.html:123
 msgid "Passphrase"
 msgstr "패스프레이즈"
 
-#: app/templates/landing.html:17 app/templates/sender.html:79
-#: app/templates/sender.html:116
+#: app/templates/landing.html:20 app/templates/sender.html:86
+#: app/templates/sender.html:127
 msgid "show passphrase"
 msgstr "패스프레이즈 표시"
 
-#: app/templates/landing.html:17 app/templates/login.html:14
-#: app/templates/login.html:22 app/templates/sender.html:80
+#: app/templates/landing.html:20 app/templates/login.html:14
+#: app/templates/login.html:33 app/templates/sender.html:87
 msgid "show"
 msgstr "표시"
 
-#: app/templates/landing.html:20
+#: app/templates/landing.html:24
 msgid "Reveal Secret"
 msgstr "비밀 확인"
 
-#: app/templates/landing.html:26
+#: app/templates/landing.html:30
 msgid "Copy to clipboard"
 msgstr "클립보드에 복사"
 
-#: app/templates/landing.html:27
+#: app/templates/landing.html:31
 msgid "This secret has been destroyed."
 msgstr "이 비밀은 삭제되었습니다."
 
-#: app/templates/landing.html:32
+#: app/templates/landing.html:36
 msgid "Click to view full size"
 msgstr "클릭하여 원본 크기로 보기"
 
-#: app/templates/landing.html:33
+#: app/templates/landing.html:37
 msgid "Click the image for full size · this secret has been destroyed."
 msgstr "이미지를 클릭하여 원본 크기로 보기 · 이 비밀은 삭제되었습니다."
 
-#: app/templates/landing.html:37
+#: app/templates/landing.html:41
 msgid "This secret is no longer available."
 msgstr "이 비밀은 더 이상 이용할 수 없습니다."
 
-#: app/templates/landing.html:38
+#: app/templates/landing.html:42
 msgid "It may have already been viewed or has expired."
 msgstr "이미 확인되었거나 만료되었을 수 있습니다."
 
-#: app/templates/landing.html:42
+#: app/templates/landing.html:46
 msgid "Full-size image"
 msgstr "원본 크기 이미지"
 
-#: app/templates/landing.html:44
+#: app/templates/landing.html:48
 msgid "Close full-size view"
 msgstr "원본 크기 보기 닫기"
 
-#: app/templates/landing.html:44
+#: app/templates/landing.html:48
 msgid "close"
 msgstr "닫기"
 
@@ -143,15 +143,15 @@ msgstr "비밀번호 표시"
 msgid "6-digit code"
 msgstr "6자리 코드"
 
-#: app/templates/login.html:22
+#: app/templates/login.html:33
 msgid "show code"
 msgstr "코드 표시"
 
-#: app/templates/login.html:25
+#: app/templates/login.html:37
 msgid "Sign in"
 msgstr "로그인"
 
-#: app/templates/login.html:29
+#: app/templates/login.html:41
 msgid "Use a recovery code"
 msgstr "복구 코드 사용"
 
@@ -175,7 +175,7 @@ msgstr "지난 항목 지우기"
 msgid "Text"
 msgstr "텍스트"
 
-#: app/templates/sender.html:42 app/templates/sender.html:52
+#: app/templates/sender.html:42 app/templates/sender.html:56
 msgid "Image"
 msgstr "이미지"
 
@@ -183,105 +183,109 @@ msgstr "이미지"
 msgid "Enter your secret"
 msgstr "비밀을 입력하세요"
 
-#: app/templates/sender.html:48
+#: app/templates/sender.html:51
 msgid "Type your message..."
 msgstr "메시지를 입력하세요..."
 
-#: app/templates/sender.html:54
+#: app/templates/sender.html:58
 msgid "Drop image here or click to browse"
 msgstr "이미지를 여기에 놓거나 클릭하여 찾아보세요"
 
-#: app/templates/sender.html:58
+#: app/templates/sender.html:62
 msgid "clear"
 msgstr "지우기"
 
-#: app/templates/sender.html:63
+#: app/templates/sender.html:67
 msgid "Expires in"
 msgstr "만료 기한"
 
-#: app/templates/sender.html:65
+#: app/templates/sender.html:69
 msgid "5 minutes"
 msgstr "5분"
 
-#: app/templates/sender.html:66
+#: app/templates/sender.html:70
 msgid "30 minutes"
 msgstr "30분"
 
-#: app/templates/sender.html:67
+#: app/templates/sender.html:71
 msgid "1 hour"
 msgstr "1시간"
 
-#: app/templates/sender.html:68
+#: app/templates/sender.html:72
 msgid "4 hours"
 msgstr "4시간"
 
-#: app/templates/sender.html:69
+#: app/templates/sender.html:73
 msgid "12 hours"
 msgstr "12시간"
 
-#: app/templates/sender.html:70
+#: app/templates/sender.html:74
 msgid "24 hours"
 msgstr "24시간"
 
-#: app/templates/sender.html:71
+#: app/templates/sender.html:75
 msgid "3 days"
 msgstr "3일"
 
-#: app/templates/sender.html:72
+#: app/templates/sender.html:76
 msgid "7 days"
 msgstr "7일"
 
-#: app/templates/sender.html:75
+#: app/templates/sender.html:79
 msgid "Passphrase (optional)"
 msgstr "패스프레이즈 (선택)"
 
-#: app/templates/sender.html:86
+#: app/templates/sender.html:94
 msgid "Track viewing status"
 msgstr "열람 상태 추적"
 
-#: app/templates/sender.html:90
+#: app/templates/sender.html:98
 msgid "Label (for your tracked list)"
 msgstr "레이블 (추적 목록용)"
 
-#: app/templates/sender.html:91
+#: app/templates/sender.html:101
 msgid "e.g. API key for Acme"
 msgstr "예: Acme API 키"
 
-#: app/templates/sender.html:95
+#: app/templates/sender.html:102
+msgid "Up to 60 characters. Shown only to you."
+msgstr "최대 60자. 본인에게만 표시됩니다."
+
+#: app/templates/sender.html:106
 msgid ""
 "After you create this, you won't be able to read the content again — not "
 "even from your own side. Save a copy elsewhere if you'll want one."
 msgstr "만든 후에는 본인도 내용을 다시 읽을 수 없습니다. 필요할 경우 다른 곳에 복사본을 보관하세요."
 
-#: app/templates/sender.html:97
+#: app/templates/sender.html:108
 msgid "Create Secret"
 msgstr "비밀 만들기"
 
-#: app/templates/sender.html:103
+#: app/templates/sender.html:114
 msgid "Secret created."
 msgstr "비밀이 생성되었습니다."
 
-#: app/templates/sender.html:106
+#: app/templates/sender.html:117
 msgid "URL"
 msgstr "URL"
 
-#: app/templates/sender.html:108
+#: app/templates/sender.html:119
 msgid "Copy URL"
 msgstr "URL 복사"
 
-#: app/templates/sender.html:119
+#: app/templates/sender.html:130
 msgid "Copy passphrase"
 msgstr "패스프레이즈 복사"
 
-#: app/templates/sender.html:120
+#: app/templates/sender.html:131
 msgid "Share with the receiver"
 msgstr "수신자와 공유하세요"
 
-#: app/templates/sender.html:125
+#: app/templates/sender.html:136
 msgid "Status"
 msgstr "상태"
 
-#: app/templates/sender.html:129
+#: app/templates/sender.html:140
 msgid "Create another"
 msgstr "하나 더 만들기"
 

@@ -57,6 +57,15 @@
     "aria_show_code": "코드 표시",
     "aria_hide_code": "코드 숨김"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "최대 길이에 도달했습니다.",
+    "passphrase_approaching": "최대 길이에 가까워지고 있습니다",
+    "paste_trimmed": "붙여넣기를 {{max}}자로 잘랐습니다(원래 {{original}}자).",
+    "label_trimmed": "붙여넣기를 {{max}}자로 잘랐습니다.",
+    "content_paste_large": "{{size}} 붙여넣었습니다. 정말 이만큼 보내려는 건지 확인해 주세요.",
+    "recovery_format": "10자, 하이픈은 선택입니다."
+  },
   "tracked": {
     "image_secret": "이미지 비밀",
     "text_secret": "텍스트 비밀",

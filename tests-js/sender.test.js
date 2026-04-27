@@ -29,7 +29,10 @@ function mountSender() {
       </div>
       <form id="secret-form">
         <section id="panel-text">
-          <textarea id="content" name="content"></textarea>
+          <textarea id="content" name="content"
+                    maxlength="100000"
+                    aria-describedby="content-hint"></textarea>
+          <p class="form-hint" id="content-hint" hidden aria-live="polite" aria-atomic="true"></p>
         </section>
         <section id="panel-image" hidden>
           <div id="dropzone">
@@ -41,10 +44,14 @@ function mountSender() {
           </div>
         </section>
         <select id="expires_in" name="expires_in"><option value="3600" selected>1h</option></select>
-        <input type="text" id="passphrase" name="passphrase">
+        <input type="text" id="passphrase" name="passphrase"
+               maxlength="200"
+               aria-describedby="passphrase-hint">
+        <p class="form-hint" id="passphrase-hint" hidden aria-live="polite" aria-atomic="true"></p>
         <label><input type="checkbox" id="track" name="track"> Track</label>
         <div id="label-wrap" hidden>
-          <input type="text" id="label">
+          <input type="text" id="label" maxlength="60" aria-describedby="label-hint">
+          <p class="form-hint" id="label-hint" aria-live="polite" aria-atomic="true">Up to 60 characters. Shown only to you.</p>
         </div>
         <button type="submit" id="submit-btn">Create Secret</button>
         <p class="error" id="sender-error" hidden></p>
@@ -490,5 +497,388 @@ describe('sender.js — copy passphrase + show/hide on the result screen', () =>
     expect(passphraseEl().dataset.real).toBe('');
     expect(passphraseEl().textContent).toBe('');
     expect(passphraseRow().hidden).toBe(true);
+  });
+
+  it('"Create another" clears char-limit hints so a prior warning/error doesn\'t outlive form.reset()', async () => {
+    // Regression guard: form.reset() wipes input values but doesn't fire
+    // input events, so without an explicit reset path the previous session's
+    // hint state stays visible above an empty form. Reproduces all three
+    // bound hints (content/label/passphrase) at once because the underlying
+    // bug is the same for each.
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    // Reveal label-wrap so labelHint is bound and can hold an at-ceiling error.
+    document.getElementById('track').checked = true;
+    document.getElementById('track').dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Push each hint into a non-idle state.
+    const content = document.getElementById('content');
+    content.value = 'a'.repeat(96_000);
+    content.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    const label = document.getElementById('label');
+    label.value = 'a'.repeat(60); // at the 60-char ceiling -> error
+    label.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    const passphrase = document.getElementById('passphrase');
+    passphrase.value = 'a'.repeat(190); // 95% of 200-char cap -> warning
+    passphrase.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    expect(document.getElementById('content-hint').classList.contains('is-warning')).toBe(true);
+    expect(document.getElementById('label-hint').classList.contains('is-error')).toBe(true);
+    expect(document.getElementById('passphrase-hint').classList.contains('is-warning')).toBe(true);
+
+    // Submit, then start a new compose session.
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+    document.getElementById('create-another').click();
+
+    // Content hint: idle = hidden + empty.
+    const contentHint = document.getElementById('content-hint');
+    expect(contentHint.hidden).toBe(true);
+    expect(contentHint.textContent).toBe('');
+    expect(contentHint.classList.contains('is-warning')).toBe(false);
+    expect(contentHint.classList.contains('is-error')).toBe(false);
+
+    // Label hint: idle = visible with the static "Up to 60 characters..."
+    // template text, no modifier classes. (The binder captures this idle
+    // text on init and restores it when length falls below counterAt.)
+    const labelHint = document.getElementById('label-hint');
+    expect(labelHint.classList.contains('is-error')).toBe(false);
+    expect(labelHint.classList.contains('is-warning')).toBe(false);
+
+    // Passphrase hint: idle = hidden.
+    const passphraseHint = document.getElementById('passphrase-hint');
+    expect(passphraseHint.hidden).toBe(true);
+    expect(passphraseHint.classList.contains('is-warning')).toBe(false);
+  });
+});
+
+describe('sender.js — char-limit hints (content / label / passphrase)', () => {
+  beforeEach(() => {
+    mountSender();
+    // Most hint tests don't submit, so a hanging /api/secrets is fine.
+    vi.stubGlobal(
+      'fetch',
+      stubSenderFetch(() => new Promise(() => {}))
+    );
+  });
+
+  // Type-then-input simulator. jsdom's `.value =` doesn't enforce maxlength;
+  // for the steady-state typing path, the value's already <= max so it's a
+  // no-op. The browser would have rejected an over-cap typed value before it
+  // reached us; we mirror that by preconditioning `value` to <= max.
+  function setAndFireInput(input, value) {
+    input.value = value;
+    input.setSelectionRange(value.length, value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  }
+
+  // Paste simulator. We dispatch the synthetic paste with a clipboardData
+  // shim that getData() returns the pasted text from, then mutate the
+  // input value to mimic the browser's actual insertion (respecting
+  // maxlength), and finally fire input with inputType=insertFromPaste so
+  // the form.js handler runs its paste-override branch.
+  function pasteInto(input, pastedText) {
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    pasteEvent.clipboardData = { getData: () => pastedText };
+    input.dispatchEvent(pasteEvent);
+
+    const maxAttr = input.getAttribute('maxlength');
+    const max = maxAttr ? Number(maxAttr) : Infinity;
+    const selStart = input.selectionStart ?? input.value.length;
+    const selEnd = input.selectionEnd ?? input.value.length;
+    let next = input.value.slice(0, selStart) + pastedText + input.value.slice(selEnd);
+    if (next.length > max) next = next.slice(0, max);
+    input.value = next;
+    input.setSelectionRange(next.length, next.length);
+
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
+  }
+
+  it('content textarea: hint stays hidden below the 75% counter threshold', async () => {
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    setAndFireInput(input, 'a'.repeat(50_000));
+    const hint = document.getElementById('content-hint');
+    expect(hint.hidden).toBe(true);
+  });
+
+  it('content textarea: counter shows (no modifier) at the 75% threshold', async () => {
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    setAndFireInput(input, 'a'.repeat(75_000));
+    const hint = document.getElementById('content-hint');
+    expect(hint.hidden).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(false);
+    expect(hint.classList.contains('is-error')).toBe(false);
+    expect(hint.textContent).toContain('75,000');
+    expect(hint.textContent).toContain('100,000');
+  });
+
+  it('content textarea: counter goes warning at the 95% threshold', async () => {
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    setAndFireInput(input, 'a'.repeat(95_000));
+    const hint = document.getElementById('content-hint');
+    expect(hint.hidden).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(true);
+    expect(hint.classList.contains('is-error')).toBe(false);
+  });
+
+  it('content textarea: counter goes error and freezes at the 100% ceiling', async () => {
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    setAndFireInput(input, 'a'.repeat(100_000));
+    const hint = document.getElementById('content-hint');
+    expect(hint.classList.contains('is-error')).toBe(true);
+    expect(hint.textContent).toContain('100,000');
+  });
+
+  it('content textarea: pasting beyond the cap surfaces a paste-trimmed error message', async () => {
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    pasteInto(input, 'a'.repeat(150_000));
+
+    const hint = document.getElementById('content-hint');
+    expect(hint.classList.contains('is-error')).toBe(true);
+    // hint.paste_trimmed mentions the pre-truncation original size.
+    expect(hint.textContent).toContain('150,000');
+    expect(hint.textContent).toContain('100,000');
+  });
+
+  it('content textarea: pasting >=10K but under the cap surfaces a "large paste" warning', async () => {
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    pasteInto(input, 'a'.repeat(15_000));
+
+    const hint = document.getElementById('content-hint');
+    expect(hint.classList.contains('is-warning')).toBe(true);
+    expect(hint.classList.contains('is-error')).toBe(false);
+    // _formatBytes renders 15,000 chars as ~"15 KB" -- the precise rendering
+    // is locale/Intl-driven, so just assert on the unit suffix.
+    expect(hint.textContent).toContain('KB');
+  });
+
+  it('content textarea: paste-large threshold is byte-based, fires for CJK paste under 10K code units but over 10KB', async () => {
+    // Regression guard: pre-fix the threshold compared `pasted.length`
+    // (UTF-16 code units) to a "10KB" constant, missing CJK and emoji
+    // pastes whose code-unit count was small but byte size exceeded the
+    // threshold. 4K BMP CJK characters = 4K code units (well under the
+    // old 10K threshold) but ~12K UTF-8 bytes, which is the actual
+    // intended unit -- new code fires.
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    pasteInto(input, '一'.repeat(4_000));
+
+    const hint = document.getElementById('content-hint');
+    expect(hint.classList.contains('is-warning')).toBe(true);
+    expect(hint.classList.contains('is-error')).toBe(false);
+    expect(hint.textContent).toContain('KB');
+  });
+
+  it('label: trim message uses the short form (no "(was N)" parenthetical)', async () => {
+    await loadModule('sender');
+    await flushAsync();
+    // Reveal the label-wrap so the input is visible and bound.
+    document.getElementById('track').checked = true;
+    document.getElementById('track').dispatchEvent(new Event('change', { bubbles: true }));
+
+    const input = document.getElementById('label');
+    pasteInto(input, 'a'.repeat(120));
+
+    const hint = document.getElementById('label-hint');
+    expect(hint.classList.contains('is-error')).toBe(true);
+    // `hint.label_trimmed` mentions max but not `original` -- short form for
+    // a field whose ceiling is small enough that the original size is
+    // implicit.
+    expect(hint.textContent).toContain('60');
+    expect(hint.textContent).not.toContain('120');
+  });
+
+  it('unchecking track clears the label hint along with the label value', async () => {
+    // Regression guard: syncLabelVisibility() wipes label.value when track
+    // is unchecked, but didn't fire an input event -- so a stale at-error
+    // hint would still be sitting in the slot when track is re-checked.
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('track').checked = true;
+    document.getElementById('track').dispatchEvent(new Event('change', { bubbles: true }));
+
+    const input = document.getElementById('label');
+    pasteInto(input, 'a'.repeat(120));
+    const hint = document.getElementById('label-hint');
+    expect(hint.classList.contains('is-error')).toBe(true);
+
+    document.getElementById('track').checked = false;
+    document.getElementById('track').dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(hint.classList.contains('is-error')).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(false);
+  });
+
+  it('passphrase: shows approaching-max warning at 90% of the 200-char cap', async () => {
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('passphrase');
+    setAndFireInput(input, 'a'.repeat(180));
+
+    const hint = document.getElementById('passphrase-hint');
+    expect(hint.hidden).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(true);
+  });
+
+  it('passphrase: hint text swaps from "approaching" to "max reached" at the 200-char ceiling', async () => {
+    // Before the swap, the "approaching" message stayed on past the cap
+    // even though the textarea silently blocks further keystrokes, which
+    // was literally inaccurate at-limit. The cap state stays at warning
+    // (no error escalation) but the message now reflects reality.
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('passphrase');
+    setAndFireInput(input, 'a'.repeat(180));
+    const approachingText = document.getElementById('passphrase-hint').textContent;
+    expect(approachingText.length).toBeGreaterThan(0);
+
+    setAndFireInput(input, 'a'.repeat(200));
+    const hint = document.getElementById('passphrase-hint');
+    expect(hint.hidden).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(true);
+    expect(hint.classList.contains('is-error')).toBe(false);
+    expect(hint.textContent).not.toBe(approachingText);
+    // Sourced from app/static/i18n/en.json hint.max_reached.
+    expect(hint.textContent).toBe('Maximum length reached.');
+  });
+});
+
+describe('sender.js — telemetry fields on submit body', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  function captureCreateBody() {
+    let captured = null;
+    const fetchMock = stubSenderFetch((opts) => {
+      captured = opts;
+      return Promise.resolve(
+        jsonResponse({
+          url: 'https://example/s/tok#key',
+          id: 'deadbeef',
+          expires_at: '2099-01-01T00:00:00Z',
+        })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return () => (captured ? JSON.parse(captured.body) : null);
+  }
+
+  it('omits the near_cap flag when the user stayed below the 95% threshold', async () => {
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('content').value = 'small payload';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const body = getBody();
+    expect(body).not.toBeNull();
+    expect(body.near_cap).toBeUndefined();
+  });
+
+  it('sets near_cap=true when an over-cap paste crossed the threshold (even after truncation)', async () => {
+    // Regression guard: the prior bytes-tracking version would have reported
+    // the post-truncation size (100K), losing the 150K intent signal. The
+    // presence-only flag captures the threshold-crossing fact regardless of
+    // the final value's size.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    pasteEvent.clipboardData = { getData: () => 'a'.repeat(150_000) };
+    input.dispatchEvent(pasteEvent);
+    input.value = 'a'.repeat(100_000); // post-truncation visible value
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().near_cap).toBe(true);
+  });
+
+  it('keeps near_cap=true through edit-down (sticky once the threshold was crossed)', async () => {
+    // Regression guard: a user who typed up to 96K (crossed threshold) and
+    // then deleted back to 50K before submitting still reports the threshold
+    // crossing -- the bit is sticky for the compose session.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    input.value = 'a'.repeat(96_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    input.value = 'a'.repeat(50_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(
+      new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
+    );
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().near_cap).toBe(true);
+  });
+
+  it('"Create another" resets telemetry state so the next session starts clean', async () => {
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    pasteEvent.clipboardData = { getData: () => 'a'.repeat(150_000) };
+    input.dispatchEvent(pasteEvent);
+    input.value = 'a'.repeat(100_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+    expect(getBody().near_cap).toBe(true);
+
+    // Reset and submit a small payload.
+    document.getElementById('create-another').click();
+    document.getElementById('content').value = 'tiny';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().near_cap).toBeUndefined();
   });
 });

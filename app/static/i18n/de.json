@@ -58,6 +58,15 @@
     "aria_show_code": "Code anzeigen",
     "aria_hide_code": "Code verbergen"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "Maximale Länge erreicht.",
+    "passphrase_approaching": "Nahe am Maximum",
+    "paste_trimmed": "Eingefügter Text auf {{max}} Zeichen gekürzt (war {{original}}).",
+    "label_trimmed": "Eingefügter Text auf {{max}} Zeichen gekürzt.",
+    "content_paste_large": "{{size}} eingefügt. Bestätige, dass du wirklich so viel senden möchtest.",
+    "recovery_format": "10 Zeichen, Bindestrich optional."
+  },
   "tracked": {
     "image_secret": "Bild-Geheimnis",
     "text_secret": "Text-Geheimnis",

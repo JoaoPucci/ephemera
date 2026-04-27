@@ -141,6 +141,21 @@ p {
   margin: var(--space-4) 0 0;
 }
 
+/* Modifier states for inline validation feedback. The hint container is
+   permanently rendered next to its input (with aria-live="polite" and
+   aria-describedby wired in the template), so JS just toggles the
+   modifier class as the user approaches / hits the limit, or after a
+   paste gets truncated. State precedence handled in the per-form JS:
+   paste-trimmed > ceiling-reached > approaching > idle (hidden).
+   No new tokens; .is-warning rides --accent and .is-error rides
+   --danger so dark-mode variants come along for free. */
+.form-hint.is-warning {
+  color: var(--accent);
+}
+.form-hint.is-error {
+  color: var(--danger);
+}
+
 /* Generic "next-block, default rhythm" utility. Drops a `<p>` or any
    block element down by the standard one-step gap so we don't have to
    reach for inline `style="margin-top: 1rem"` when a sibling needs

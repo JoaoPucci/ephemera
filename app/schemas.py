@@ -30,7 +30,32 @@ EXPIRY_PRESETS: set[int] = {300, 1800, 3600, 14400, 43200, 86400, 259200, 604800
 class CreateTextSecret(BaseModel):
     """JSON body for POST /api/secrets when content_type=text."""
 
-    content: str = Field(min_length=1, max_length=1_000_000)
+    # Cap is 100,000 *characters* (Python code points / `len(str)`), not
+    # bytes. The browser textarea's HTML maxlength enforces UTF-16 code
+    # units, which equals codepoints for BMP content (Latin, Cyrillic,
+    # most CJK) but is half for supplementary-plane content (emoji,
+    # rare CJK ext). For BMP both sides agree on 100,000; for emoji-heavy
+    # content the browser is the tighter constraint (~50K codepoints fit
+    # in 100K UTF-16 code units), and the server happily accepts whatever
+    # the textarea allowed. API callers (which bypass the textarea) get
+    # the codepoint cap exactly. UX-driven by design: "100,000 characters"
+    # is a coherent unit across every locale we ship (English, Japanese,
+    # Chinese, Korean, ...). A bytes cap would be unfair to Japanese/CJK
+    # users -- they'd hit the limit at ~33K visible characters because
+    # each is 3 UTF-8 bytes.
+    #
+    # Worst case server-side after this layer accepts:
+    #   plaintext bytes  = up to 100,000 chars * 4 bytes/char (supplementary
+    #                      plane: emoji, rare CJK ext) = ~400 KB
+    #   ciphertext bytes = ~534 KB (Fernet adds 57 bytes framing + AES
+    #                      padding to 16-byte blocks, then base64 4/3x)
+    #   request body     = ~410 KB worst case (content + JSON envelope +
+    #                      passphrase/label/etc.) -- well within Caddy's
+    #                      11 MB body cap (docs/deployment.md).
+    # For typical content (ASCII, mostly-BMP CJK) the numbers are 1-3x
+    # smaller. The 1 MB ceiling that used to live here was an arbitrary
+    # safety stop from before there was a deliberate product cap.
+    content: str = Field(min_length=1, max_length=100_000)
     content_type: Literal["text"]
     expires_in: int = Field(
         description="Seconds from now. Must be one of EXPIRY_PRESETS."
@@ -38,6 +63,15 @@ class CreateTextSecret(BaseModel):
     passphrase: str | None = Field(default=None, max_length=200)
     track: bool = False
     label: str | None = Field(default=None, max_length=60)
+    # Optional telemetry hint from the sender form. Set true when the user's
+    # intended content (typed or pasted, pre-truncation) crossed ~95% of the
+    # cap during the compose session -- a signal the backend can't infer
+    # post-hoc, since the textarea silently truncates over-cap pastes and
+    # edit-down erases the high-water mark. The route emits a presence-only
+    # `content.limit_hit` analytics event when this is true AND analytics is
+    # enabled in settings (see app/analytics.py + app/config.py). Aggregate-
+    # only by design: no size, no paste-vs-typed, no user identity persisted.
+    near_cap: bool = False
 
     @field_validator("expires_in")
     @classmethod
@@ -55,6 +89,15 @@ class RevealBody(BaseModel):
         max_length=256,
         description="Client half of the Fernet key (base64url).",
     )
+    # 200 codepoints, NOT 200 UTF-16 code units. The reveal input in
+    # landing.html deliberately omits maxlength (vs sender.html's create-
+    # side input which still has maxlength="200" UTF-16): a sender-side
+    # UTF-16 cap is benign because browser-to-browser flows are symmetric,
+    # but a receiver-side UTF-16 cap would lock receivers out of
+    # legitimate emoji-heavy passphrases that were created via the API
+    # or by a pre-cap browser client. Server codepoint cap is the source
+    # of truth on reveal; over-cap input falls through to the generic
+    # credentials error like any wrong-passphrase attempt.
     passphrase: str | None = Field(default=None, max_length=200)
 
 

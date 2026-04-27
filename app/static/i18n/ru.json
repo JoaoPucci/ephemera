@@ -60,6 +60,15 @@
     "aria_show_code": "показать код",
     "aria_hide_code": "скрыть код"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "Достигнут максимум.",
+    "passphrase_approaching": "Близко к максимуму",
+    "paste_trimmed": "Вставка обрезана до {{max}} символов (было {{original}}).",
+    "label_trimmed": "Вставка обрезана до {{max}} символов.",
+    "content_paste_large": "Вставлено {{size}}. Подтвердите, что хотите отправить именно столько.",
+    "recovery_format": "10 символов; дефис не обязателен."
+  },
   "tracked": {
     "image_secret": "Секрет-изображение",
     "text_secret": "Секрет-текст",

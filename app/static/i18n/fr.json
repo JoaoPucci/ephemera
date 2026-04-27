@@ -59,6 +59,15 @@
     "aria_show_code": "afficher le code",
     "aria_hide_code": "masquer le code"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "Limite atteinte.",
+    "passphrase_approaching": "Proche de la limite",
+    "paste_trimmed": "Texte collé tronqué à {{max}} caractères (faisait {{original}}).",
+    "label_trimmed": "Texte collé tronqué à {{max}} caractères.",
+    "content_paste_large": "{{size}} collés. Confirmez que vous vouliez bien envoyer autant.",
+    "recovery_format": "10 caractères, tiret facultatif."
+  },
   "tracked": {
     "image_secret": "Secret image",
     "text_secret": "Secret texte",

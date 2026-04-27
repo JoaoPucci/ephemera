@@ -1,5 +1,6 @@
 """Tests for sender routes: login, logout, secret creation, status endpoint, user scoping."""
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # /send page rendering
@@ -954,3 +955,143 @@ def test_cancel_rejects_cross_origin(client, auth_headers):
     }
     c = client.post(f"/api/secrets/{sid}/cancel", headers=bad)
     assert c.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Content-cap telemetry: optional `near_cap: bool` flag on CreateTextSecret.
+# Frontend sets it true once the user crossed ~95% of the textarea cap during
+# the compose session; the route emits a presence-only `content.limit_hit`
+# analytics event ONLY when the flag is true AND analytics is enabled
+# operator-side. Aggregate-only by design: no payload, no user_id.
+# ---------------------------------------------------------------------------
+
+
+def _read_analytics_events():
+    """Return all rows from analytics_events as a list of dicts. v5 schema:
+    no user_id column."""
+    import json
+
+    from app.models._core import _connect
+
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT event_type, payload FROM analytics_events ORDER BY id"
+        ).fetchall()
+    return [{"event_type": r[0], "payload": json.loads(r[1])} for r in rows]
+
+
+@pytest.fixture
+def analytics_enabled(monkeypatch):
+    """Flip settings.analytics_enabled = True for the duration of a test.
+    Off by default in production: a privacy-focused tool collects no
+    telemetry without explicit operator consent."""
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("EPHEMERA_ANALYTICS_ENABLED", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_create_secret_omits_telemetry_when_flag_absent(
+    client, auth_headers, analytics_enabled
+):
+    """Steady-state path: small content, no near_cap flag, no event."""
+    r = client.post(
+        "/api/secrets",
+        json={"content": "small payload", "content_type": "text", "expires_in": 300},
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    assert _read_analytics_events() == []
+
+
+def test_create_secret_writes_content_limit_hit_when_near_cap_true(
+    client, auth_headers, analytics_enabled
+):
+    """When near_cap=true AND analytics is enabled, the route writes a
+    presence-only event row -- no payload, no user identity."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x" * 95_000,
+            "content_type": "text",
+            "expires_in": 300,
+            "near_cap": True,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201, r.text
+
+    events = _read_analytics_events()
+    assert len(events) == 1
+    e = events[0]
+    assert e["event_type"] == "content.limit_hit"
+    assert e["payload"] == {}
+
+
+def test_create_secret_writes_no_event_when_analytics_disabled_by_default(
+    client, auth_headers
+):
+    """The privacy default: analytics_enabled is False unless the operator
+    explicitly opts in. Even with near_cap=true on the body, no row lands."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x" * 95_000,
+            "content_type": "text",
+            "expires_in": 300,
+            "near_cap": True,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    assert _read_analytics_events() == []
+
+
+def test_create_secret_succeeds_even_if_telemetry_write_raises(
+    client, auth_headers, monkeypatch, analytics_enabled
+):
+    """Telemetry is fire-and-forget. A raised exception inside the analytics
+    write must not change the user-visible response."""
+    from app import analytics
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic telemetry failure")
+
+    monkeypatch.setattr(analytics, "record_event_standalone", boom)
+
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "still works",
+            "content_type": "text",
+            "expires_in": 300,
+            "near_cap": True,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert "url" in body and "id" in body
+    # No event was persisted because the writer was monkeypatched to raise
+    # before the underlying record_event call.
+    assert _read_analytics_events() == []
+
+
+def test_create_secret_rejects_oversize_content_at_schema_boundary(
+    client, auth_headers
+):
+    """The pydantic max_length on `content` matches the textarea cap (100 KB).
+    A direct API caller bypassing the form must hit the same ceiling."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x" * 100_001,
+            "content_type": "text",
+            "expires_in": 300,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 422

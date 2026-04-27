@@ -62,6 +62,15 @@
     "aria_show_code": "إظهار الرمز",
     "aria_hide_code": "إخفاء الرمز"
   },
+  "hint": {
+    "counter": "{{used}} / {{max}}",
+    "max_reached": "تم الوصول إلى الحد الأقصى للطول.",
+    "passphrase_approaching": "اقتراب من الحد الأقصى",
+    "paste_trimmed": "تم اقتطاع النص الملصوق إلى {{max}} حرفًا (كان {{original}}).",
+    "label_trimmed": "تم اقتطاع النص الملصوق إلى {{max}} حرفًا.",
+    "content_paste_large": "تم لصق {{size}}. تأكَّد أنك أردت إرسال هذا القدر فعلاً.",
+    "recovery_format": "10 أحرف، والشَّرطة اختيارية."
+  },
   "tracked": {
     "image_secret": "سر صورة",
     "text_secret": "سر نصي",

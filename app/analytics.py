@@ -1,9 +1,12 @@
 """Lightweight event-based analytics.
 
-Records anonymous metadata events (sizes, counts, durations, anonymous
-categorical values) -- never user content (passphrases, secret content,
-file bytes, labels) or any end-user PII. The on-disk table is
-`analytics_events` (see app/models/_core.py).
+Records anonymous metadata events -- counts, presence-only flags, and
+optional anonymous categorical/numeric metadata. Never user content
+(passphrases, secret content, file bytes, labels) and never user
+identity (no `user_id` column, no IP, no session token). Audit-trail
+signals belong in security_log.py; this module is for aggregate
+product metrics only. The on-disk table is `analytics_events` (see
+app/models/_core.py).
 
 Events are append-only; no end-user-facing read API. The admin CLI
 (`ephemera-admin analytics-summary <event_type>`) is the only query
@@ -16,6 +19,9 @@ Payload values are restricted to bool / int / float / str. Strings cap
 at 64 chars -- that fits enum-style categoricals but won't accommodate
 a leaked passphrase / label / content snippet. Nested dicts and lists
 are rejected structurally so a list/dict can't smuggle one in either.
+The table itself carries no user_id column: a row says "this event type
+happened at time T", nothing about WHO. That's structural, not policy:
+even if a future caller wants to attach a user, the schema refuses.
 
 # Why a registry
 
@@ -56,13 +62,16 @@ from typing import Any
 from .models import _core
 
 # Per-event-type payload schema. Each entry: event type -> {key: type}.
+# An empty {} means "presence-only": the event has no payload, the row's
+# existence is the entire signal. Use this whenever the metric you'd act
+# on is "did X happen, how often" -- it's a stricter privacy posture
+# (nothing to leak in the payload) and aggregate counts are all you'd
+# query the table for anyway.
+#
 # Keys absent from the schema reject; values not matching the declared
 # type reject; nested containers reject. See _validate_payload.
 EVENT_REGISTRY: dict[str, dict[str, type]] = {
-    "content.limit_hit": {
-        "intended_size_bytes": int,
-        "was_paste": bool,
-    },
+    "content.limit_hit": {},  # presence-only: count(*) is the signal
 }
 
 # Maximum value-cap for str-type payload fields. 64 chars fits enum-style
@@ -71,10 +80,9 @@ EVENT_REGISTRY: dict[str, dict[str, type]] = {
 _MAX_STRING_VALUE_LEN = 64
 
 # Sanity bounds on common int fields. Range-clamp before storing so a
-# client-asserted size can't write a meaningless value.
-_INT_FIELD_BOUNDS: dict[str, tuple[int, int]] = {
-    "intended_size_bytes": (0, 1024 * 1024 * 1024),  # 0 to 1 GiB
-}
+# client-asserted value can't write a meaningless one. Empty today; future
+# event types with int fields populate this on a per-field basis.
+_INT_FIELD_BOUNDS: dict[str, tuple[int, int]] = {}
 
 
 class AnalyticsValidationError(ValueError):
@@ -177,30 +185,41 @@ def record_event(
     event_type: str,
     *,
     payload: dict | None = None,
-    user_id: int | None = None,
 ) -> None:
     """Append a row to analytics_events after validating the payload.
 
-    Privacy invariant: payload contains metadata only -- sizes, counts,
-    durations, anonymous categorical values. Never user content.
-    Enforced structurally by _validate_payload's type / length / nesting
-    checks.
-
-    user_id is intentionally a bare `int`, not a user row -- the
-    analytics surface MUST NOT be a vector for opt-in TOTP reads or any
-    other side-effect on the user record. ON DELETE SET NULL on the FK
-    preserves trend integrity through admin rotation.
+    Privacy invariant: rows carry no user identity (no user_id, no IP, no
+    session token), and payloads are metadata-only -- sizes, counts,
+    durations, anonymous categorical values, never user content. Both
+    are enforced structurally: the schema has no user_id column, and
+    _validate_payload's type/length/nesting checks reject anything that
+    would smuggle content in via the payload.
 
     The caller manages the connection (positional first arg) so analytics
     writes can join an existing transaction if the call site has one.
-    The route handler that emits content.limit_hit doesn't need
-    transaction unification, but other future emitters might.
+    Today's only emitter is fire-and-forget post-create, but other
+    future emitters might want unification.
     """
     validated = _validate_payload(event_type, payload)
     conn.execute(
-        "INSERT INTO analytics_events (event_type, user_id, payload) VALUES (?, ?, ?)",
-        (event_type, user_id, json.dumps(validated)),
+        "INSERT INTO analytics_events (event_type, payload) VALUES (?, ?)",
+        (event_type, json.dumps(validated)),
     )
+
+
+def record_event_standalone(
+    event_type: str,
+    *,
+    payload: dict | None = None,
+) -> None:
+    """Convenience wrapper that opens a fresh connection, records one event,
+    commits, and closes. Use this when the call site has no transaction of
+    its own and doesn't need atomicity with surrounding writes -- e.g., the
+    sender route's post-create `content.limit_hit` emitter. Use record_event()
+    with an explicit conn when joining an existing transaction.
+    """
+    with _core._connect() as conn:
+        record_event(conn, event_type, payload=payload)
 
 
 def _percentile_index(n: int, p: float) -> int:

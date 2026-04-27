@@ -1,10 +1,17 @@
 """Tests for app.analytics: registry, validator, record_event, summarize.
 
-The privacy invariant ("payload metadata only, no end-user PII") is the
-load-bearing one. Most tests here exercise it from different angles --
-unknown event types, unknown keys, wrong types, nested containers,
-oversized strings, out-of-range ints. If a future refactor accidentally
-loosens any of those guards, the corresponding test goes red.
+The privacy invariant ("payload metadata only, no end-user PII; no user
+identity column") is the load-bearing one. Most tests here exercise it
+from different angles -- unknown event types, unknown keys, wrong types,
+nested containers, oversized strings, out-of-range ints. If a future
+refactor accidentally loosens any of those guards, the corresponding
+test goes red.
+
+The shipped event type today (`content.limit_hit`) is presence-only
+(empty registry schema). The validator-shape tests inject a synthetic
+event type with int + bool fields via the `cap_metric_event` fixture --
+that decouples the tests from whatever payload schemas EVENT_REGISTRY
+happens to ship.
 """
 
 import json
@@ -14,17 +21,36 @@ import pytest
 
 from app import analytics
 
+
+@pytest.fixture
+def cap_metric_event():
+    """Inject a synthetic event type with an int + bool field plus an
+    associated _INT_FIELD_BOUNDS entry, then clean up. Lets the validator
+    tests assert on int/bool/range behavior without tying the assertions
+    to whatever payload the shipped events declare today.
+    """
+    name = "test.cap_metric"
+    analytics.EVENT_REGISTRY[name] = {"intended_size_bytes": int, "was_paste": bool}
+    analytics._INT_FIELD_BOUNDS["intended_size_bytes"] = (0, 1024 * 1024 * 1024)
+    try:
+        yield name
+    finally:
+        del analytics.EVENT_REGISTRY[name]
+        del analytics._INT_FIELD_BOUNDS["intended_size_bytes"]
+
+
 # ---------------------------------------------------------------------------
 # Registry shape
 # ---------------------------------------------------------------------------
 
 
-def test_registry_contains_content_limit_hit():
-    """First registered event type. PR 3 will write to it from the
-    create-secret route handler."""
-    assert "content.limit_hit" in analytics.EVENT_REGISTRY
-    schema = analytics.EVENT_REGISTRY["content.limit_hit"]
-    assert schema == {"intended_size_bytes": int, "was_paste": bool}
+def test_registry_contains_content_limit_hit_as_presence_only():
+    """The shipped event type. Registry value is empty `{}` -- presence-only
+    semantics: the row's existence is the entire signal. No payload, no
+    user identity, no per-event metadata. This is the privacy posture in
+    schema form -- a future change that adds keys to this registry entry
+    has to defend why."""
+    assert analytics.EVENT_REGISTRY["content.limit_hit"] == {}
 
 
 # ---------------------------------------------------------------------------
@@ -32,15 +58,15 @@ def test_registry_contains_content_limit_hit():
 # ---------------------------------------------------------------------------
 
 
-def test_validate_payload_happy_path_round_trips():
+def test_validate_payload_happy_path_round_trips(cap_metric_event):
     payload = {"intended_size_bytes": 150_000, "was_paste": True}
-    out = analytics._validate_payload("content.limit_hit", payload)
+    out = analytics._validate_payload(cap_metric_event, payload)
     assert out == payload
 
 
-def test_validate_payload_allows_partial_payload():
+def test_validate_payload_allows_partial_payload(cap_metric_event):
     """Schema keys are opt-in per call site. Absent values are fine."""
-    out = analytics._validate_payload("content.limit_hit", {"intended_size_bytes": 50})
+    out = analytics._validate_payload(cap_metric_event, {"intended_size_bytes": 50})
     assert out == {"intended_size_bytes": 50}
 
 
@@ -72,63 +98,69 @@ def test_validate_rejects_unknown_event_type():
         analytics._validate_payload("not.a.real.event", {})
 
 
-def test_validate_rejects_unknown_payload_key():
+def test_validate_rejects_unknown_payload_key(cap_metric_event):
     """Per-event-type key allowlist via registry. A typo or an unsanctioned
     field rejects rather than silently landing in the table."""
     with pytest.raises(analytics.AnalyticsValidationError, match="unknown keys"):
         analytics._validate_payload(
-            "content.limit_hit",
+            cap_metric_event,
             {"intended_size_bytes": 100, "extra_field": "leaks"},
         )
 
 
-def test_validate_rejects_wrong_type_for_int_field():
+def test_validate_rejects_unknown_payload_key_on_presence_only_event():
+    """A presence-only event (empty registry schema) MUST reject any payload
+    keys at all. Otherwise a caller could quietly start writing fields
+    that the table contract claims don't exist."""
+    with pytest.raises(analytics.AnalyticsValidationError, match="unknown keys"):
+        analytics._validate_payload("content.limit_hit", {"intended_size_bytes": 100})
+
+
+def test_validate_rejects_wrong_type_for_int_field(cap_metric_event):
     with pytest.raises(analytics.AnalyticsValidationError, match="expected int"):
-        analytics._validate_payload(
-            "content.limit_hit", {"intended_size_bytes": "150000"}
-        )
+        analytics._validate_payload(cap_metric_event, {"intended_size_bytes": "150000"})
 
 
-def test_validate_rejects_bool_for_int_field():
+def test_validate_rejects_bool_for_int_field(cap_metric_event):
     """`bool` is a subclass of int in Python; the validator must reject
     a True/False where int is declared so a flag can't masquerade as
     a count."""
     with pytest.raises(analytics.AnalyticsValidationError, match="expected int"):
-        analytics._validate_payload("content.limit_hit", {"intended_size_bytes": True})
+        analytics._validate_payload(cap_metric_event, {"intended_size_bytes": True})
 
 
-def test_validate_rejects_wrong_type_for_bool_field():
+def test_validate_rejects_wrong_type_for_bool_field(cap_metric_event):
     with pytest.raises(analytics.AnalyticsValidationError, match="expected bool"):
-        analytics._validate_payload("content.limit_hit", {"was_paste": 1})
+        analytics._validate_payload(cap_metric_event, {"was_paste": 1})
 
 
-def test_validate_rejects_nested_list():
+def test_validate_rejects_nested_list(cap_metric_event):
     """The privacy primitive: nested containers can hide a content snippet
     under a flat type-check. Reject structurally."""
     with pytest.raises(analytics.AnalyticsValidationError, match="nested containers"):
         analytics._validate_payload(
-            "content.limit_hit", {"intended_size_bytes": [1, 2, 3]}
+            cap_metric_event, {"intended_size_bytes": [1, 2, 3]}
         )
 
 
-def test_validate_rejects_nested_dict():
+def test_validate_rejects_nested_dict(cap_metric_event):
     with pytest.raises(analytics.AnalyticsValidationError, match="nested containers"):
         analytics._validate_payload(
-            "content.limit_hit",
+            cap_metric_event,
             {"intended_size_bytes": {"sneaky": "passphrase"}},
         )
 
 
-def test_validate_rejects_int_below_lower_bound():
+def test_validate_rejects_int_below_lower_bound(cap_metric_event):
     with pytest.raises(analytics.AnalyticsValidationError, match="outside allowed"):
-        analytics._validate_payload("content.limit_hit", {"intended_size_bytes": -1})
+        analytics._validate_payload(cap_metric_event, {"intended_size_bytes": -1})
 
 
-def test_validate_rejects_int_above_upper_bound():
+def test_validate_rejects_int_above_upper_bound(cap_metric_event):
     """Upper bound is 1 GiB to clamp client-asserted sizes."""
     with pytest.raises(analytics.AnalyticsValidationError, match="outside allowed"):
         analytics._validate_payload(
-            "content.limit_hit",
+            cap_metric_event,
             {"intended_size_bytes": 1024 * 1024 * 1024 + 1},
         )
 
@@ -168,35 +200,47 @@ def test_validate_rejects_oversized_string_value():
 
 def _make_in_memory_db():
     """Stand up an in-memory SQLite DB with just the analytics_events table.
-    Avoids the full init_db() ceremony for unit tests of record_event."""
+    Avoids the full init_db() ceremony for unit tests of record_event.
+    Mirrors the v5+ shape: no user_id column."""
     conn = sqlite3.connect(":memory:")
     conn.execute("""
         CREATE TABLE analytics_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_type TEXT NOT NULL,
             occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
             payload TEXT NOT NULL DEFAULT '{}'
         )
     """)
     return conn
 
 
-def test_record_event_writes_validated_row():
+def test_record_event_writes_presence_only_row():
+    """Happy path: the shipped event type is presence-only. The row records
+    `event_type` + auto `occurred_at`; payload is `{}`. No user identity
+    is persisted -- the schema has no user_id column."""
+    conn = _make_in_memory_db()
+    analytics.record_event(conn, "content.limit_hit")
+    rows = conn.execute("SELECT event_type, payload FROM analytics_events").fetchall()
+    assert len(rows) == 1
+    event_type, payload_json = rows[0]
+    assert event_type == "content.limit_hit"
+    assert json.loads(payload_json) == {}
+
+
+def test_record_event_writes_validated_row(cap_metric_event):
+    """A non-presence-only event round-trips its payload through the
+    validator. Uses the synthetic test event so we exercise int + bool
+    fields without coupling to a shipped event's payload shape."""
     conn = _make_in_memory_db()
     analytics.record_event(
         conn,
-        "content.limit_hit",
+        cap_metric_event,
         payload={"intended_size_bytes": 250_000, "was_paste": True},
-        user_id=1,
     )
-    rows = conn.execute(
-        "SELECT event_type, user_id, payload FROM analytics_events"
-    ).fetchall()
+    rows = conn.execute("SELECT event_type, payload FROM analytics_events").fetchall()
     assert len(rows) == 1
-    event_type, user_id, payload_json = rows[0]
-    assert event_type == "content.limit_hit"
-    assert user_id == 1
+    event_type, payload_json = rows[0]
+    assert event_type == cap_metric_event
     assert json.loads(payload_json) == {
         "intended_size_bytes": 250_000,
         "was_paste": True,
@@ -218,21 +262,6 @@ def test_record_event_propagates_validation_error():
     assert rows[0] == 0
 
 
-def test_record_event_accepts_null_user_id():
-    """ON DELETE SET NULL on the FK preserves rows with anonymised user_id.
-    record_event should accept user_id=None directly (e.g. for events
-    fired pre-auth or from a system path)."""
-    conn = _make_in_memory_db()
-    analytics.record_event(
-        conn,
-        "content.limit_hit",
-        payload={"intended_size_bytes": 100, "was_paste": False},
-        user_id=None,
-    )
-    (uid,) = conn.execute("SELECT user_id FROM analytics_events").fetchone()
-    assert uid is None
-
-
 # ---------------------------------------------------------------------------
 # summarize: the read path the admin CLI uses
 # ---------------------------------------------------------------------------
@@ -243,10 +272,24 @@ def test_summarize_zero_events(tmp_db_path):
     assert out == {"count": 0, "fields": {}}
 
 
-def test_summarize_aggregates_int_field_percentiles(tmp_db_path):
+def test_summarize_presence_only_event_returns_count(tmp_db_path):
+    """For presence-only events (`content.limit_hit`), summarize should
+    return only count -- there are no int fields to percentile-aggregate.
+    Counts over time are the entire query surface for these events."""
+    from app.models._core import _connect
+
+    with _connect() as conn:
+        for _ in range(7):
+            analytics.record_event(conn, "content.limit_hit")
+    out = analytics.summarize("content.limit_hit")
+    assert out == {"count": 7, "fields": {}}
+
+
+def test_summarize_aggregates_int_field_percentiles(tmp_db_path, cap_metric_event):
     """Insert a small distribution and assert the percentile slots work.
-    Uses the live tmp_db_path so summarize's `_connect()` resolves to
-    the test DB. Percentile indexing follows nearest-rank: index =
+    Uses the synthetic test event (with an int field) so we exercise the
+    aggregation path without depending on a shipped event having an int
+    field. Percentile indexing follows nearest-rank: index =
     max(0, min(n-1, ceil(n*p)-1))."""
     from app.models._core import _connect
 
@@ -255,10 +298,10 @@ def test_summarize_aggregates_int_field_percentiles(tmp_db_path):
         for sz in sizes:
             analytics.record_event(
                 conn,
-                "content.limit_hit",
+                cap_metric_event,
                 payload={"intended_size_bytes": sz, "was_paste": False},
             )
-    out = analytics.summarize("content.limit_hit")
+    out = analytics.summarize(cap_metric_event)
     assert out["count"] == 10
     stats = out["fields"]["intended_size_bytes"]
     assert stats["count"] == 10
@@ -270,7 +313,9 @@ def test_summarize_aggregates_int_field_percentiles(tmp_db_path):
     assert stats["p95"] == 100
 
 
-def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(tmp_db_path):
+def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(
+    tmp_db_path, cap_metric_event
+):
     """Regression for the int(n*p) overshoot bug. For n=20 and p=0.95,
     n*p is exactly 19.0; the buggy formula `int(19.0) = 19` returns
     values[19] (the max), biasing capacity-planning telemetry high.
@@ -283,10 +328,10 @@ def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(tmp_db_path):
         for sz in sizes:
             analytics.record_event(
                 conn,
-                "content.limit_hit",
+                cap_metric_event,
                 payload={"intended_size_bytes": sz, "was_paste": False},
             )
-    stats = analytics.summarize("content.limit_hit")["fields"]["intended_size_bytes"]
+    stats = analytics.summarize(cap_metric_event)["fields"]["intended_size_bytes"]
     assert stats["min"] == 1
     assert stats["max"] == 20
     # p95 must be 19, NOT 20 (the max). The old `int(n*p)` formula

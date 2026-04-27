@@ -20,7 +20,233 @@ const preview = document.getElementById('preview');
 const fileName = document.getElementById('file-name');
 const clearFile = document.getElementById('clear-file');
 
-// ---------- tabs ----------
+// ---------- char-limit hints (counter, paste-warning, ceiling-reached) ----------
+//
+// Three discrete states share a single hint slot per field. State precedence:
+//
+//   paste-trim  > ceiling-reached  > approaching  > idle
+//
+// `paste-trim` and (for the textarea) `paste-large` are set by the paste
+// handler and rendered on the paste-induced input event (e.inputType
+// === 'insertFromPaste'). Subsequent typing reverts to the regular
+// counter-vs-ceiling computation.
+//
+// Telemetry: we track the largest pre-truncation content size in the
+// compose session and submit it as `intended_content_size_bytes` when
+// it crosses 95% of the cap. Backend writes a `content.limit_hit`
+// analytics event with that size + `was_paste` flag.
+
+const MAX_CONTENT = 100_000;
+const MAX_LABEL = 60;
+const MAX_PASSPHRASE = 200;
+const PASTE_LARGE_THRESHOLD = 10_000; // soft warning for >10KB chunk
+
+// Telemetry session state. We track only "did the user cross the 95%
+// threshold during this compose session" -- a single sticky bit, not a
+// size. The signal that's hard to recover server-side is the
+// threshold-crossing itself: an over-cap paste (200K -> truncated to
+// 100K) and an edit-down (typed 100K -> deleted to 50K) both leave the
+// final content much smaller than the user's intent. The flag closes
+// that gap; the backend gets nothing else.
+let intendedContentSize = 0; // chars, drives counter UX + threshold gate
+let nearCapHit = false; // sticky session bit reported as `near_cap` on submit
+const TELEMETRY_THRESHOLD = MAX_CONTENT * 0.95;
+
+function _formatNumber(n) {
+  return n.toLocaleString(window.i18n.currentLocale);
+}
+
+function _formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${_formatNumber(Math.round(n / 1024))} KB`;
+  return `${_formatNumber(Math.round((n / 1024 / 1024) * 10) / 10)} MB`;
+}
+
+function _setHint(hintEl, content, modifier) {
+  // modifier: 'warning' | 'error' | null. content === null hides the hint.
+  if (content === null) {
+    hintEl.hidden = true;
+    hintEl.textContent = '';
+    hintEl.classList.remove('is-warning', 'is-error');
+    return;
+  }
+  hintEl.hidden = false;
+  hintEl.textContent = content;
+  hintEl.classList.toggle('is-warning', modifier === 'warning');
+  hintEl.classList.toggle('is-error', modifier === 'error');
+}
+
+// Wires a counter / paste-warning / ceiling-reached hint to a textarea or
+// input with maxlength. opts:
+//   counterAt       fraction of max to start showing the counter (default 0.75)
+//   warningAt       fraction at which to add .is-warning (default 0.95)
+//   pasteLargeThreshold     paste size that triggers the paste-large warning
+//                           (Infinity by default = never; the textarea opts in)
+//   useShortTrimMessage     true on the label field (omits the "(was X)"
+//                           parenthetical from the trim message; the field is
+//                           short enough that the original size is implicit)
+//   onIntendedSize(sizeChars)
+//                           telemetry callback, fired on every intended-size
+//                           observation (post-paste OR per keystroke). The
+//                           caller decides what to do with it (typically:
+//                           flip a sticky "near cap was crossed" bit).
+function _bindCounterHint(input, hintEl, max, opts = {}) {
+  const counterAt = (opts.counterAt ?? 0.75) * max;
+  const warningAt = (opts.warningAt ?? 0.95) * max;
+  const pasteLargeThreshold = opts.pasteLargeThreshold ?? Number.POSITIVE_INFINITY;
+  const useShortTrim = !!opts.useShortTrimMessage;
+  // Static text rendered into the slot from the template (e.g. label's
+  // "Up to 60 characters. Shown only to you."). Captured once on init so
+  // the idle state can restore it.
+  const idleText = hintEl.textContent.trim() || null;
+
+  let pasteOverrideMessage = null;
+  let pasteOverrideModifier = null;
+
+  function _showIdle() {
+    if (idleText !== null) _setHint(hintEl, idleText, null);
+    else _setHint(hintEl, null, null);
+  }
+
+  _showIdle();
+
+  input.addEventListener('paste', (e) => {
+    const pasted = e.clipboardData?.getData('text') ?? '';
+    const selStart = input.selectionStart ?? 0;
+    const selEnd = input.selectionEnd ?? 0;
+    const currentLen = input.value.length;
+    const intendedAfter = currentLen - (selEnd - selStart) + pasted.length;
+
+    if (intendedAfter > max) {
+      // Browser will silently truncate at maxlength. Show paste-trim error.
+      pasteOverrideMessage = useShortTrim
+        ? window.i18n.t('hint.label_trimmed', { max: _formatNumber(max) })
+        : window.i18n.t('hint.paste_trimmed', {
+            max: _formatNumber(max),
+            original: _formatNumber(intendedAfter),
+          });
+      pasteOverrideModifier = 'error';
+      if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
+    } else if (pasteLargeThreshold !== Number.POSITIVE_INFINITY) {
+      // Threshold is UTF-8 bytes ("10KB chunk"); JS .length is UTF-16
+      // code units, which diverges 2-4x from byte length for CJK/emoji.
+      // Encode for an accurate byte count -- a 4K-character BMP CJK
+      // paste is 4K code units but ~12K UTF-8 bytes and should trip
+      // this. Skipped for fields that opt out (Infinity sentinel) so
+      // we don't allocate a TextEncoder for label/passphrase pastes
+      // that never use this branch.
+      const pastedBytes = new TextEncoder().encode(pasted).length;
+      if (pastedBytes >= pasteLargeThreshold) {
+        pasteOverrideMessage = window.i18n.t('hint.content_paste_large', {
+          size: _formatBytes(pastedBytes),
+        });
+        pasteOverrideModifier = 'warning';
+        if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
+      } else {
+        pasteOverrideMessage = null;
+      }
+    } else {
+      pasteOverrideMessage = null;
+    }
+  });
+
+  input.addEventListener('input', (e) => {
+    if (pasteOverrideMessage !== null && e.inputType === 'insertFromPaste') {
+      _setHint(hintEl, pasteOverrideMessage, pasteOverrideModifier);
+      pasteOverrideMessage = null;
+      return;
+    }
+    pasteOverrideMessage = null;
+
+    const len = input.value.length;
+    if (opts.onIntendedSize && len > 0) opts.onIntendedSize(len);
+
+    if (len >= max) {
+      // Frozen counter at ceiling. The frozen-ness IS the signal.
+      _setHint(
+        hintEl,
+        window.i18n.t('hint.counter', {
+          used: _formatNumber(len),
+          max: _formatNumber(max),
+        }),
+        'error'
+      );
+    } else if (len >= warningAt) {
+      _setHint(
+        hintEl,
+        window.i18n.t('hint.counter', {
+          used: _formatNumber(len),
+          max: _formatNumber(max),
+        }),
+        'warning'
+      );
+    } else if (len >= counterAt) {
+      _setHint(
+        hintEl,
+        window.i18n.t('hint.counter', {
+          used: _formatNumber(len),
+          max: _formatNumber(max),
+        }),
+        null
+      );
+    } else {
+      _showIdle();
+    }
+  });
+}
+
+// Passphrase-style hint: a one-line "approaching maximum" warning at
+// ~90% of the cap, swapping to "maximum reached" once the input is at
+// the cap. No counter and no error escalation -- the 200-char cap is a
+// deliberate ceiling on a deliberate input; at-limit gets a factual
+// status (the prior "approaching" wording stayed on past the cap, which
+// was literally inaccurate once the textarea's maxlength blocked
+// further keystrokes), but it doesn't deserve a red error flip.
+function _bindPassphraseHint(input, hintEl, max, threshold = 0.9) {
+  const warnAt = threshold * max;
+  input.addEventListener('input', () => {
+    const len = input.value.length;
+    if (len >= max) {
+      _setHint(hintEl, window.i18n.t('hint.max_reached'), 'warning');
+    } else if (len >= warnAt) {
+      _setHint(hintEl, window.i18n.t('hint.passphrase_approaching'), 'warning');
+    } else {
+      _setHint(hintEl, null, null);
+    }
+  });
+}
+
+// ---------- wire up the hints ----------
+
+const contentInput = document.getElementById('content');
+const contentHint = document.getElementById('content-hint');
+if (contentInput && contentHint) {
+  _bindCounterHint(contentInput, contentHint, MAX_CONTENT, {
+    counterAt: 0.75,
+    warningAt: 0.95,
+    pasteLargeThreshold: PASTE_LARGE_THRESHOLD,
+    onIntendedSize: (sizeChars) => {
+      if (sizeChars > intendedContentSize) intendedContentSize = sizeChars;
+      // Sticky session bit. Once the user crosses the threshold (typed,
+      // pasted, OR pasted-and-truncated), nearCapHit stays true through
+      // any subsequent edit-down, so submit reports the threshold-
+      // crossing fact regardless of the final value's size.
+      if (sizeChars >= TELEMETRY_THRESHOLD) nearCapHit = true;
+    },
+  });
+}
+
+const labelInput = document.getElementById('label');
+const labelHint = document.getElementById('label-hint');
+if (labelInput && labelHint) {
+  _bindCounterHint(labelInput, labelHint, MAX_LABEL, {
+    counterAt: 0.75,
+    warningAt: 1.0, // label has no warning band; counter -> error at ceiling
+    useShortTrimMessage: true,
+  });
+}
+
+// ---------- passphrase (visibility toggle + approaching-max hint) ----------
 
 // Passphrase visibility toggle (same pattern as login.js). The passphrase is
 // sender-entered and communicated out-of-band, so masking protects against
@@ -28,6 +254,10 @@ const clearFile = document.getElementById('clear-file');
 // the sender genuinely needs to read back what they typed.
 const ppInput = document.getElementById('passphrase');
 const ppToggle = document.getElementById('toggle-passphrase');
+const passphraseHintEl = document.getElementById('passphrase-hint');
+if (ppInput && passphraseHintEl) {
+  _bindPassphraseHint(ppInput, passphraseHintEl, MAX_PASSPHRASE, 0.9);
+}
 if (ppInput && ppToggle) {
   ppToggle.addEventListener('click', () => {
     const showing = ppInput.getAttribute('type') === 'text';
@@ -134,6 +364,13 @@ form.addEventListener('submit', async (e) => {
         track,
       };
       if (label) body.label = label;
+      // Cap-proximity telemetry. Single sticky bit: presence-only signal
+      // that the user crossed >=95% of the cap somewhere during this
+      // compose session, even if they edited back down before hitting
+      // submit. The backend records the bare event (no size, no paste-
+      // vs-typed, no user identity) and only when analytics is enabled
+      // operator-side.
+      if (nearCapHit) body.near_cap = true;
       res = await fetch('/api/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -294,6 +531,21 @@ document.getElementById('create-another').addEventListener('click', () => {
   result.hidden = true;
   compose.hidden = false;
   document.getElementById('status-widget').hidden = true;
+  // Reset cap-proximity telemetry state so the next compose session starts
+  // fresh -- otherwise a previous near-cap session would re-emit on every
+  // subsequent submit, even if the new content is small.
+  intendedContentSize = 0;
+  nearCapHit = false;
+  // form.reset() above clears input values but doesn't dispatch the input
+  // events that drive the cap-proximity hints, so a previous warning or
+  // error stays visible above the now-empty inputs. Synthesize an input
+  // event per bound field; the binder's terminal `else` branch recomputes
+  // against the empty value and restores idle state (hidden / static
+  // idle-text). Kept here rather than duplicated in each binder so the
+  // idle logic stays single-sourced.
+  if (contentInput) contentInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  if (labelInput) labelInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  if (ppInput) ppInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
   // Wipe the previous passphrase from the result-row's dataset so it
   // doesn't outlive the visible UI. Without this, a user who clicks
   // "Create another" and then walks away leaves the previous plaintext
@@ -310,7 +562,14 @@ const trackCheckbox = document.getElementById('track');
 const labelWrap = document.getElementById('label-wrap');
 function syncLabelVisibility() {
   labelWrap.hidden = !trackCheckbox.checked;
-  if (!trackCheckbox.checked) document.getElementById('label').value = '';
+  if (!trackCheckbox.checked) {
+    document.getElementById('label').value = '';
+    // Same stale-hint problem as create-another: the value is wiped without
+    // an input event firing, so a prior at-ceiling error would still be
+    // sitting in the hint slot when the user re-checks track. Synthesize
+    // an input event so the binder restores idle.
+    if (labelInput) labelInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
 }
 trackCheckbox.addEventListener('change', syncLabelVisibility);
 

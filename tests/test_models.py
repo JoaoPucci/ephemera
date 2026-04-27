@@ -821,11 +821,10 @@ def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypat
 # ---------------------------------------------------------------------------
 
 
-def test_v4_analytics_events_table_present_on_fresh_db(tmp_db_path):
-    """Fresh DBs land at v4 directly via TABLES_SCRIPT, which now includes
-    the analytics_events table. The v4 migration is a pure-create no-op
-    on fresh DBs (CREATE TABLE IF NOT EXISTS) and only fires meaningfully
-    on legacy v3 DBs."""
+def test_analytics_events_table_present_on_fresh_db(tmp_db_path):
+    """Fresh DBs land at the current version directly via TABLES_SCRIPT.
+    Schema is in v5 shape: no user_id column (aggregate-only), no FK
+    child-column index."""
     with sqlite3.connect(str(tmp_db_path)) as conn:
         names = {
             r[0]
@@ -841,12 +840,13 @@ def test_v4_analytics_events_table_present_on_fresh_db(tmp_db_path):
         }
     assert "analytics_events" in names
     assert "idx_analytics_events_type_time" in idx_names
-    # FK child-column index: without this, ON DELETE SET NULL full-scans
-    # analytics_events on every remove-user.
-    assert "idx_analytics_events_user_id" in idx_names
+    # No user_id column, so no FK child-column index either.
+    assert "idx_analytics_events_user_id" not in idx_names
 
 
-def test_v4_analytics_events_columns_match_design(tmp_db_path):
+def test_analytics_events_columns_match_v5_design(tmp_db_path):
+    """v5 dropped `user_id` (aggregate-only by design). The table now
+    carries only the bare minimum: id, event_type, occurred_at, payload."""
     with sqlite3.connect(str(tmp_db_path)) as conn:
         cols = {
             r[1]: r[2]  # name -> type
@@ -856,16 +856,17 @@ def test_v4_analytics_events_columns_match_design(tmp_db_path):
         "id": "INTEGER",
         "event_type": "TEXT",
         "occurred_at": "TIMESTAMP",
-        "user_id": "INTEGER",
         "payload": "TEXT",
     }
+    assert "user_id" not in cols
 
 
-def test_v3_legacy_db_upgrades_to_v4(tmp_path, monkeypatch):
+def test_v3_legacy_db_upgrades_to_current(tmp_path, monkeypatch):
     """Seed a v3 DB (CHECK clauses present, no analytics_events table,
     schema_version stamped at 3), boot the current code, and confirm
-    the v4 migration creates the analytics_events table without
-    disturbing the v3 CHECK constraints."""
+    migrations walk it forward through v4 (creates analytics_events with
+    user_id) and v5 (drops user_id) without disturbing the v3 CHECK
+    constraints."""
     db = tmp_path / "v3.db"
     with sqlite3.connect(str(db)) as conn:
         conn.executescript(
@@ -945,17 +946,139 @@ def test_v3_legacy_db_upgrades_to_v4(tmp_path, monkeypatch):
                     "SELECT name FROM sqlite_master WHERE type='index'"
                 ).fetchall()
             }
-        assert ver == 4
+        assert ver == 5
         assert "analytics_events" in names
-        # Both indices on analytics_events land via the v4 migration AND
-        # via INDICES_SCRIPT (which init_db re-runs after migrations).
-        # Either path alone is sufficient; assert from a legacy v3 fixture
-        # that the post-upgrade DB has them.
         assert "idx_analytics_events_type_time" in idx_names
-        assert "idx_analytics_events_user_id" in idx_names
-        # v3 CHECK clauses survive: the v4 migration is pure-create and
-        # does not touch the secrets/users tables.
+        # v5 dropped the user_id column + its index; the post-migration DB
+        # has no trace of either, regardless of the v4 intermediate state.
+        assert "idx_analytics_events_user_id" not in idx_names
+        with sqlite3.connect(str(db)) as conn2:
+            cols = {
+                r[1]
+                for r in conn2.execute("PRAGMA table_info(analytics_events)").fetchall()
+            }
+        assert "user_id" not in cols
+        # v3 CHECK clauses survive: v4/v5 migrations don't touch
+        # the secrets/users tables.
         assert "CHECK" in secrets_sql
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_v5_migration_resumes_after_rename_interrupt(tmp_path, monkeypatch):
+    """Crash recovery: if a previous boot got killed between the v5 migration's
+    RENAME and the version stamp, the next boot finds:
+        * `_analytics_events_v4` (the renamed real data, never copied)
+        * `analytics_events` (recreated empty by TABLES_SCRIPT this boot)
+    Without recovery logic, _migrate_to_v5 would re-run, the second RENAME
+    would fail because the temp table already exists, and boot would block.
+
+    Seed exactly that state (v4 DB whose analytics_events has been renamed
+    away, plus a fresh-empty v5 analytics_events from TABLES_SCRIPT), drop
+    the version stamp back to 4 to simulate the un-stamped crash, and
+    confirm init_db walks it forward to v5 with the data preserved.
+    """
+    db = tmp_path / "v5_interrupted.db"
+    # Seed a v4-shape DB with one analytics row.
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL CHECK (length(username) <= 256),
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                totp_secret TEXT NOT NULL,
+                totp_last_step INTEGER NOT NULL DEFAULT 0,
+                recovery_code_hashes TEXT NOT NULL DEFAULT '[]',
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                lockout_until TEXT,
+                session_generation INTEGER NOT NULL DEFAULT 0,
+                preferred_language TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE secrets (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token TEXT UNIQUE NOT NULL,
+                server_key BLOB,
+                ciphertext BLOB,
+                content_type TEXT NOT NULL,
+                mime_type TEXT,
+                passphrase TEXT CHECK (passphrase IS NULL OR length(passphrase) <= 80),
+                track INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                label TEXT CHECK (label IS NULL OR length(label) <= 60),
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                viewed_at TEXT
+            );
+            CREATE TABLE api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT
+            );
+            CREATE TABLE analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                payload TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (id, version) VALUES (1, 4);
+            """
+        )
+        # One real row in the v4-shape table -- the data we must not lose.
+        conn.execute(
+            "INSERT INTO analytics_events (event_type, payload) "
+            "VALUES ('content.limit_hit', '{}')"
+        )
+        # Simulate the prior interrupted run: the RENAME succeeded but
+        # nothing after it ran. Schema_version is still stamped at 4.
+        conn.execute("ALTER TABLE analytics_events RENAME TO _analytics_events_v4")
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    from app import config
+
+    config.get_settings.cache_clear()
+    try:
+        # init_db should run TABLES_SCRIPT (creates a fresh empty v5
+        # analytics_events because none exists at the canonical name),
+        # then re-run _migrate_to_v5 which detects the leftover temp
+        # table and resumes from it without dropping the real data.
+        models.init_db()
+        with sqlite3.connect(str(db)) as conn:
+            (ver,) = conn.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            cols = {
+                r[1]
+                for r in conn.execute("PRAGMA table_info(analytics_events)").fetchall()
+            }
+            (count,) = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
+            (event_type,) = conn.execute(
+                "SELECT event_type FROM analytics_events"
+            ).fetchone()
+            temp_still_present = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='_analytics_events_v4'"
+            ).fetchone()
+        assert ver == 5
+        assert "user_id" not in cols  # v5 shape, no user identity column
+        assert count == 1, "the row that was in flight must be preserved"
+        assert event_type == "content.limit_hit"
+        assert temp_still_present is None, "temp table must be cleaned up"
     finally:
         config.get_settings.cache_clear()
 

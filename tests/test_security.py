@@ -624,6 +624,35 @@ def test_landing_passphrase_input_is_type_password():
     )
 
 
+def test_landing_passphrase_input_has_no_html_maxlength():
+    """The reveal-side passphrase input must NOT enforce an HTML maxlength.
+    HTML maxlength counts UTF-16 code units; the server cap on
+    `RevealBody.passphrase` is 200 codepoints. For supplementary-plane
+    content (emoji, rare CJK ext), 1 codepoint = 2 UTF-16 code units, so
+    a maxlength="200" on this input would lock receivers out of legitimate
+    emoji-heavy passphrases at ~100 codepoints -- including any pre-cap
+    secret created via the API or a pre-deploy browser client. Server-
+    side codepoint cap is the single source of truth on reveal; over-cap
+    input falls through to the generic credentials error like any other
+    wrong-passphrase attempt. See the RevealBody.passphrase comment in
+    app/schemas.py."""
+    import pathlib
+    import re
+
+    html = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "app"
+        / "templates"
+        / "landing.html"
+    ).read_text()
+    pp_match = re.search(r'<input[^>]*id="passphrase"[^>]*>', html)
+    assert pp_match is not None, "no #passphrase input found on landing page"
+    tag = pp_match.group(0)
+    assert "maxlength" not in tag, (
+        f"reveal passphrase input must not ship an HTML maxlength; got: {tag}"
+    )
+
+
 def test_login_code_input_has_show_hide_toggle_wiring():
     """The login form's code input ships as type=text (TOTP is the default
     mode; masking a 30-second rotating code buys no security). When the
