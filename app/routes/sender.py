@@ -34,6 +34,7 @@ from ..schemas import (
     LogoutResponse,
     SecretStatusResponse,
     TrackedListResponse,
+    UpdatePreferencesBody,
 )
 
 router = APIRouter()
@@ -242,21 +243,20 @@ async def create_secret(
         label=label if track else None,  # labels are meaningless without tracking
     )
 
-    # Presence-only `content.limit_hit` analytics emit. Two gates:
-    #   * settings.analytics_enabled (off by default; opt-in via
-    #     EPHEMERA_ANALYTICS_ENABLED=true). A privacy-focused tool collects
-    #     no telemetry without explicit operator consent.
-    #   * near_cap from the request body. The frontend sets this true when
-    #     the user's intended (pre-truncation) content size crossed ~95% of
-    #     the cap during the compose session -- a signal the backend can't
-    #     infer post-hoc, since the textarea silently truncates over-cap
-    #     pastes and edit-down erases the high-water mark.
+    # Presence-only `content.limit_hit` analytics emit.
+    # `near_cap` is the call-site precondition (the user crossed ~95% of
+    # the cap during the compose session -- a signal the backend can't
+    # infer post-hoc, since the textarea silently truncates over-cap
+    # pastes and edit-down erases the high-water mark).
+    # The two emit gates (operator env + per-user opt-in) live inside
+    # `record_event_standalone` -- pass the authenticated user, the
+    # module silently no-ops if either gate is closed.
     # No payload, no user_id: the row's existence is the entire signal,
     # `count(*)` over time is the only query the table is built for.
     # Fire-and-forget: a write failure must never break the 201.
-    if near_cap and settings.analytics_enabled:
+    if near_cap:
         try:
-            analytics.record_event_standalone("content.limit_hit")
+            analytics.record_event_standalone("content.limit_hit", user=user)
         except Exception:
             _logger.warning("content.limit_hit telemetry write failed", exc_info=True)
 
@@ -278,6 +278,48 @@ def api_me(user: dict = Depends(verify_api_token_or_session)):
         id=user["id"],
         username=user["username"],
         email=user.get("email"),
+        analytics_opt_in=bool(user.get("analytics_opt_in")),
+    )
+
+
+@router.patch(
+    "/api/me/preferences",
+    response_model=ApiMeResponse,
+    dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
+)
+def update_preferences(
+    body: UpdatePreferencesBody,
+    request: Request,
+    user: dict = Depends(verify_api_token_or_session),
+):
+    """Flip user-scoped preferences. Today's only knob is `analytics_opt_in`
+    (per-user telemetry consent); the route is shaped as a generic
+    preferences mutation so future user-scoped settings can join without
+    a new endpoint.
+
+    Each actual flip emits a `preferences.analytics_changed` security_log
+    entry so an operator can answer "who consented when" without joining
+    the aggregate-only analytics_events table (which deliberately carries
+    no user_id). No-op PATCH (sending the current value) does not log.
+    """
+    if body.analytics_opt_in is not None:
+        desired = 1 if body.analytics_opt_in else 0
+        current = int(user.get("analytics_opt_in") or 0)
+        if desired != current:
+            models.update_user(user["id"], analytics_opt_in=desired)
+            security_log.emit(
+                "preferences.analytics_changed",
+                user_id=user["id"],
+                username=user["username"],
+                enabled=bool(desired),
+                client_ip=security_log.client_ip(request),
+            )
+            user = {**user, "analytics_opt_in": desired}
+    return ApiMeResponse(
+        id=user["id"],
+        username=user["username"],
+        email=user.get("email"),
+        analytics_opt_in=bool(user.get("analytics_opt_in")),
     )
 
 

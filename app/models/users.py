@@ -37,7 +37,7 @@ _USER_COLUMNS_NO_TOTP = (
     "id, username, email, password_hash, "
     "totp_last_step, recovery_code_hashes, "
     "failed_attempts, lockout_until, session_generation, "
-    "preferred_language, "
+    "preferred_language, analytics_opt_in, "
     "created_at, updated_at"
 )
 
@@ -169,6 +169,7 @@ _ALLOWED_UPDATE_COLUMNS = frozenset(
         "lockout_until",
         "session_generation",
         "preferred_language",
+        "analytics_opt_in",
         # `updated_at` is set by update_user itself, not by callers, but
         # naming it here makes the set the authoritative list of writable
         # columns rather than "everything writable except the one the

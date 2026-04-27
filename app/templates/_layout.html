@@ -124,6 +124,31 @@
 
       {% if is_authenticated %}
       <section class="chrome-menu-section" style="--stagger-i: 2;">
+        {# Analytics opt-in: per-user telemetry consent. Default off (consent-
+           first). Aria role menuitemcheckbox so screen readers announce the
+           on/off state; chrome-menu.js syncs aria-checked with the value
+           it reads from /api/me on load and the value the user toggles to.
+           PATCH /api/me/preferences persists the change. Tooltip carries
+           the longer copy so the row stays single-line; the same string
+           is exposed to assistive tech via aria-describedby on a visually-
+           hidden span. Drawer-only today; if desktop access becomes load-
+           bearing, add a parallel control in top-chrome-right then. #}
+        <button type="button" class="chrome-menu-row chrome-menu-row-toggle"
+                id="chrome-menu-analytics" role="menuitemcheckbox" aria-checked="false"
+                aria-describedby="chrome-menu-analytics-help"
+                title="{{ _('Counts events like “someone hit the message length cap” — never your messages, links, or identity.') }}">
+          <svg class="chrome-menu-row-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
+            <rect x="4" y="13" width="3.5" height="7" rx="1" fill="currentColor"/>
+            <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="currentColor"/>
+            <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="currentColor"/>
+          </svg>
+          <span class="chrome-menu-row-label">{{ _("share anonymous usage counts") }}</span>
+          <span class="chrome-menu-switch" aria-hidden="true">
+            <span class="chrome-menu-switch-thumb"></span>
+          </span>
+          <span class="visually-hidden" id="chrome-menu-analytics-help">{{ _("Counts events like “someone hit the message length cap” — never your messages, links, or identity.") }}</span>
+        </button>
+
         {# Sign-out row uses the same two-click confirm pattern as the
            desktop user pill. First tap arms it (row turns red, label
            swaps to the locale's sign_out_confirm text via data-confirm

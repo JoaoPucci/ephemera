@@ -119,6 +119,19 @@ class ApiMeResponse(BaseModel):
     id: int
     username: str
     email: str | None = None
+    # Per-user analytics consent. Read on page load so the frontend can
+    # render the toggle in the right state; gates whether `near_cap` is
+    # included in the create-secret body.
+    analytics_opt_in: bool = False
+
+
+class UpdatePreferencesBody(BaseModel):
+    """Body for PATCH /api/me/preferences. All fields optional -- only
+    fields explicitly included are updated; missing fields are left
+    unchanged. Today the only writable preference is `analytics_opt_in`
+    (per-user telemetry consent)."""
+
+    analytics_opt_in: bool | None = None
 
 
 # ---------------------------------------------------------------------------

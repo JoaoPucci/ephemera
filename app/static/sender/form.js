@@ -52,6 +52,30 @@ let intendedContentSize = 0; // chars, drives counter UX + threshold gate
 let nearCapHit = false; // sticky session bit reported as `near_cap` on submit
 const TELEMETRY_THRESHOLD = MAX_CONTENT * 0.95;
 
+// Per-user analytics consent, mirrored from /api/me on load and from the
+// chrome-menu drawer toggle's PATCH response on flip. Default false: until
+// /api/me lands we assume opt-out, which is the right direction (no signal
+// over the wire on a fast submit before the page settled). Browser-side
+// gate so a user who has opted out doesn't even ship `near_cap` in the
+// request body -- defense-in-depth against future logging regressions
+// that might capture bodies, even though the server-side gate would drop
+// it anyway.
+let analyticsOptIn = false;
+window.addEventListener('ephemera:me-loaded', (e) => {
+  analyticsOptIn = Boolean(e.detail?.analytics_opt_in);
+});
+window.addEventListener('ephemera:me-updated', (e) => {
+  const next = Boolean(e.detail?.analytics_opt_in);
+  // When the user disables consent mid-session, clear the in-flight
+  // sticky bit too. The session boundary for telemetry is "did the user
+  // cross 95% during the compose"; a mid-session opt-out should reset
+  // that as if the session had restarted -- the user's mental model is
+  // "I turned the toggle off, this signal is no longer being produced",
+  // and a residual sticky bit on the next submit would break that.
+  if (analyticsOptIn && !next) nearCapHit = false;
+  analyticsOptIn = next;
+});
+
 function _formatNumber(n) {
   return n.toLocaleString(window.i18n.currentLocale);
 }
@@ -370,7 +394,12 @@ form.addEventListener('submit', async (e) => {
       // submit. The backend records the bare event (no size, no paste-
       // vs-typed, no user identity) and only when analytics is enabled
       // operator-side.
-      if (nearCapHit) body.near_cap = true;
+      // Two-side gate: only ship `near_cap` if the user has opted in.
+      // Server still validates and drops the field if its own per-user
+      // gate is closed -- we don't trust the client. But not sending it
+      // at all when consent is off honors the user's mental model of
+      // "I turned this off; nothing related goes over the wire."
+      if (nearCapHit && analyticsOptIn) body.near_cap = true;
       res = await fetch('/api/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

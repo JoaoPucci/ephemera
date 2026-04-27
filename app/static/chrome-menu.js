@@ -21,6 +21,7 @@
   const langSelect = document.getElementById('chrome-menu-lang');
   const langLabel = document.getElementById('chrome-menu-lang-label');
   const themeBtn = document.getElementById('chrome-menu-theme');
+  const analyticsBtn = document.getElementById('chrome-menu-analytics');
   const signoutBtn = document.getElementById('chrome-menu-signout');
   const signoutLabel = document.getElementById('chrome-menu-signout-label');
 
@@ -164,6 +165,47 @@
       if (isTouchPrimary && typeof themeBtn.blur === 'function') themeBtn.blur();
       // syncThemeState fires via the MutationObserver when the data-theme
       // attribute flips, no need to call it manually here.
+    });
+  }
+
+  // ---- Analytics-opt-in row (per-user telemetry toggle) ----
+  // Consent-first: default off. The aria-checked state mirrors the row's
+  // value as known here. Source of truth is the server response of
+  // PATCH /api/me/preferences -- we apply optimistically, roll back if
+  // the patch fails. Fires `ephemera:me-updated` on success so other
+  // modules (form.js's near_cap gate) can react without re-fetching.
+  if (analyticsBtn) {
+    function setAnalyticsState(enabled) {
+      analyticsBtn.setAttribute('aria-checked', enabled ? 'true' : 'false');
+    }
+    // Initial state from the /api/me payload that sender.js broadcasts.
+    window.addEventListener('ephemera:me-loaded', (e) => {
+      setAnalyticsState(Boolean(e.detail?.analytics_opt_in));
+    });
+    analyticsBtn.addEventListener('click', async () => {
+      const current = analyticsBtn.getAttribute('aria-checked') === 'true';
+      const next = !current;
+      // Optimistic flip so the switch animates immediately. Rollback on
+      // failure -- a 401/500/network error keeps the user's perceived
+      // state aligned with the server.
+      setAnalyticsState(next);
+      if (isTouchPrimary && typeof analyticsBtn.blur === 'function') analyticsBtn.blur();
+      try {
+        const res = await fetch('/api/me/preferences', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ analytics_opt_in: next }),
+        });
+        if (!res.ok) throw new Error(`patch failed: ${res.status}`);
+        const me = await res.json();
+        const persisted = Boolean(me.analytics_opt_in);
+        setAnalyticsState(persisted);
+        window.dispatchEvent(new CustomEvent('ephemera:me-updated', { detail: me }));
+      } catch {
+        // Rollback. No error toast: the toggle is small, the failure
+        // mode is "the switch snaps back" -- which is itself the signal.
+        setAnalyticsState(current);
+      }
     });
   }
 
