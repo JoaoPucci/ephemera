@@ -90,7 +90,7 @@ jobs:
         # explicit auth path). fail_ci_if_error=false so a transient
         # Codecov outage doesn't block the merge -- the artifact above
         # is the authoritative copy.
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: coverage.xml
           flags: python
@@ -132,7 +132,7 @@ jobs:
 
       - name: Upload JS coverage to Codecov
         # use_oidc=true: see backend job above for rationale.
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           directory: coverage/
           flags: javascript
