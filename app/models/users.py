@@ -209,6 +209,31 @@ def set_preferred_language(user_id: int, language: str | None) -> None:
     update_user(user_id, preferred_language=language)
 
 
+def set_analytics_opt_in(user_id: int, desired: int) -> int | None:
+    """Atomically set users.analytics_opt_in if it currently differs.
+
+    Returns the persisted value when an update actually fired, or None
+    when no row was changed (either the value already matched, or the
+    user_id doesn't exist). The conditional WHERE is what makes this
+    safe under concurrent toggles: a read-modify-write in Python could
+    no-op a real change if two requests both observed the pre-flip
+    value. Putting the comparison in SQL keeps the read+decide+write a
+    single atomic statement. Last write wins under interleaving, which
+    matches the user mental model for rapid toggle clicks.
+
+    Caller should drive security_log emission off the `is not None`
+    return so a no-op PATCH doesn't generate an audit row.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "UPDATE users SET analytics_opt_in = ?, updated_at = ? "
+            "WHERE id = ? AND analytics_opt_in != ? "
+            "RETURNING analytics_opt_in",
+            (desired, _iso(_utcnow()), user_id, desired),
+        ).fetchone()
+    return int(row["analytics_opt_in"]) if row else None
+
+
 def bump_session_generation(user_id: int) -> int:
     """Invalidate every outstanding session cookie for this user by advancing
     the generation counter the cookie is signed over. Call this after any

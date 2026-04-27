@@ -45,13 +45,64 @@ function mountBothSurfaces({ analyticsOptIn = false } = {}) {
   `;
 }
 
-const PATCH_OK_BODY = { id: 1, username: 'admin', analytics_opt_in: true };
-const PATCH_OK_OFF = { id: 1, username: 'admin', analytics_opt_in: false };
+// URL-aware fetch stub. analytics-toggle.js bootstraps from /api/me on
+// init (so it works on every authed page, not just the sender), AND
+// PATCHes /api/me/preferences on commit. Tests need both responses
+// distinguished -- the bootstrap response shapes the initial state,
+// the PATCH response shapes the post-confirm state. Each call is
+// served by URL match; `patchResolver` lets a test inject a custom
+// PATCH response (e.g. an out-of-order sequence) instead of the
+// default {analytics_opt_in: patchOptIn}.
+function stubAnalyticsFetch({
+  initialOptIn = false,
+  patchOptIn = true,
+  patchStatus = 200,
+  patchResolver = null,
+} = {}) {
+  return vi.fn((url, opts) => {
+    if (url === '/api/me') {
+      return Promise.resolve(
+        jsonResponse({ id: 1, username: 'admin', analytics_opt_in: initialOptIn })
+      );
+    }
+    if (url === '/api/me/preferences') {
+      if (patchResolver) return patchResolver(opts);
+      if (patchStatus !== 200) {
+        return Promise.resolve(new Response(null, { status: patchStatus }));
+      }
+      return Promise.resolve(
+        jsonResponse({ id: 1, username: 'admin', analytics_opt_in: patchOptIn })
+      );
+    }
+    return Promise.resolve(new Response(null, { status: 404 }));
+  });
+}
 
-describe('analytics-toggle.js — initial state sync', () => {
-  beforeEach(() => mountBothSurfaces());
+function patchCalls(fetchMock) {
+  return fetchMock.mock.calls.filter(([url]) => url === '/api/me/preferences');
+}
 
-  it('syncs both surfaces from ephemera:me-loaded', async () => {
+describe('analytics-toggle.js — bootstrap + cross-surface state sync', () => {
+  it('bootstraps initial state from /api/me without waiting for ephemera:me-loaded', async () => {
+    // Regression guard: prior versions only listened for the event
+    // dispatched by sender.js. On any other authed surface (or future
+    // page that doesn't load sender.js), the toggle would render at
+    // template default `aria-checked="false"` even for opted-in users.
+    mountBothSurfaces({ analyticsOptIn: false });
+    vi.stubGlobal('fetch', stubAnalyticsFetch({ initialOptIn: true }));
+    await loadModule('analytics-toggle');
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('true');
+    expect(document.getElementById('chrome-menu-analytics').getAttribute('aria-checked')).toBe(
+      'true'
+    );
+  });
+
+  it('still syncs from ephemera:me-loaded for in-page consumers that fire it', async () => {
+    mountBothSurfaces();
+    vi.stubGlobal('fetch', stubAnalyticsFetch({ initialOptIn: false }));
     await loadModule('analytics-toggle');
     await flushAsync();
 
@@ -62,12 +113,11 @@ describe('analytics-toggle.js — initial state sync', () => {
     );
 
     expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('true');
-    expect(document.getElementById('chrome-menu-analytics').getAttribute('aria-checked')).toBe(
-      'true'
-    );
   });
 
-  it('syncs both surfaces from ephemera:me-updated', async () => {
+  it('syncs both surfaces from ephemera:me-updated (cross-surface PATCH propagation)', async () => {
+    mountBothSurfaces();
+    vi.stubGlobal('fetch', stubAnalyticsFetch({ initialOptIn: false }));
     await loadModule('analytics-toggle');
     await flushAsync();
 
@@ -85,9 +135,10 @@ describe('analytics-toggle.js — initial state sync', () => {
 });
 
 describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () => {
+  beforeEach(() => mountBothSurfaces({ analyticsOptIn: false }));
+
   it('clicking the desktop pill (off) opens the popover and does NOT PATCH', async () => {
-    mountBothSurfaces({ analyticsOptIn: false });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_BODY)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: false });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -96,16 +147,14 @@ describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () =>
     btn.click();
     await flushAsync();
 
-    // No PATCH yet -- the click only opens the dialog.
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(patchCalls(fetchMock)).toHaveLength(0);
     expect(document.getElementById('analytics-popover').hidden).toBe(false);
     expect(btn.getAttribute('aria-expanded')).toBe('true');
     expect(btn.getAttribute('aria-checked')).toBe('false');
   });
 
   it('clicking the drawer row (off) opens the disclosure and does NOT PATCH', async () => {
-    mountBothSurfaces({ analyticsOptIn: false });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_BODY)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: false });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -114,15 +163,14 @@ describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () =>
     btn.click();
     await flushAsync();
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(patchCalls(fetchMock)).toHaveLength(0);
     expect(document.getElementById('chrome-menu-analytics-disclosure').hidden).toBe(false);
     expect(btn.getAttribute('aria-expanded')).toBe('true');
     expect(btn.getAttribute('aria-checked')).toBe('false');
   });
 
   it('Cancel closes the dialog without PATCHing or flipping state', async () => {
-    mountBothSurfaces({ analyticsOptIn: false });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_BODY)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: false });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -134,15 +182,14 @@ describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () =>
     document.querySelector('.analytics-popover-cancel').click();
     await flushAsync();
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(patchCalls(fetchMock)).toHaveLength(0);
     expect(document.getElementById('analytics-popover').hidden).toBe(true);
     expect(btn.getAttribute('aria-expanded')).toBe('false');
     expect(btn.getAttribute('aria-checked')).toBe('false');
   });
 
   it('Enable PATCHes, closes the dialog, and flips both surfaces to on', async () => {
-    mountBothSurfaces({ analyticsOptIn: false });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_BODY)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: false, patchOptIn: true });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -153,11 +200,10 @@ describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () =>
     await flushAsync();
     await flushAsync();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, opts] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/me/preferences');
-    expect(opts.method).toBe('PATCH');
-    expect(JSON.parse(opts.body)).toEqual({ analytics_opt_in: true });
+    const patches = patchCalls(fetchMock);
+    expect(patches).toHaveLength(1);
+    expect(patches[0][1].method).toBe('PATCH');
+    expect(JSON.parse(patches[0][1].body)).toEqual({ analytics_opt_in: true });
 
     expect(document.getElementById('analytics-popover').hidden).toBe(true);
     expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('true');
@@ -167,8 +213,7 @@ describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () =>
   });
 
   it('Esc dismisses the open dialog without PATCHing', async () => {
-    mountBothSurfaces({ analyticsOptIn: false });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_BODY)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: false });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -178,30 +223,27 @@ describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () =>
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await flushAsync();
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(patchCalls(fetchMock)).toHaveLength(0);
     expect(document.getElementById('analytics-popover').hidden).toBe(true);
   });
 
   it('outside-click dismisses the open dialog without PATCHing', async () => {
-    mountBothSurfaces({ analyticsOptIn: false });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_BODY)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: false });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
 
     document.getElementById('analytics-toggle').click();
     await flushAsync();
-    // Click on the body (outside both panel and trigger).
     document.body.click();
     await flushAsync();
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(patchCalls(fetchMock)).toHaveLength(0);
     expect(document.getElementById('analytics-popover').hidden).toBe(true);
   });
 
   it('a failed PATCH does not flip aria-checked (no optimistic state)', async () => {
-    mountBothSurfaces({ analyticsOptIn: false });
-    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 500 })));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: false, patchStatus: 500 });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -212,18 +254,17 @@ describe('analytics-toggle.js — opt-IN goes through the confirm dialog', () =>
     await flushAsync();
     await flushAsync();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(patchCalls(fetchMock)).toHaveLength(1);
     expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('false');
-    // Dialog still closes -- next click reopens it, which is the user's
-    // expected mental model after a failure.
     expect(document.getElementById('analytics-popover').hidden).toBe(true);
   });
 });
 
 describe('analytics-toggle.js — opt-OUT is instant + acknowledged (asymmetric)', () => {
+  beforeEach(() => mountBothSurfaces({ analyticsOptIn: true }));
+
   it('clicking the desktop pill while ON PATCHes immediately and shows the ack', async () => {
-    mountBothSurfaces({ analyticsOptIn: true });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_OFF)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: true, patchOptIn: false });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -232,26 +273,21 @@ describe('analytics-toggle.js — opt-OUT is instant + acknowledged (asymmetric)
     await flushAsync();
     await flushAsync();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [, opts] = fetchMock.mock.calls[0];
-    expect(JSON.parse(opts.body)).toEqual({ analytics_opt_in: false });
-    // No popover for opt-OUT.
+    const patches = patchCalls(fetchMock);
+    expect(patches).toHaveLength(1);
+    expect(JSON.parse(patches[0][1].body)).toEqual({ analytics_opt_in: false });
     expect(document.getElementById('analytics-popover').hidden).toBe(true);
     expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('false');
-    // SR ack: aria-live=polite span carries the spoken confirmation.
+
     const srAck = document.getElementById('analytics-toggle-ack');
     expect(srAck.textContent.length).toBeGreaterThan(0);
-    // Sighted ack: position-fixed tooltip visible briefly. Use the
-    // .is-visible class as the visibility signal (CSS opacity-fade);
-    // textContent presence sanity-checks the text was set.
     const tip = document.getElementById('analytics-toggle-ack-tip');
     expect(tip.classList.contains('is-visible')).toBe(true);
     expect(tip.textContent.length).toBeGreaterThan(0);
   });
 
   it('clicking the drawer row while ON PATCHes immediately and swaps label text', async () => {
-    mountBothSurfaces({ analyticsOptIn: true });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(PATCH_OK_OFF)));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: true, patchOptIn: false });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -262,22 +298,17 @@ describe('analytics-toggle.js — opt-OUT is instant + acknowledged (asymmetric)
     await flushAsync();
     await flushAsync();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(patchCalls(fetchMock)).toHaveLength(1);
     expect(document.getElementById('chrome-menu-analytics-disclosure').hidden).toBe(true);
     expect(drawerBtn.getAttribute('aria-checked')).toBe('false');
 
-    // Sighted: row label briefly carries the ack text (label-swap, same
-    // pattern as sign-out two-click). Same row width as the original
-    // label so no reflow.
     expect(labelEl.textContent.length).toBeGreaterThan(0);
-    // SR: aria-live span has the same text.
     const drawerAck = drawerBtn.querySelector('.chrome-menu-row-ack');
     expect(drawerAck.textContent.length).toBeGreaterThan(0);
   });
 
   it('failed PATCH on opt-OUT does NOT flip state and does NOT write ack', async () => {
-    mountBothSurfaces({ analyticsOptIn: true });
-    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 500 })));
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: true, patchStatus: 500 });
     vi.stubGlobal('fetch', fetchMock);
     await loadModule('analytics-toggle');
     await flushAsync();
@@ -291,5 +322,87 @@ describe('analytics-toggle.js — opt-OUT is instant + acknowledged (asymmetric)
     expect(ack.textContent).toBe('');
     const tip = document.getElementById('analytics-toggle-ack-tip');
     expect(tip.classList.contains('is-visible')).toBe(false);
+  });
+});
+
+describe('analytics-toggle.js — race-resilience on rapid PATCH', () => {
+  beforeEach(() => mountBothSurfaces({ analyticsOptIn: false }));
+
+  it('drops a stale PATCH response when a newer one was issued in flight', async () => {
+    // Two PATCH responses, each gated on its own resolver. Test forces
+    // them to land in REVERSE order: B (newer) lands first, A (older)
+    // lands second. Without a sequence guard the older response's
+    // setState() + ephemera:me-updated would clobber B's state. With
+    // the guard, A's response is dropped silently.
+    let resolveA;
+    let resolveB;
+    let callIdx = 0;
+    const fetchMock = vi.fn((url, opts) => {
+      if (url === '/api/me') {
+        return Promise.resolve(jsonResponse({ id: 1, analytics_opt_in: false }));
+      }
+      if (url === '/api/me/preferences') {
+        callIdx += 1;
+        if (callIdx === 1) {
+          // First call returns analytics_opt_in mirroring the requested body.
+          return new Promise((resolve) => {
+            resolveA = () =>
+              resolve(
+                jsonResponse({
+                  id: 1,
+                  analytics_opt_in: JSON.parse(opts.body).analytics_opt_in,
+                })
+              );
+          });
+        }
+        return new Promise((resolve) => {
+          resolveB = () =>
+            resolve(
+              jsonResponse({
+                id: 1,
+                analytics_opt_in: JSON.parse(opts.body).analytics_opt_in,
+              })
+            );
+        });
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('analytics-toggle');
+    await flushAsync();
+
+    // Open dialog, confirm -> PATCH A in flight (would set true).
+    document.getElementById('analytics-toggle').click();
+    await flushAsync();
+    document.querySelector('.analytics-popover-confirm').click();
+    await flushAsync();
+
+    // While A pending, simulate a second PATCH (e.g. drawer click while
+    // desktop response is mid-flight). Force-flip the state so opt-OUT
+    // path fires PATCH B (would set false). Use the model's own state-
+    // sync hook: dispatch ephemera:me-updated to mark the toggle as on,
+    // then click triggers the opt-OUT path.
+    window.dispatchEvent(
+      new CustomEvent('ephemera:me-updated', {
+        detail: { analytics_opt_in: true },
+      })
+    );
+    document.getElementById('analytics-toggle').click();
+    await flushAsync();
+
+    // Land B FIRST -- newer response.
+    resolveB();
+    await flushAsync();
+    await flushAsync();
+
+    // Land A SECOND -- stale, should be dropped.
+    resolveA();
+    await flushAsync();
+    await flushAsync();
+
+    // Final state must reflect B (the most-recently-issued PATCH),
+    // not A. Without the sequence guard, A's late response would have
+    // called setState(true) and clobbered B's setState(false).
+    expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('false');
   });
 });

@@ -59,6 +59,30 @@
     if (desktopBtn) desktopBtn.setAttribute('aria-checked', value);
     if (drawerBtn) drawerBtn.setAttribute('aria-checked', value);
   }
+
+  // Bootstrap initial state from /api/me directly. Prior versions of
+  // this module relied on `ephemera:me-loaded` from sender.js, but
+  // that's only emitted on the sender page -- on any other authed
+  // page (or future authed surface) the toggle would render stuck at
+  // the template default `aria-checked="false"`, showing the wrong
+  // state for opted-in users and turning a corrective click into a
+  // no-op. Fetching here makes the toggle self-sufficient on every
+  // page that renders it, and the duplicate /api/me on the sender
+  // page is cheap (small JSON, browser HTTP cache). The me-updated
+  // event below remains the cross-surface sync channel for in-page
+  // PATCH results.
+  (async function bootstrap() {
+    try {
+      const res = await fetch('/api/me');
+      if (!res.ok) return;
+      const me = await res.json();
+      setState(Boolean(me.analytics_opt_in));
+    } catch {
+      // Auth/network errors are handled at the page level (sender.js
+      // will reload on 401 etc.). Toggle stays at default; nothing
+      // useful we can do here.
+    }
+  })();
   window.addEventListener('ephemera:me-loaded', (e) => {
     setState(Boolean(e.detail?.analytics_opt_in));
   });
@@ -209,7 +233,19 @@
   }
 
   // ---- PATCH + state propagation ----
+  // `patchSeq` is the latest-issued-request marker. If a user clicks
+  // rapidly (or alternates between desktop and drawer surfaces), HTTP
+  // responses can arrive out of order. Without this guard, the older
+  // response landing last would call `setState(persisted)` with stale
+  // value and broadcast `ephemera:me-updated` with a stale payload --
+  // the visible switch would flip back to a value the user already
+  // reverted away from, and form.js's analytics-opt-in cache would
+  // diverge from the server until reload. With the guard, only the
+  // response from the latest-issued PATCH is honoured; older responses
+  // are dropped silently after the network round-trip.
+  let patchSeq = 0;
   async function commit(next) {
+    const seq = ++patchSeq;
     try {
       const res = await fetch('/api/me/preferences', {
         method: 'PATCH',
@@ -218,6 +254,11 @@
       });
       if (!res.ok) throw new Error(`patch failed: ${res.status}`);
       const me = await res.json();
+      // Stale response: a newer PATCH was issued while this one was in
+      // flight. Drop this response so it doesn't overwrite the newer
+      // pending one's eventual result. The newer request is responsible
+      // for landing the correct final state.
+      if (seq !== patchSeq) return null;
       const persisted = Boolean(me.analytics_opt_in);
       setState(persisted);
       window.dispatchEvent(new CustomEvent('ephemera:me-updated', { detail: me }));

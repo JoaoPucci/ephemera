@@ -66,13 +66,15 @@ window.addEventListener('ephemera:me-loaded', (e) => {
 });
 window.addEventListener('ephemera:me-updated', (e) => {
   const next = Boolean(e.detail?.analytics_opt_in);
-  // When the user disables consent mid-session, clear the in-flight
-  // sticky bit too. The session boundary for telemetry is "did the user
-  // cross 95% during the compose"; a mid-session opt-out should reset
-  // that as if the session had restarted -- the user's mental model is
-  // "I turned the toggle off, this signal is no longer being produced",
-  // and a residual sticky bit on the next submit would break that.
-  if (analyticsOptIn && !next) nearCapHit = false;
+  // Reset the sticky session bit on ANY consent transition, not just
+  // opt-OUT. Opt-OUT case: user turned this off, no signal from this
+  // session anymore. Opt-IN case: user crossed 95% while opted out,
+  // then opts in before submit -- without a reset, near_cap=true would
+  // ride pre-consent activity into the new state, breaking the per-
+  // user opt-in boundary the toggle exists to enforce. Either way the
+  // sticky bit's session is the consent-invariant period; flipping
+  // consent ends that session.
+  if (analyticsOptIn !== next) nearCapHit = false;
   analyticsOptIn = next;
 });
 

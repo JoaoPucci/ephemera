@@ -438,6 +438,43 @@ def test_update_user_accepts_every_documented_writable_column(provisioned_user):
     )
 
 
+def test_set_analytics_opt_in_returns_new_value_on_actual_change(provisioned_user):
+    """Atomic toggle: when the desired value differs from the current
+    one, the SQL UPDATE fires and returns the new value. This is the
+    "real change" path the route uses to gate security_log emission."""
+    # Default is 0 from the v6 migration.
+    persisted = models.set_analytics_opt_in(provisioned_user["id"], 1)
+    assert persisted == 1
+    fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh["analytics_opt_in"] == 1
+
+
+def test_set_analytics_opt_in_returns_none_when_value_already_matches(provisioned_user):
+    """Concurrency-safe no-op: when the desired value matches what's
+    already in the row, the conditional WHERE clause skips the UPDATE
+    and RETURNING produces no row. The route uses None as the signal
+    "don't emit security_log, don't claim a flip happened."
+
+    Pre-fix this was a Python-side `if desired != current` check that
+    races against concurrent PATCHes (two requests both observing the
+    same pre-flip value can no-op a real change). Putting the
+    comparison in SQL keeps it atomic; this test pins that behavior."""
+    # Already 0 by default. Ask for 0 -> no-op.
+    persisted = models.set_analytics_opt_in(provisioned_user["id"], 0)
+    assert persisted is None
+    fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh["analytics_opt_in"] == 0
+
+
+def test_set_analytics_opt_in_returns_none_for_unknown_user(tmp_db_path):
+    """Defensive: a stale or hand-crafted call against a nonexistent
+    user_id must not silently succeed. RETURNING on a zero-row UPDATE
+    yields no row; the function reports None and the caller knows
+    nothing changed."""
+    persisted = models.set_analytics_opt_in(999_999, 1)
+    assert persisted is None
+
+
 def test_default_user_getters_do_not_return_totp_secret(provisioned_user):
     """The default user-row accessors must never hand back the TOTP
     plaintext. Most call sites (session auth, bearer auth, admin flows

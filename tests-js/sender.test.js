@@ -970,4 +970,92 @@ describe('sender.js — telemetry fields on submit body', () => {
     const body = getBody();
     expect(body.near_cap).toBeUndefined();
   });
+
+  it('clears the sticky nearCapHit when the user toggles analytics ON mid-session too', async () => {
+    // Symmetric to the opt-OUT reset above. Pre-fix the flag was only
+    // cleared on a true->false transition. A user who crossed 95% while
+    // opted out and THEN opted in before submit would still send
+    // near_cap=true derived from pre-consent activity -- a real opt-in
+    // boundary violation. The reset must fire on either transition
+    // direction.
+    let captured = null;
+    const fetchMock = vi.fn((url, opts) => {
+      if (url === '/api/me') {
+        return Promise.resolve(
+          jsonResponse({ id: 1, username: 'admin', email: null, analytics_opt_in: false })
+        );
+      }
+      if (url === '/api/secrets/tracked') {
+        return Promise.resolve(jsonResponse({ items: [] }));
+      }
+      if (url === '/api/secrets') {
+        captured = opts;
+        return Promise.resolve(
+          jsonResponse({
+            url: 'https://example/s/tok#key',
+            id: 'deadbeef',
+            expires_at: '2099-01-01T00:00:00Z',
+          })
+        );
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+    await flushAsync(); // /api/me resolves with analyticsOptIn:false
+
+    // User crosses the 95% threshold while opted OUT. The sticky bit
+    // gets set internally by form.js, but the wire gate should drop it
+    // because consent is off.
+    const input = document.getElementById('content');
+    input.value = 'a'.repeat(96_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    // User opts IN via the toggle; form.js sees the false->true
+    // transition. The pre-consent sticky bit should be cleared at this
+    // moment, NOT carried forward into the now-consenting session.
+    window.dispatchEvent(
+      new CustomEvent('ephemera:me-updated', { detail: { analytics_opt_in: true } })
+    );
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(captured).not.toBeNull();
+    const body = JSON.parse(captured.body);
+    // Without the opt-IN reset, body.near_cap would be true (carried
+    // over from pre-consent activity). With the reset, it's undefined.
+    expect(body.near_cap).toBeUndefined();
+  });
+
+  it('does NOT clear nearCapHit on a no-op me-updated (same value)', async () => {
+    // The reset is gated on an actual transition (analyticsOptIn !== next).
+    // A me-updated event that arrives with the SAME value (e.g. cross-tab
+    // sync re-broadcasting current state) must not clobber a legitimate
+    // sticky flag. Otherwise a routine sync would silently disable the
+    // metric for the rest of the session.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+    await flushAsync(); // /api/me resolves with analyticsOptIn:true (default stub)
+
+    const input = document.getElementById('content');
+    input.value = 'a'.repeat(96_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    // Re-broadcast the SAME value -- no transition. nearCapHit should stay set.
+    window.dispatchEvent(
+      new CustomEvent('ephemera:me-updated', { detail: { analytics_opt_in: true } })
+    );
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().near_cap).toBe(true);
+  });
 });
