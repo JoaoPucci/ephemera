@@ -146,9 +146,24 @@
     if (ackTimer) clearTimeout(ackTimer);
 
     if (surface === 'desktop') {
-      // Sighted: tooltip-style overlay.
-      if (desktopAckTip) {
+      // Sighted: tooltip-style overlay positioned under the trigger
+      // pill. Anchored at show-time via getBoundingClientRect because
+      // the chrome neighbours (lang-picker / theme-toggle) shift width
+      // with the active locale, and the tip should track the pill
+      // exactly -- not the chrome row's right edge (which is where
+      // theme-toggle lives, not where the user clicked).
+      if (desktopAckTip && desktopBtn) {
+        const rect = desktopBtn.getBoundingClientRect();
+        const isRTL = document.documentElement.dir === 'rtl' || document.dir === 'rtl';
         desktopAckTip.textContent = text;
+        desktopAckTip.style.top = `${rect.bottom + 6}px`;
+        if (isRTL) {
+          desktopAckTip.style.left = `${rect.left}px`;
+          desktopAckTip.style.right = 'auto';
+        } else {
+          desktopAckTip.style.right = `${window.innerWidth - rect.right}px`;
+          desktopAckTip.style.left = 'auto';
+        }
         desktopAckTip.classList.add('is-visible');
       }
       // SR: aria-live span.
@@ -157,10 +172,15 @@
         if (desktopAckTip) {
           desktopAckTip.classList.remove('is-visible');
           // Wait for fade transition before clearing the textContent
-          // so the text doesn't pop out before opacity finishes.
+          // so the text doesn't pop out before opacity finishes. Also
+          // clear the inline positioning so the next show recomputes
+          // fresh against current layout.
           setTimeout(() => {
             if (desktopAckTip && !desktopAckTip.classList.contains('is-visible')) {
               desktopAckTip.textContent = '';
+              desktopAckTip.style.top = '';
+              desktopAckTip.style.left = '';
+              desktopAckTip.style.right = '';
             }
           }, 250);
         }
