@@ -31,12 +31,18 @@ class CreateTextSecret(BaseModel):
     """JSON body for POST /api/secrets when content_type=text."""
 
     # Cap is 100,000 *characters* (Python code points / `len(str)`), not
-    # bytes. Matches the textarea's HTML maxlength so the client-side and
-    # server-side limits agree on the user-visible unit. UX-driven by
-    # design: "100,000 characters" is a coherent unit across every locale
-    # we ship (English, Japanese, Chinese, Korean, ...). A bytes cap would
-    # be unfair to Japanese/CJK users -- they'd hit the limit at ~33K
-    # visible characters because each is 3 UTF-8 bytes.
+    # bytes. The browser textarea's HTML maxlength enforces UTF-16 code
+    # units, which equals codepoints for BMP content (Latin, Cyrillic,
+    # most CJK) but is half for supplementary-plane content (emoji,
+    # rare CJK ext). For BMP both sides agree on 100,000; for emoji-heavy
+    # content the browser is the tighter constraint (~50K codepoints fit
+    # in 100K UTF-16 code units), and the server happily accepts whatever
+    # the textarea allowed. API callers (which bypass the textarea) get
+    # the codepoint cap exactly. UX-driven by design: "100,000 characters"
+    # is a coherent unit across every locale we ship (English, Japanese,
+    # Chinese, Korean, ...). A bytes cap would be unfair to Japanese/CJK
+    # users -- they'd hit the limit at ~33K visible characters because
+    # each is 3 UTF-8 bytes.
     #
     # Worst case server-side after this layer accepts:
     #   plaintext bytes  = up to 100,000 chars * 4 bytes/char (supplementary
@@ -83,6 +89,15 @@ class RevealBody(BaseModel):
         max_length=256,
         description="Client half of the Fernet key (base64url).",
     )
+    # 200 codepoints, NOT 200 UTF-16 code units. The reveal input in
+    # landing.html deliberately omits maxlength (vs sender.html's create-
+    # side input which still has maxlength="200" UTF-16): a sender-side
+    # UTF-16 cap is benign because browser-to-browser flows are symmetric,
+    # but a receiver-side UTF-16 cap would lock receivers out of
+    # legitimate emoji-heavy passphrases that were created via the API
+    # or by a pre-cap browser client. Server codepoint cap is the source
+    # of truth on reveal; over-cap input falls through to the generic
+    # credentials error like any wrong-passphrase attempt.
     passphrase: str | None = Field(default=None, max_length=200)
 
 
