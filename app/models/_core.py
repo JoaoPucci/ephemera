@@ -449,11 +449,33 @@ def _migrate_to_v5(conn: sqlite3.Connection) -> None:
 
     SQLite's ALTER TABLE DROP COLUMN can't drop FK-referenced columns cleanly
     on every version we'd want to support, so we use the rename + recreate +
-    copy + drop pattern instead. Index drop is unconditional (it's idempotent
-    once the source column is gone).
+    copy + drop pattern instead.
+
+    Idempotent across an interrupted prior run. If the process was killed
+    between the RENAME and the version stamp, the next boot finds:
+        * `_analytics_events_v4`: the renamed-but-not-yet-copied real data
+        * `analytics_events`: empty, just-recreated by TABLES_SCRIPT (v5 shape)
+    Detect that state and skip the rename so we don't either crash on
+    "table already exists" or, worse, drop the temp table and lose every
+    analytics row. The same recovery branch handles a crash AFTER the
+    new-table CREATE but BEFORE the INSERT (v5 table is empty, temp has
+    data) and a crash AFTER the INSERT but BEFORE the DROP (v5 table has
+    data, temp also has data) -- in both cases the populated v5 table
+    gets dropped and re-built from the temp source, idempotent.
     """
     conn.execute("DROP INDEX IF EXISTS idx_analytics_events_user_id")
-    conn.execute("ALTER TABLE analytics_events RENAME TO _analytics_events_v4")
+    has_temp = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='_analytics_events_v4'"
+    ).fetchone()
+    if has_temp:
+        # Resume mode: the rename from a prior interrupted run already
+        # happened, so _analytics_events_v4 is the authoritative source.
+        # Drop whatever sits at analytics_events (empty fresh recreate
+        # from TABLES_SCRIPT, or partial-copy from a later crash) and
+        # rebuild from the temp.
+        conn.execute("DROP TABLE IF EXISTS analytics_events")
+    else:
+        conn.execute("ALTER TABLE analytics_events RENAME TO _analytics_events_v4")
     conn.execute("""
         CREATE TABLE analytics_events (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,

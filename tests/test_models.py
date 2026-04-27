@@ -965,6 +965,124 @@ def test_v3_legacy_db_upgrades_to_current(tmp_path, monkeypatch):
         config.get_settings.cache_clear()
 
 
+def test_v5_migration_resumes_after_rename_interrupt(tmp_path, monkeypatch):
+    """Crash recovery: if a previous boot got killed between the v5 migration's
+    RENAME and the version stamp, the next boot finds:
+        * `_analytics_events_v4` (the renamed real data, never copied)
+        * `analytics_events` (recreated empty by TABLES_SCRIPT this boot)
+    Without recovery logic, _migrate_to_v5 would re-run, the second RENAME
+    would fail because the temp table already exists, and boot would block.
+
+    Seed exactly that state (v4 DB whose analytics_events has been renamed
+    away, plus a fresh-empty v5 analytics_events from TABLES_SCRIPT), drop
+    the version stamp back to 4 to simulate the un-stamped crash, and
+    confirm init_db walks it forward to v5 with the data preserved.
+    """
+    db = tmp_path / "v5_interrupted.db"
+    # Seed a v4-shape DB with one analytics row.
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL CHECK (length(username) <= 256),
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                totp_secret TEXT NOT NULL,
+                totp_last_step INTEGER NOT NULL DEFAULT 0,
+                recovery_code_hashes TEXT NOT NULL DEFAULT '[]',
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                lockout_until TEXT,
+                session_generation INTEGER NOT NULL DEFAULT 0,
+                preferred_language TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE secrets (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token TEXT UNIQUE NOT NULL,
+                server_key BLOB,
+                ciphertext BLOB,
+                content_type TEXT NOT NULL,
+                mime_type TEXT,
+                passphrase TEXT CHECK (passphrase IS NULL OR length(passphrase) <= 80),
+                track INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                label TEXT CHECK (label IS NULL OR length(label) <= 60),
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                viewed_at TEXT
+            );
+            CREATE TABLE api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT
+            );
+            CREATE TABLE analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                payload TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (id, version) VALUES (1, 4);
+            """
+        )
+        # One real row in the v4-shape table -- the data we must not lose.
+        conn.execute(
+            "INSERT INTO analytics_events (event_type, payload) "
+            "VALUES ('content.limit_hit', '{}')"
+        )
+        # Simulate the prior interrupted run: the RENAME succeeded but
+        # nothing after it ran. Schema_version is still stamped at 4.
+        conn.execute("ALTER TABLE analytics_events RENAME TO _analytics_events_v4")
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    from app import config
+
+    config.get_settings.cache_clear()
+    try:
+        # init_db should run TABLES_SCRIPT (creates a fresh empty v5
+        # analytics_events because none exists at the canonical name),
+        # then re-run _migrate_to_v5 which detects the leftover temp
+        # table and resumes from it without dropping the real data.
+        models.init_db()
+        with sqlite3.connect(str(db)) as conn:
+            (ver,) = conn.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            cols = {
+                r[1]
+                for r in conn.execute("PRAGMA table_info(analytics_events)").fetchall()
+            }
+            (count,) = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
+            (event_type,) = conn.execute(
+                "SELECT event_type FROM analytics_events"
+            ).fetchone()
+            temp_still_present = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='_analytics_events_v4'"
+            ).fetchone()
+        assert ver == 5
+        assert "user_id" not in cols  # v5 shape, no user identity column
+        assert count == 1, "the row that was in flight must be preserved"
+        assert event_type == "content.limit_hit"
+        assert temp_still_present is None, "temp table must be cleaned up"
+    finally:
+        config.get_settings.cache_clear()
+
+
 def test_v2_legacy_db_with_violating_rows_aborts_v3_migration(tmp_path, monkeypatch):
     """A v2 DB with a row that exceeds a new CHECK ceiling must abort the
     migration with a remediable error message rather than failing mid-INSERT

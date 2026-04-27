@@ -30,10 +30,25 @@ EXPIRY_PRESETS: set[int] = {300, 1800, 3600, 14400, 43200, 86400, 259200, 604800
 class CreateTextSecret(BaseModel):
     """JSON body for POST /api/secrets when content_type=text."""
 
-    # Cap matches the textarea's HTML maxlength. The frontend stops at this
-    # length client-side; this is the matching server-side guarantee for
-    # callers hitting the API directly. The previous 1MB ceiling was an
-    # arbitrary safety stop from before there was a deliberate product cap.
+    # Cap is 100,000 *characters* (Python code points / `len(str)`), not
+    # bytes. Matches the textarea's HTML maxlength so the client-side and
+    # server-side limits agree on the user-visible unit. UX-driven by
+    # design: "100,000 characters" is a coherent unit across every locale
+    # we ship (English, Japanese, Chinese, Korean, ...). A bytes cap would
+    # be unfair to Japanese/CJK users -- they'd hit the limit at ~33K
+    # visible characters because each is 3 UTF-8 bytes.
+    #
+    # Worst case server-side after this layer accepts:
+    #   plaintext bytes  = up to 100,000 chars * 4 bytes/char (supplementary
+    #                      plane: emoji, rare CJK ext) = ~400 KB
+    #   ciphertext bytes = ~534 KB (Fernet adds 57 bytes framing + AES
+    #                      padding to 16-byte blocks, then base64 4/3x)
+    #   request body     = ~410 KB worst case (content + JSON envelope +
+    #                      passphrase/label/etc.) -- well within Caddy's
+    #                      11 MB body cap (docs/deployment.md).
+    # For typical content (ASCII, mostly-BMP CJK) the numbers are 1-3x
+    # smaller. The 1 MB ceiling that used to live here was an arbitrary
+    # safety stop from before there was a deliberate product cap.
     content: str = Field(min_length=1, max_length=100_000)
     content_type: Literal["text"]
     expires_in: int = Field(
