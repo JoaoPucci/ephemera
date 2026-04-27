@@ -744,6 +744,29 @@ describe('sender.js — char-limit hints (content / label / passphrase)', () => 
     expect(hint.hidden).toBe(false);
     expect(hint.classList.contains('is-warning')).toBe(true);
   });
+
+  it('passphrase: hint text swaps from "approaching" to "max reached" at the 200-char ceiling', async () => {
+    // Before the swap, the "approaching" message stayed on past the cap
+    // even though the textarea silently blocks further keystrokes, which
+    // was literally inaccurate at-limit. The cap state stays at warning
+    // (no error escalation) but the message now reflects reality.
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('passphrase');
+    setAndFireInput(input, 'a'.repeat(180));
+    const approachingText = document.getElementById('passphrase-hint').textContent;
+    expect(approachingText.length).toBeGreaterThan(0);
+
+    setAndFireInput(input, 'a'.repeat(200));
+    const hint = document.getElementById('passphrase-hint');
+    expect(hint.hidden).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(true);
+    expect(hint.classList.contains('is-error')).toBe(false);
+    expect(hint.textContent).not.toBe(approachingText);
+    // Sourced from app/static/i18n/en.json hint.max_reached.
+    expect(hint.textContent).toBe('Maximum length reached.');
+  });
 });
 
 describe('sender.js — telemetry fields on submit body', () => {

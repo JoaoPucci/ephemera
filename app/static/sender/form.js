@@ -195,15 +195,20 @@ function _bindCounterHint(input, hintEl, max, opts = {}) {
   });
 }
 
-// Passphrase-style hint: just a one-line "approaching maximum" warning
-// at ~90% of the cap, no counter and no error flip. The 200-char cap is
-// a deliberate ceiling on a deliberate input; at-limit doesn't deserve
-// scolding.
+// Passphrase-style hint: a one-line "approaching maximum" warning at
+// ~90% of the cap, swapping to "maximum reached" once the input is at
+// the cap. No counter and no error escalation -- the 200-char cap is a
+// deliberate ceiling on a deliberate input; at-limit gets a factual
+// status (the prior "approaching" wording stayed on past the cap, which
+// was literally inaccurate once the textarea's maxlength blocked
+// further keystrokes), but it doesn't deserve a red error flip.
 function _bindPassphraseHint(input, hintEl, max, threshold = 0.9) {
   const warnAt = threshold * max;
   input.addEventListener('input', () => {
     const len = input.value.length;
-    if (len >= warnAt) {
+    if (len >= max) {
+      _setHint(hintEl, window.i18n.t('hint.max_reached'), 'warning');
+    } else if (len >= warnAt) {
       _setHint(hintEl, window.i18n.t('hint.passphrase_approaching'), 'warning');
     } else {
       _setHint(hintEl, null, null);
