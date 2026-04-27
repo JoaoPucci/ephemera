@@ -663,39 +663,6 @@ button.copy-error:hover {
 
 .analytics-toggle svg {
   display: block;
-  flex-shrink: 0;
-}
-
-/* Visible short label next to the icon. The longer help text stays in
-   `title` (hover tooltip); the inline label is the primary affordance
-   for sighted users on first encounter. Letter-spacing matches .user-btn
-   so the chrome-row pills read as a coherent group. */
-.analytics-toggle {
-  gap: 0.4rem;
-}
-.analytics-toggle-label {
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-}
-
-/* Transient post-click status: empty on render; analytics-toggle.js
-   writes a short confirmation ("Now sharing." / "Now private.") after
-   a successful PATCH and clears it after a couple of seconds. role=status
-   + aria-live=polite makes screen readers announce the change without
-   stealing focus. opacity-driven fade so the visual doesn't flicker. */
-.analytics-toggle-status {
-  font-size: 0.75rem;
-  color: var(--muted);
-  margin-left: 0.5rem;
-  opacity: 0;
-  transition: opacity 200ms ease;
-  pointer-events: none;
-  white-space: nowrap;
-}
-.analytics-toggle-status.is-visible {
-  opacity: 1;
 }
 
 .user-btn {
@@ -2009,13 +1976,20 @@ button.copy-error:hover {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
     transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
   }
-  html[data-theme="dark"] .chrome-menu-switch {
+  /* Switch is driven by `aria-checked` on the parent toggle button, not
+     by the global `<html data-theme>`. Both the theme row and the
+     analytics row use this component; chrome-menu.js syncs the theme
+     button's aria-checked from the theme attribute, analytics-toggle.js
+     syncs the analytics button's aria-checked from /api/me + click.
+     Tying the visual to aria-checked means a button's switch tracks
+     ITS OWN state, not whoever else's state happens to be ambient. */
+  .chrome-menu-row-toggle[aria-checked="true"] .chrome-menu-switch {
     background: var(--accent);
   }
-  html[data-theme="dark"] .chrome-menu-switch-thumb {
+  .chrome-menu-row-toggle[aria-checked="true"] .chrome-menu-switch-thumb {
     transform: translateX(1.1rem);
   }
-  [dir="rtl"] html[data-theme="dark"] .chrome-menu-switch-thumb {
+  [dir="rtl"] .chrome-menu-row-toggle[aria-checked="true"] .chrome-menu-switch-thumb {
     transform: translateX(-1.1rem);
   }
   /* Nudge the switch down a hair on the stacked-help variant so it sits

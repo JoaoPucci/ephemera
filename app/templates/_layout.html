@@ -179,28 +179,21 @@
     {% if is_authenticated %}
     {# Per-user analytics-opt-in toggle. Mirrors the chrome-menu drawer
        row; the desktop affordance is needed because the drawer is mobile-
-       only (CSS-hidden above the 480px breakpoint). Both surfaces share
-       state via ephemera:me-loaded / ephemera:me-updated CustomEvents
-       wired in static/analytics-toggle.js. role="switch" so screen
-       readers announce on/off. The pill carries a visible short label
-       (icon-only was opaque); the longer help is on `title` for hover.
-       The status span next to it is aria-live=polite — empty on render,
-       analytics-toggle.js writes a transient confirmation there after
-       a click ("Now sharing." / "Now private.") and clears it after
-       a couple seconds. Both visible to sighted users and announced
-       to assistive tech. #}
+       only. Visible label, post-click confirmation flow, and final copy
+       are pending a designer round (the icon-only shape was opaque, and
+       the user wants confirmation before persisting -- not just a fire-
+       and-forget flip). Wired by static/analytics-toggle.js to PATCH
+       /api/me/preferences and broadcast via ephemera:me-updated. #}
     <button type="button" id="analytics-toggle" class="analytics-toggle"
             role="switch" aria-checked="false"
+            aria-label="{{ _('share anonymous usage counts') }}"
             title="{{ _('Counts events like “someone hit the message length cap” — never your messages, links, or identity.') }}">
       <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14">
         <rect x="4" y="13" width="3.5" height="7" rx="1" fill="currentColor"/>
         <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="currentColor"/>
         <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="currentColor"/>
       </svg>
-      <span class="analytics-toggle-label">{{ _("usage counts") }}</span>
     </button>
-    <span id="analytics-toggle-status" class="analytics-toggle-status"
-          role="status" aria-live="polite"></span>
     {% endif %}
     <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}"></button>
   </div>
