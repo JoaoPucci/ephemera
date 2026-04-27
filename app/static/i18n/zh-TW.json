@@ -82,5 +82,15 @@
     "time_burned": "{{when}}銷毀",
     "time_canceled": "{{when}}撤銷",
     "time_expired": "{{when}}過期"
+  },
+  "analytics": {
+    "label": "使用統計",
+    "dialog_title": "分享匿名使用資料",
+    "dialog_body": "ephemera 會記錄諸如「使用者達到訊息長度上限」或「接收者開啟了祕密」這類事件 — 僅為彙總資料，不含訊息內容、連結、IP，也不含身分資訊。",
+    "dialog_note": "你可以隨時關閉。不會改變你在這裡能做的事。",
+    "confirm": "啟用",
+    "cancel": "取消",
+    "disabled_ack": "已關閉分享",
+    "enabled_ack": "已開啟分享"
   }
 }

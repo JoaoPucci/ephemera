@@ -82,5 +82,15 @@
     "time_burned": "{{when}} 삭제",
     "time_canceled": "{{when}} 취소",
     "time_expired": "{{when}} 만료"
+  },
+  "analytics": {
+    "label": "사용 통계",
+    "dialog_title": "익명 사용 데이터 공유",
+    "dialog_body": "ephemera는 \"사용자가 메시지 길이 상한에 도달함\"이나 \"수신자가 비밀을 열어봄\" 같은 이벤트를 기록합니다 — 집계값만, 메시지 본문·링크·IP·신원은 포함되지 않습니다.",
+    "dialog_note": "언제든지 끌 수 있습니다. 여기서 할 수 있는 일은 달라지지 않습니다.",
+    "confirm": "켜기",
+    "cancel": "취소",
+    "disabled_ack": "공유를 껐습니다",
+    "enabled_ack": "공유를 켰습니다"
   }
 }

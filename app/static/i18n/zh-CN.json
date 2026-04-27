@@ -82,5 +82,15 @@
     "time_burned": "{{when}}销毁",
     "time_canceled": "{{when}}撤销",
     "time_expired": "{{when}}过期"
+  },
+  "analytics": {
+    "label": "使用统计",
+    "dialog_title": "共享匿名使用数据",
+    "dialog_body": "ephemera 会记录诸如「用户达到消息长度上限」或「接收者打开了秘密」这类事件 — 仅为聚合数据，不含消息内容、链接、IP，也不含身份信息。",
+    "dialog_note": "你可以随时关闭。不会改变你在这里能做的事。",
+    "confirm": "启用",
+    "cancel": "取消",
+    "disabled_ack": "已关闭共享",
+    "enabled_ack": "已开启共享"
   }
 }

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-27 19:52+0900\n"
+"POT-Creation-Date: 2026-04-27 20:09+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: zh_Hans\n"
@@ -42,26 +42,16 @@ msgstr "语言"
 msgid "dark mode"
 msgstr "深色模式"
 
-#: app/templates/_layout.html:144 app/templates/_layout.html:189
-msgid "share anonymous usage counts"
-msgstr ""
-
-#: app/templates/_layout.html:145 app/templates/_layout.html:190
-msgid ""
-"Counts events like “someone hit the message length cap” — never your "
-"messages, links, or identity."
-msgstr ""
-
-#: app/templates/_layout.html:160 app/templates/_layout.html:165
+#: app/templates/_layout.html:177 app/templates/_layout.html:182
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
 msgstr "退出登录"
 
-#: app/templates/_layout.html:173
+#: app/templates/_layout.html:190
 msgid "Language"
 msgstr "语言"
 
-#: app/templates/_layout.html:198
+#: app/templates/_layout.html:235
 msgid "toggle theme"
 msgstr "切换主题"
 
@@ -301,4 +291,13 @@ msgstr "再创建一个"
 
 #~ msgid "usage counts"
 #~ msgstr "退出登录"
+
+#~ msgid "share anonymous usage counts"
+#~ msgstr ""
+
+#~ msgid ""
+#~ "Counts events like “someone hit the "
+#~ "message length cap” — never your "
+#~ "messages, links, or identity."
+#~ msgstr ""
 

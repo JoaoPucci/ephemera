@@ -665,6 +665,165 @@ button.copy-error:hover {
   display: block;
 }
 
+/* Visible label between icon and state-dot. JS fills it from
+   analytics.label so the chrome-pill ships without a server-rendered
+   English fallback that would leak past localized users. */
+.analytics-toggle {
+  gap: 0.4rem;
+}
+.analytics-toggle-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* State-at-a-glance dot. Muted when off, accent when on. The dot is
+   the visual switch (cheaper-feeling than a sliding pill on a chrome
+   button) and pairs with the chevron to communicate "this opens
+   something AND has a state". */
+.analytics-toggle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+  transition: background 150ms ease;
+  display: inline-block;
+}
+.analytics-toggle[aria-checked="true"] .analytics-toggle-dot {
+  background: var(--accent);
+}
+
+/* Chevron signals "opens a dialog/popover" -- resolves the "icon does
+   nothing visible" complaint. Rotates 180deg when the popover is open
+   so the affordance reads as "currently expanded". */
+.analytics-toggle-chevron {
+  display: block;
+  color: var(--muted);
+  transition: transform 150ms ease;
+}
+.analytics-toggle[aria-expanded="true"] .analytics-toggle-chevron {
+  transform: rotate(180deg);
+}
+
+/* Visible opt-OUT confirmation tip. position: fixed so it overlays the
+   page without taking flow space -- the prior inline-text shape pushed
+   the lang-picker / theme-toggle around when the ack appeared.
+   Anchored under the chrome row, right edge; the SR announcement still
+   rides the visually-hidden aria-live span next to it (sighted users
+   see this; screen-reader users hear the same text). */
+.analytics-toggle-ack-tip {
+  position: fixed;
+  top: 3.25rem;
+  inset-inline-end: 1rem;
+  z-index: 60;
+  padding: 0.4rem 0.75rem;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-sm);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+  pointer-events: none;
+}
+.analytics-toggle-ack-tip.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Confirmation popover for opt-IN on desktop. Anchored under the pill
+   right edge; the JS toggles `hidden` rather than `popover` for older-
+   browser compatibility. max-width keeps DE/FR copy from running too
+   wide; min-width gives the body enough room for the example clauses
+   to wrap naturally without orphan single words. */
+.analytics-popover {
+  position: fixed;
+  top: 3.5rem;
+  inset-inline-end: 1rem;
+  z-index: 60;
+  max-width: 320px;
+  min-width: 260px;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.analytics-popover-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.analytics-popover-body {
+  margin: 0 0 0.75rem;
+  color: var(--text);
+}
+.analytics-popover-note {
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.analytics-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.analytics-popover-cancel,
+.analytics-popover-confirm {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.analytics-popover-cancel:hover {
+  background: color-mix(in srgb, var(--muted) 8%, var(--surface));
+}
+.analytics-popover-confirm {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+.analytics-popover-confirm:hover {
+  filter: brightness(1.05);
+}
+
+/* Visually-hidden utility (standard a11y pattern: removed from sighted
+   layout but still in the accessibility tree, so aria-live announcements
+   reach screen readers without the text taking layout space). Used by
+   the analytics-opt-in opt-OUT ack -- the visual confirmation is the
+   dot color flip + switch animation; the spoken confirmation rides
+   this hidden span. */
+.visually-hidden {
+  /* biome-ignore lint/complexity/noImportantStyles: standard a11y utility -- must beat any author rule that would reposition the element back into flow. */
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .user-btn {
   position: fixed;
   top: 1rem;
@@ -1587,11 +1746,19 @@ button.copy-error:hover {
   touch-action: manipulation;
 }
 
-@media (max-width: 480px) {
-  /* The desktop top-chrome + user-btn step aside at mobile -- the
-     drawer replaces them. The bottom wordmark + .app-version STAY
-     visible: they're the brand signature and belong in their paired-
-     baseline position above the card, not squeezed into a toolbar. */
+@media (max-width: 720px) {
+  /* The desktop top-chrome + user-btn step aside in favor of the
+     drawer once the chrome row would crowd the centered "ephemera"
+     wordmark. Originally 480px; bumped to 720 when the analytics-opt-in
+     pill landed -- with lang-picker + analytics + theme on the right
+     and user-btn on the left, the row needs ~720px of clearance to
+     avoid colliding with the wordmark in the middle. The 480px block
+     just above this still applies for phone-style typography / card
+     layout below 480.
+
+     The bottom wordmark + .app-version STAY visible: they're the brand
+     signature and belong in their paired-baseline position above the
+     card, not squeezed into a toolbar. */
   .top-chrome,
   .user-btn {
     display: none;
@@ -1863,36 +2030,57 @@ button.copy-error:hover {
   .chrome-menu-row-label {
     flex: 0 1 auto;
   }
-  /* Stacked label + help. Used by the analytics-opt-in toggle, where
-     the help describes the consequences of flipping the switch. Help
-     line clamps to 2 lines so the row stays scannable on 320px-class
-     viewports; the full text remains accessible to assistive tech via
-     aria-describedby (textContent is unaffected by visual clamping). */
-  .chrome-menu-row-toggle-stacked {
-    align-items: flex-start;
-    padding-block: 0.6rem;
+
+  /* Confirmation disclosure for the analytics-opt-in row. Slides down
+     under the trigger button when aria-expanded="true" goes on the
+     button. Lives as a sibling element so it can render full-bleed
+     without inheriting button-padding constraints. The cancel/confirm
+     button shapes mirror the desktop popover so both surfaces feel
+     like the same dialog at different breakpoints. */
+  .chrome-menu-row-disclosure {
+    padding: 0.5rem 0.75rem 0.85rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
   }
-  .chrome-menu-row-toggle-stacked .chrome-menu-row-icon {
-    margin-top: 0.15rem;
+  .chrome-menu-row-disclosure-body {
+    margin: 0 0 0.6rem;
   }
-  .chrome-menu-row-text {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-width: 0;
-    gap: 0.15rem;
-  }
-  .chrome-menu-row-help {
-    font-size: 0.75rem;
-    line-height: 1.35;
+  .chrome-menu-row-disclosure-note {
+    margin: 0 0 0.85rem;
+    font-size: 0.78rem;
     color: var(--muted);
-    font-weight: 400;
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+  }
+  .chrome-menu-row-disclosure-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+  .chrome-menu-row-disclosure-cancel,
+  .chrome-menu-row-disclosure-confirm {
+    padding: 0.45rem 0.95rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    transition:
+      background 120ms ease,
+      border-color 120ms ease;
+  }
+  .chrome-menu-row-disclosure-cancel:hover,
+  .chrome-menu-row-disclosure-cancel:active {
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+  }
+  .chrome-menu-row-disclosure-confirm {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast, #fff);
+  }
+  .chrome-menu-row-disclosure-confirm:hover {
+    filter: brightness(1.05);
   }
   .chrome-menu-row-value {
     margin-inline-start: auto;
@@ -1991,13 +2179,6 @@ button.copy-error:hover {
   }
   [dir="rtl"] .chrome-menu-row-toggle[aria-checked="true"] .chrome-menu-switch-thumb {
     transform: translateX(-1.1rem);
-  }
-  /* Nudge the switch down a hair on the stacked-help variant so it sits
-     visually centered against the two-line label/help block. Placed after
-     the base .chrome-menu-switch rule to keep selectors in ascending
-     specificity order (Biome lint). */
-  .chrome-menu-row-toggle-stacked .chrome-menu-switch {
-    margin-top: 0.2rem;
   }
 
   /* Danger row (sign-out) + armed state */

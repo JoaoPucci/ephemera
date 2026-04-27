@@ -82,5 +82,15 @@
     "time_burned": "{{when}}に破棄",
     "time_canceled": "{{when}}に取り消し",
     "time_expired": "{{when}}に期限切れ"
+  },
+  "analytics": {
+    "label": "利用統計",
+    "dialog_title": "匿名の利用データを共有する",
+    "dialog_body": "ephemera は「ユーザーがメッセージ長の上限に達した」「受信者が秘密を開いた」といったイベントを記録します — 集計値のみ、メッセージ本文・リンク・IP・身元はいずれも含みません。",
+    "dialog_note": "いつでもオフにできます。ここでできることは変わりません。",
+    "confirm": "有効にする",
+    "cancel": "キャンセル",
+    "disabled_ack": "共有をオフにしました",
+    "enabled_ack": "共有をオンにしました"
   }
 }

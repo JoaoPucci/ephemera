@@ -84,5 +84,15 @@
     "time_burned": "détruit {{when}}",
     "time_canceled": "annulé {{when}}",
     "time_expired": "expiré {{when}}"
+  },
+  "analytics": {
+    "label": "Statistiques",
+    "dialog_title": "Partager des données d'utilisation anonymes",
+    "dialog_body": "ephemera enregistrera des événements tels que « un utilisateur a atteint la limite de longueur du message » ou « un destinataire a ouvert un secret » — agrégés, sans texte du message, sans liens, sans IP, sans identité.",
+    "dialog_note": "Tu peux désactiver à tout moment. Cela ne change pas ce que tu peux faire ici.",
+    "confirm": "Activer",
+    "cancel": "Annuler",
+    "disabled_ack": "Partage désactivé",
+    "enabled_ack": "Partage activé"
   }
 }

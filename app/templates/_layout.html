@@ -124,30 +124,48 @@
 
       {% if is_authenticated %}
       <section class="chrome-menu-section" style="--stagger-i: 2;">
-        {# Analytics opt-in: per-user telemetry consent. Default off (consent-
-           first). Aria role menuitemcheckbox so screen readers announce the
-           on/off state; analytics-toggle.js syncs aria-checked with the
-           value it reads from /api/me on load and the value the user
-           toggles to. PATCH /api/me/preferences persists the change.
-           Stacked layout (label + visibly-rendered help) so the help line
-           is discoverable in-row; the help span is line-clamped at 2 to
-           keep the row scannable on narrow viewports (320px etc.). #}
-        <button type="button" class="chrome-menu-row chrome-menu-row-toggle chrome-menu-row-toggle-stacked"
-                id="chrome-menu-analytics" role="menuitemcheckbox" aria-checked="false"
-                aria-describedby="chrome-menu-analytics-help">
+        {# Analytics opt-in: per-user telemetry consent.
+           Asymmetric flow per the designer round on PR #72:
+             * OFF -> ON: tap opens an inline disclosure that explains
+               what's recorded + what's not, and the user has to click
+               Enable to commit. PATCH only fires after Enable.
+             * ON -> OFF: instant. PATCH on tap. The row briefly shows
+               an "ack" line acknowledging that sharing was turned off,
+               then collapses back. Privacy-violating direction is
+               friction-gated; privacy-preserving direction is one tap.
+           All visible copy is rendered by analytics-toggle.js from the
+           JSON i18n catalogue (translator round populated all 11
+           locales). The button itself ships empty text slots so there
+           is no untranslated server-rendered fallback to leak. role=
+           button + aria-haspopup="true" + aria-controls so AT
+           announces the disclosure relationship. #}
+        <button type="button" class="chrome-menu-row chrome-menu-row-toggle"
+                id="chrome-menu-analytics"
+                role="button"
+                aria-checked="false"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-controls="chrome-menu-analytics-disclosure">
           <svg class="chrome-menu-row-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
             <rect x="4" y="13" width="3.5" height="7" rx="1" fill="currentColor"/>
             <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="currentColor"/>
             <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="currentColor"/>
           </svg>
-          <span class="chrome-menu-row-text">
-            <span class="chrome-menu-row-label">{{ _("share anonymous usage counts") }}</span>
-            <span class="chrome-menu-row-help" id="chrome-menu-analytics-help">{{ _("Counts events like “someone hit the message length cap” — never your messages, links, or identity.") }}</span>
-          </span>
+          <span class="chrome-menu-row-label" data-i18n="analytics.dialog_title"></span>
           <span class="chrome-menu-switch" aria-hidden="true">
             <span class="chrome-menu-switch-thumb"></span>
           </span>
+          <span class="chrome-menu-row-ack visually-hidden" aria-live="polite"
+                data-i18n-disabled-ack="analytics.disabled_ack"></span>
         </button>
+        <div class="chrome-menu-row-disclosure" id="chrome-menu-analytics-disclosure" hidden>
+          <p class="chrome-menu-row-disclosure-body" data-i18n="analytics.dialog_body"></p>
+          <p class="chrome-menu-row-disclosure-note" data-i18n="analytics.dialog_note"></p>
+          <div class="chrome-menu-row-disclosure-actions">
+            <button type="button" class="chrome-menu-row-disclosure-cancel" data-i18n="analytics.cancel"></button>
+            <button type="button" class="chrome-menu-row-disclosure-confirm" data-i18n="analytics.confirm"></button>
+          </div>
+        </div>
 
         {# Sign-out row uses the same two-click confirm pattern as the
            desktop user pill. First tap arms it (row turns red, label
@@ -177,23 +195,50 @@
     </select>
     {% endif %}
     {% if is_authenticated %}
-    {# Per-user analytics-opt-in toggle. Mirrors the chrome-menu drawer
-       row; the desktop affordance is needed because the drawer is mobile-
-       only. Visible label, post-click confirmation flow, and final copy
-       are pending a designer round (the icon-only shape was opaque, and
-       the user wants confirmation before persisting -- not just a fire-
-       and-forget flip). Wired by static/analytics-toggle.js to PATCH
-       /api/me/preferences and broadcast via ephemera:me-updated. #}
+    {# Desktop analytics-opt-in pill. Same asymmetric flow as the drawer
+       row: OFF->ON opens a popover (anchored under this pill) that
+       explains the trade and offers Enable / Cancel. ON->OFF flips
+       instantly with an aria-live "ack" that fades. State at a glance
+       via .analytics-toggle-dot (accent when on, muted when off);
+       chevron tells the user the pill OPENS something rather than
+       firing instantly. All visible copy is filled by analytics-toggle.js
+       from the JSON i18n catalogue; this button ships empty text slots. #}
     <button type="button" id="analytics-toggle" class="analytics-toggle"
-            role="switch" aria-checked="false"
-            aria-label="{{ _('share anonymous usage counts') }}"
-            title="{{ _('Counts events like “someone hit the message length cap” — never your messages, links, or identity.') }}">
+            role="button"
+            aria-checked="false"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            aria-controls="analytics-popover">
       <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14">
         <rect x="4" y="13" width="3.5" height="7" rx="1" fill="currentColor"/>
         <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="currentColor"/>
         <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="currentColor"/>
       </svg>
+      <span class="analytics-toggle-label" data-i18n="analytics.label"></span>
+      <span class="analytics-toggle-dot" aria-hidden="true"></span>
+      <svg class="analytics-toggle-chevron" viewBox="0 0 12 12" aria-hidden="true" width="10" height="10">
+        <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
     </button>
+    <div class="analytics-popover" id="analytics-popover" role="dialog" aria-modal="false"
+         aria-labelledby="analytics-popover-title" hidden>
+      <h2 class="analytics-popover-title" id="analytics-popover-title" data-i18n="analytics.dialog_title"></h2>
+      <p class="analytics-popover-body" data-i18n="analytics.dialog_body"></p>
+      <p class="analytics-popover-note" data-i18n="analytics.dialog_note"></p>
+      <div class="analytics-popover-actions">
+        <button type="button" class="analytics-popover-cancel" data-i18n="analytics.cancel"></button>
+        <button type="button" class="analytics-popover-confirm" data-i18n="analytics.confirm"></button>
+      </div>
+    </div>
+    <span id="analytics-toggle-ack" class="visually-hidden" aria-live="polite"
+          data-i18n-disabled-ack="analytics.disabled_ack"></span>
+    {# Visible opt-OUT confirmation tooltip. Position-fixed (not inline)
+       so showing it doesn't push the lang-picker / theme-toggle around.
+       Sits below the chrome row, fades in/out for ~1.5s. analytics-
+       toggle.js writes the localized text and toggles `.is-visible`. #}
+    <span id="analytics-toggle-ack-tip" class="analytics-toggle-ack-tip"
+          aria-hidden="true"
+          data-i18n-disabled-ack="analytics.disabled_ack"></span>
     {% endif %}
     <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}"></button>
   </div>

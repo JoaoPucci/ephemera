@@ -83,5 +83,15 @@
     "time_burned": "burned {{when}}",
     "time_canceled": "canceled {{when}}",
     "time_expired": "expired {{when}}"
+  },
+  "analytics": {
+    "label": "Analytics",
+    "dialog_title": "Share anonymous usage data",
+    "dialog_body": "ephemera will record events like \"a user hit the message length cap\" or \"a recipient opened a secret\" — aggregated, no message text, no links, no IP, no identity.",
+    "dialog_note": "You can turn this off any time. It does not change what you can do here.",
+    "confirm": "Enable",
+    "cancel": "Cancel",
+    "disabled_ack": "Sharing turned off",
+    "enabled_ack": "Sharing turned on"
   }
 }
