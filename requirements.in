@@ -8,7 +8,7 @@
 # PRs (it detects the .in -> .txt pip-tools pattern).
 
 fastapi>=0.110
-uvicorn[standard]>=0.27
+uvicorn[standard]>=0.46.0
 python-multipart>=0.0.9
 pydantic-settings>=2.2
 cryptography>=42.0
