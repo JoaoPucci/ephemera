@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-26 21:36+0900\n"
+"POT-Creation-Date: 2026-04-27 20:09+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: zh_Hans\n"
@@ -42,16 +42,16 @@ msgstr "语言"
 msgid "dark mode"
 msgstr "深色模式"
 
-#: app/templates/_layout.html:135 app/templates/_layout.html:140
+#: app/templates/_layout.html:177 app/templates/_layout.html:182
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
 msgstr "退出登录"
 
-#: app/templates/_layout.html:148
+#: app/templates/_layout.html:190
 msgid "Language"
 msgstr "语言"
 
-#: app/templates/_layout.html:154
+#: app/templates/_layout.html:235
 msgid "toggle theme"
 msgstr "切换主题"
 
@@ -73,53 +73,53 @@ msgstr "此消息只能查看一次。查看后将被永久销毁。"
 msgid "Passphrase"
 msgstr "密码短语"
 
-#: app/templates/landing.html:20 app/templates/sender.html:86
+#: app/templates/landing.html:17 app/templates/sender.html:86
 #: app/templates/sender.html:127
 msgid "show passphrase"
 msgstr "显示密码短语"
 
-#: app/templates/landing.html:20 app/templates/login.html:14
+#: app/templates/landing.html:17 app/templates/login.html:14
 #: app/templates/login.html:33 app/templates/sender.html:87
 msgid "show"
 msgstr "显示"
 
-#: app/templates/landing.html:24
+#: app/templates/landing.html:20
 msgid "Reveal Secret"
 msgstr "查看秘密"
 
-#: app/templates/landing.html:30
+#: app/templates/landing.html:26
 msgid "Copy to clipboard"
 msgstr "复制到剪贴板"
 
-#: app/templates/landing.html:31
+#: app/templates/landing.html:27
 msgid "This secret has been destroyed."
 msgstr "此秘密已被销毁。"
 
-#: app/templates/landing.html:36
+#: app/templates/landing.html:32
 msgid "Click to view full size"
 msgstr "点击查看原图"
 
-#: app/templates/landing.html:37
+#: app/templates/landing.html:33
 msgid "Click the image for full size · this secret has been destroyed."
 msgstr "点击图片查看原图 · 此秘密已被销毁。"
 
-#: app/templates/landing.html:41
+#: app/templates/landing.html:37
 msgid "This secret is no longer available."
 msgstr "此秘密已不可用。"
 
-#: app/templates/landing.html:42
+#: app/templates/landing.html:38
 msgid "It may have already been viewed or has expired."
 msgstr "它可能已被查看或已过期。"
 
-#: app/templates/landing.html:46
+#: app/templates/landing.html:42
 msgid "Full-size image"
 msgstr "原始大小图片"
 
-#: app/templates/landing.html:48
+#: app/templates/landing.html:44
 msgid "Close full-size view"
 msgstr "关闭原图视图"
 
-#: app/templates/landing.html:48
+#: app/templates/landing.html:44
 msgid "close"
 msgstr "关闭"
 
@@ -288,4 +288,16 @@ msgstr "状态"
 #: app/templates/sender.html:140
 msgid "Create another"
 msgstr "再创建一个"
+
+#~ msgid "usage counts"
+#~ msgstr "退出登录"
+
+#~ msgid "share anonymous usage counts"
+#~ msgstr ""
+
+#~ msgid ""
+#~ "Counts events like “someone hit the "
+#~ "message length cap” — never your "
+#~ "messages, links, or identity."
+#~ msgstr ""
 

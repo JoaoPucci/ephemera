@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-26 21:36+0900\n"
+"POT-Creation-Date: 2026-04-27 20:09+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: es\n"
@@ -42,16 +42,16 @@ msgstr "idioma"
 msgid "dark mode"
 msgstr "modo oscuro"
 
-#: app/templates/_layout.html:135 app/templates/_layout.html:140
+#: app/templates/_layout.html:177 app/templates/_layout.html:182
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
 msgstr "cerrar sesión"
 
-#: app/templates/_layout.html:148
+#: app/templates/_layout.html:190
 msgid "Language"
 msgstr "Idioma"
 
-#: app/templates/_layout.html:154
+#: app/templates/_layout.html:235
 msgid "toggle theme"
 msgstr "cambiar tema"
 
@@ -75,55 +75,55 @@ msgstr ""
 msgid "Passphrase"
 msgstr "Frase de contraseña"
 
-#: app/templates/landing.html:20 app/templates/sender.html:86
+#: app/templates/landing.html:17 app/templates/sender.html:86
 #: app/templates/sender.html:127
 msgid "show passphrase"
 msgstr "mostrar frase de contraseña"
 
-#: app/templates/landing.html:20 app/templates/login.html:14
+#: app/templates/landing.html:17 app/templates/login.html:14
 #: app/templates/login.html:33 app/templates/sender.html:87
 msgid "show"
 msgstr "mostrar"
 
-#: app/templates/landing.html:24
+#: app/templates/landing.html:20
 msgid "Reveal Secret"
 msgstr "Revelar secreto"
 
-#: app/templates/landing.html:30
+#: app/templates/landing.html:26
 msgid "Copy to clipboard"
 msgstr "Copiar al portapapeles"
 
-#: app/templates/landing.html:31
+#: app/templates/landing.html:27
 msgid "This secret has been destroyed."
 msgstr "Este secreto ha sido destruido."
 
-#: app/templates/landing.html:36
+#: app/templates/landing.html:32
 msgid "Click to view full size"
 msgstr "Haz clic para ver a tamaño completo"
 
-#: app/templates/landing.html:37
+#: app/templates/landing.html:33
 msgid "Click the image for full size · this secret has been destroyed."
 msgstr ""
 "Haz clic en la imagen para verla a tamaño completo · este secreto ha sido"
 " destruido."
 
-#: app/templates/landing.html:41
+#: app/templates/landing.html:37
 msgid "This secret is no longer available."
 msgstr "Este secreto ya no está disponible."
 
-#: app/templates/landing.html:42
+#: app/templates/landing.html:38
 msgid "It may have already been viewed or has expired."
 msgstr "Puede que ya se haya visto o haya caducado."
 
-#: app/templates/landing.html:46
+#: app/templates/landing.html:42
 msgid "Full-size image"
 msgstr "Imagen a tamaño completo"
 
-#: app/templates/landing.html:48
+#: app/templates/landing.html:44
 msgid "Close full-size view"
 msgstr "Cerrar vista a tamaño completo"
 
-#: app/templates/landing.html:48
+#: app/templates/landing.html:44
 msgid "close"
 msgstr "cerrar"
 
@@ -296,4 +296,16 @@ msgstr "Estado"
 #: app/templates/sender.html:140
 msgid "Create another"
 msgstr "Crear otro"
+
+#~ msgid "usage counts"
+#~ msgstr "cerrar sesión"
+
+#~ msgid "share anonymous usage counts"
+#~ msgstr ""
+
+#~ msgid ""
+#~ "Counts events like “someone hit the "
+#~ "message length cap” — never your "
+#~ "messages, links, or identity."
+#~ msgstr ""
 

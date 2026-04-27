@@ -236,6 +236,9 @@ def test_api_me_returns_current_user(authed_client, provisioned_user):
     assert body["id"] == provisioned_user["id"]
     assert body["username"] == provisioned_user["username"]
     assert "email" in body  # may be None, but the key exists
+    # Per-user analytics consent surfaces here for the frontend toggle.
+    # Default is opt-in (false); flipping it lives at PATCH /api/me/preferences.
+    assert body["analytics_opt_in"] is False
 
 
 def test_api_me_requires_auth(client):
@@ -246,6 +249,127 @@ def test_api_me_works_with_api_token(client, auth_headers, provisioned_user):
     r = client.get("/api/me", headers=auth_headers)
     assert r.status_code == 200
     assert r.json()["username"] == provisioned_user["username"]
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/me/preferences
+# ---------------------------------------------------------------------------
+
+
+def test_patch_preferences_flips_analytics_opt_in_and_returns_new_state(
+    authed_client, provisioned_user
+):
+    """Happy path: PATCH with analytics_opt_in=true persists 1 in the DB
+    and the response echoes the new state."""
+    from app import models
+
+    r = authed_client.patch(
+        "/api/me/preferences",
+        json={"analytics_opt_in": True},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["analytics_opt_in"] is True
+    # DB-side confirmation via the model getter.
+    fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh["analytics_opt_in"] == 1
+
+
+def test_patch_preferences_can_flip_back_to_false(authed_client, provisioned_user):
+    from app import models
+
+    models.update_user(provisioned_user["id"], analytics_opt_in=1)
+
+    r = authed_client.patch(
+        "/api/me/preferences",
+        json={"analytics_opt_in": False},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
+    assert r.json()["analytics_opt_in"] is False
+    fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh["analytics_opt_in"] == 0
+
+
+def test_patch_preferences_emits_security_log_on_actual_change(
+    authed_client, provisioned_user, caplog
+):
+    """An opt-in flip is a security-relevant user action (changes what
+    gets persisted about the account's behavior). It must land in
+    security_log alongside other consent-shape events."""
+    import logging
+
+    caplog.set_level(logging.INFO, logger="ephemera.security")
+
+    r = authed_client.patch(
+        "/api/me/preferences",
+        json={"analytics_opt_in": True},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
+
+    import contextlib
+    import json
+
+    events = []
+    for rec in caplog.records:
+        if rec.name != "ephemera.security":
+            continue
+        with contextlib.suppress(ValueError, TypeError):
+            events.append(json.loads(rec.message))
+    flips = [e for e in events if e.get("event") == "preferences.analytics_changed"]
+    assert flips, "expected a preferences.analytics_changed audit entry"
+    assert flips[0]["enabled"] is True
+    assert flips[0]["user_id"] == provisioned_user["id"]
+    assert flips[0]["username"] == provisioned_user["username"]
+
+
+def test_patch_preferences_no_op_does_not_log(authed_client, provisioned_user, caplog):
+    """Sending the value the user already has must not emit a security_log
+    entry. An audit entry per UI no-op would dilute the trail with
+    non-events."""
+    import logging
+
+    caplog.set_level(logging.INFO, logger="ephemera.security")
+
+    # User starts at the default (0). PATCH with false is a no-op.
+    r = authed_client.patch(
+        "/api/me/preferences",
+        json={"analytics_opt_in": False},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
+
+    import contextlib
+    import json
+
+    events = []
+    for rec in caplog.records:
+        if rec.name != "ephemera.security":
+            continue
+        with contextlib.suppress(ValueError, TypeError):
+            events.append(json.loads(rec.message))
+    flips = [e for e in events if e.get("event") == "preferences.analytics_changed"]
+    assert flips == []
+
+
+def test_patch_preferences_requires_auth(client):
+    r = client.patch(
+        "/api/me/preferences",
+        json={"analytics_opt_in": True},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 401
+
+
+def test_patch_preferences_rejects_cross_origin(authed_client):
+    r = authed_client.patch(
+        "/api/me/preferences",
+        json={"analytics_opt_in": True},
+        headers={"Origin": "http://evil.example"},
+    )
+    assert r.status_code in (400, 403)
 
 
 def test_logout_clears_session(authed_client):
@@ -1008,10 +1132,16 @@ def test_create_secret_omits_telemetry_when_flag_absent(
 
 
 def test_create_secret_writes_content_limit_hit_when_near_cap_true(
-    client, auth_headers, analytics_enabled
+    client, auth_headers, analytics_enabled, provisioned_user
 ):
-    """When near_cap=true AND analytics is enabled, the route writes a
-    presence-only event row -- no payload, no user identity."""
+    """When near_cap=true AND BOTH gates are open (operator env +
+    user.analytics_opt_in), the route writes a presence-only event row
+    -- no payload, no user identity. The opt-in is checked at emit but
+    never written to the row."""
+    from app import models
+
+    models.update_user(provisioned_user["id"], analytics_opt_in=1)
+
     r = client.post(
         "/api/secrets",
         json={
@@ -1029,6 +1159,26 @@ def test_create_secret_writes_content_limit_hit_when_near_cap_true(
     e = events[0]
     assert e["event_type"] == "content.limit_hit"
     assert e["payload"] == {}
+
+
+def test_create_secret_writes_no_event_when_user_opted_out(
+    client, auth_headers, analytics_enabled
+):
+    """Operator gate is open but user did not opt in (default 0). The
+    route silently drops the emit. Browser-to-server flow stays consent-
+    first regardless of operator policy."""
+    r = client.post(
+        "/api/secrets",
+        json={
+            "content": "x" * 95_000,
+            "content_type": "text",
+            "expires_in": 300,
+            "near_cap": True,
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    assert _read_analytics_events() == []
 
 
 def test_create_secret_writes_no_event_when_analytics_disabled_by_default(

@@ -95,6 +95,11 @@ if (userBtn) {
     if (userNameEl && me.username) userNameEl.textContent = me.username;
     if (userBtn)
       userBtn.setAttribute('aria-label', `Signed in as ${me.username}. Click to sign out.`);
+    // Broadcast the resolved /api/me payload so unrelated modules (the
+    // chrome-menu drawer toggle, the sender form's analytics-aware submit
+    // path) can react without each having to re-fetch. CustomEvent shape
+    // keeps the consumers decoupled from this module's bootstrap order.
+    window.dispatchEvent(new CustomEvent('ephemera:me-loaded', { detail: me }));
   } catch {}
 })();
 

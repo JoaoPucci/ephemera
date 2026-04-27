@@ -23,6 +23,7 @@ Events logged today (keep this list in sync with real call-sites):
   password.reset          user_id, username
   totp.rotated            user_id, username
   recovery.regenerated    user_id, username
+  preferences.analytics_changed   user_id, username, enabled, client_ip
 
 What NEVER goes in a field value: passphrase, plaintext, client_half,
 password, totp_code, server_key, ciphertext, recovery codes, api-token

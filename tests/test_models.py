@@ -438,6 +438,43 @@ def test_update_user_accepts_every_documented_writable_column(provisioned_user):
     )
 
 
+def test_set_analytics_opt_in_returns_new_value_on_actual_change(provisioned_user):
+    """Atomic toggle: when the desired value differs from the current
+    one, the SQL UPDATE fires and returns the new value. This is the
+    "real change" path the route uses to gate security_log emission."""
+    # Default is 0 from the v6 migration.
+    persisted = models.set_analytics_opt_in(provisioned_user["id"], 1)
+    assert persisted == 1
+    fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh["analytics_opt_in"] == 1
+
+
+def test_set_analytics_opt_in_returns_none_when_value_already_matches(provisioned_user):
+    """Concurrency-safe no-op: when the desired value matches what's
+    already in the row, the conditional WHERE clause skips the UPDATE
+    and RETURNING produces no row. The route uses None as the signal
+    "don't emit security_log, don't claim a flip happened."
+
+    Pre-fix this was a Python-side `if desired != current` check that
+    races against concurrent PATCHes (two requests both observing the
+    same pre-flip value can no-op a real change). Putting the
+    comparison in SQL keeps it atomic; this test pins that behavior."""
+    # Already 0 by default. Ask for 0 -> no-op.
+    persisted = models.set_analytics_opt_in(provisioned_user["id"], 0)
+    assert persisted is None
+    fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh["analytics_opt_in"] == 0
+
+
+def test_set_analytics_opt_in_returns_none_for_unknown_user(tmp_db_path):
+    """Defensive: a stale or hand-crafted call against a nonexistent
+    user_id must not silently succeed. RETURNING on a zero-row UPDATE
+    yields no row; the function reports None and the caller knows
+    nothing changed."""
+    persisted = models.set_analytics_opt_in(999_999, 1)
+    assert persisted is None
+
+
 def test_default_user_getters_do_not_return_totp_secret(provisioned_user):
     """The default user-row accessors must never hand back the TOTP
     plaintext. Most call sites (session auth, bearer auth, admin flows
@@ -946,7 +983,9 @@ def test_v3_legacy_db_upgrades_to_current(tmp_path, monkeypatch):
                     "SELECT name FROM sqlite_master WHERE type='index'"
                 ).fetchall()
             }
-        assert ver == 5
+        from app.models._core import CURRENT_SCHEMA_VERSION
+
+        assert ver == CURRENT_SCHEMA_VERSION
         assert "analytics_events" in names
         assert "idx_analytics_events_type_time" in idx_names
         # v5 dropped the user_id column + its index; the post-migration DB
@@ -1074,11 +1113,115 @@ def test_v5_migration_resumes_after_rename_interrupt(tmp_path, monkeypatch):
                 "SELECT name FROM sqlite_master "
                 "WHERE type='table' AND name='_analytics_events_v4'"
             ).fetchone()
-        assert ver == 5
+        from app.models._core import CURRENT_SCHEMA_VERSION
+
+        assert ver == CURRENT_SCHEMA_VERSION
         assert "user_id" not in cols  # v5 shape, no user identity column
         assert count == 1, "the row that was in flight must be preserved"
         assert event_type == "content.limit_hit"
         assert temp_still_present is None, "temp table must be cleaned up"
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_v6_migration_adds_analytics_opt_in_with_default_zero(tmp_path, monkeypatch):
+    """Seed a v5-shape DB with a row that lacks `analytics_opt_in` (legacy
+    v5 was the last version where the column didn't exist). Boot the
+    current code and confirm v6 added the column, defaulted existing rows
+    to 0 (consent-first), and stamped schema_version to current. Calling
+    init_db a second time is a no-op (idempotency)."""
+    db = tmp_path / "v5.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL CHECK (length(username) <= 256),
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                totp_secret TEXT NOT NULL,
+                totp_last_step INTEGER NOT NULL DEFAULT 0,
+                recovery_code_hashes TEXT NOT NULL DEFAULT '[]',
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                lockout_until TEXT,
+                session_generation INTEGER NOT NULL DEFAULT 0,
+                preferred_language TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE secrets (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token TEXT UNIQUE NOT NULL,
+                server_key BLOB,
+                ciphertext BLOB,
+                content_type TEXT NOT NULL,
+                mime_type TEXT,
+                passphrase TEXT CHECK (passphrase IS NULL OR length(passphrase) <= 80),
+                track INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                label TEXT CHECK (label IS NULL OR length(label) <= 60),
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                viewed_at TEXT
+            );
+            CREATE TABLE api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT
+            );
+            CREATE TABLE analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                payload TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (id, version) VALUES (1, 5);
+            INSERT INTO users (
+                username, password_hash, totp_secret, created_at, updated_at
+            ) VALUES ('alice', 'pw', 'v1:dummy', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            """
+        )
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+
+    from app import config, models
+    from app.models._core import CURRENT_SCHEMA_VERSION
+
+    config.get_settings.cache_clear()
+    try:
+        models.init_db()
+
+        with sqlite3.connect(str(db)) as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+            (opt_in,) = conn.execute(
+                "SELECT analytics_opt_in FROM users WHERE username = 'alice'"
+            ).fetchone()
+            (ver,) = conn.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+        assert "analytics_opt_in" in cols
+        assert opt_in == 0  # consent-first default for legacy rows
+        assert ver == CURRENT_SCHEMA_VERSION
+
+        # Idempotency: a second init_db must be a no-op (the migration's
+        # introspection guard skips the ALTER if the column already exists).
+        models.init_db()
+        with sqlite3.connect(str(db)) as conn:
+            (ver_after,) = conn.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+        assert ver_after == CURRENT_SCHEMA_VERSION
     finally:
         config.get_settings.cache_clear()
 
