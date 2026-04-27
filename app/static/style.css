@@ -625,6 +625,46 @@ button.copy-error:hover {
   background: linear-gradient(to right, transparent 0 50%, currentColor 50% 100%);
 }
 
+/* Per-user analytics-opt-in pill. Same pill geometry as .theme-toggle
+   so the row of icon-buttons in top-chrome-right reads as a coherent
+   group. The icon (a bar-chart glyph) is the entire visible affordance.
+   role="switch" + aria-checked carry the on/off state for assistive
+   tech; the visual cue is a color shift from --muted (off) to --accent
+   (on), matching the existing "off-quiet, on-prominent" idiom used for
+   the ARMED state on the user pill confirm flow. */
+.analytics-toggle {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+  min-height: auto;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.analytics-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--surface);
+  transform: none;
+  box-shadow: var(--shadow-md);
+}
+
+.analytics-toggle[aria-checked="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.analytics-toggle svg {
+  display: block;
+}
+
 .user-btn {
   position: fixed;
   top: 1rem;

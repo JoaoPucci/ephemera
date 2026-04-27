@@ -176,6 +176,24 @@
       {% endfor %}
     </select>
     {% endif %}
+    {% if is_authenticated %}
+    {# Per-user analytics-opt-in toggle. Mirrors the chrome-menu drawer
+       row; the desktop affordance is needed because the drawer is mobile-
+       only (CSS-hidden above the 480px breakpoint). Both surfaces share
+       state via ephemera:me-loaded / ephemera:me-updated CustomEvents
+       wired in static/analytics-toggle.js. role="switch" instead of
+       button so screen readers announce on/off. #}
+    <button type="button" id="analytics-toggle" class="analytics-toggle"
+            role="switch" aria-checked="false"
+            aria-label="{{ _('share anonymous usage counts') }}"
+            title="{{ _('Counts events like “someone hit the message length cap” — never your messages, links, or identity.') }}">
+      <svg viewBox="0 0 24 24" aria-hidden="true" width="14" height="14">
+        <rect x="4" y="13" width="3.5" height="7" rx="1" fill="currentColor"/>
+        <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="currentColor"/>
+        <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    {% endif %}
     <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}"></button>
   </div>
   {% block chrome %}{% endblock %}
@@ -190,5 +208,6 @@
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
   <script src="/static/chrome-menu.js"></script>
+  <script src="/static/analytics-toggle.js"></script>
 </body>
 </html>
