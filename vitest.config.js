@@ -15,12 +15,10 @@ export default defineConfig({
       exclude: ['app/static/swagger/**'],
       // Per-file thresholds. Each entry pins a floor for one module; CI
       // breaks if coverage on that file slides below the listed numbers.
-      // Globs without an entry here have no enforced floor -- this is
-      // intentional during the build-out phase, where copy.js still sits
-      // at 46% and its threshold will land alongside its test suite in
-      // its own PR. Adding a file here without a matching test suite
-      // would either fail CI (over-tight floor) or be vacuous (zero
-      // floor).
+      // Every app/static/**/*.js module that has a dedicated test suite
+      // has an entry here. Numbers are set ~3 points below current
+      // actuals so a benign refactor doesn't tip CI red on noise;
+      // substantive coverage erosion still trips the gate.
       //
       // Numbers are set ~3 points below current actuals so a benign
       // refactor doesn't tip CI red on noise; substantive coverage
@@ -61,6 +59,12 @@ export default defineConfig({
           branches: 87,
           functions: 95,
           lines: 97,
+        },
+        'app/static/copy.js': {
+          statements: 95,
+          branches: 95,
+          functions: 95,
+          lines: 95,
         },
       },
     },
