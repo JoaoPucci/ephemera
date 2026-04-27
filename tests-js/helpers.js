@@ -91,9 +91,15 @@ export function neverResolveFetch() {
 
 // Load a static-dir ES module fresh (clears Vitest's cache first, so each
 // test gets the module's top-level wiring re-run against the current DOM).
-// Usage: `await loadModule('login')` — pass the bare name, no extension.
-// The .js extension lives inside the template's static prefix so Vite's
-// dynamic-import analyzer can narrow the candidate set to *.js files.
+// Usage:
+//   await loadModule('login')                  -> ../app/static/login.js
+//   await loadModule('sender/tracked-list')    -> ../app/static/sender/tracked-list.js
+// Pass the bare name, no extension.
+//
+// Vite's dynamic-import analyzer only narrows a variable one path segment
+// deep, so submodule loads route through their own template literal.
+// Add a new branch here when a new app/static/<dir>/ module gains its
+// own test suite.
 //
 // `installI18nStub()` is called before the import so handlers that reach
 // `window.i18n.t(...)` during their top-level wiring or later inside a
@@ -101,5 +107,9 @@ export function neverResolveFetch() {
 export async function loadModule(name) {
   installI18nStub();
   vi.resetModules();
+  if (name.startsWith('sender/')) {
+    const leaf = name.slice('sender/'.length);
+    return await import(`../app/static/sender/${leaf}.js`);
+  }
   return await import(`../app/static/${name}.js`);
 }
