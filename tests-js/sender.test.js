@@ -673,6 +673,25 @@ describe('sender.js — char-limit hints (content / label / passphrase)', () => 
     expect(hint.textContent).toContain('KB');
   });
 
+  it('content textarea: paste-large threshold is byte-based, fires for CJK paste under 10K code units but over 10KB', async () => {
+    // Regression guard: pre-fix the threshold compared `pasted.length`
+    // (UTF-16 code units) to a "10KB" constant, missing CJK and emoji
+    // pastes whose code-unit count was small but byte size exceeded the
+    // threshold. 4K BMP CJK characters = 4K code units (well under the
+    // old 10K threshold) but ~12K UTF-8 bytes, which is the actual
+    // intended unit -- new code fires.
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    pasteInto(input, '一'.repeat(4_000));
+
+    const hint = document.getElementById('content-hint');
+    expect(hint.classList.contains('is-warning')).toBe(true);
+    expect(hint.classList.contains('is-error')).toBe(false);
+    expect(hint.textContent).toContain('KB');
+  });
+
   it('label: trim message uses the short form (no "(was N)" parenthetical)', async () => {
     await loadModule('sender');
     await flushAsync();

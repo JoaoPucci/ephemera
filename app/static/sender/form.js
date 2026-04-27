@@ -127,12 +127,24 @@ function _bindCounterHint(input, hintEl, max, opts = {}) {
           });
       pasteOverrideModifier = 'error';
       if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
-    } else if (pasted.length >= pasteLargeThreshold) {
-      pasteOverrideMessage = window.i18n.t('hint.content_paste_large', {
-        size: _formatBytes(pasted.length),
-      });
-      pasteOverrideModifier = 'warning';
-      if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
+    } else if (pasteLargeThreshold !== Number.POSITIVE_INFINITY) {
+      // Threshold is UTF-8 bytes ("10KB chunk"); JS .length is UTF-16
+      // code units, which diverges 2-4x from byte length for CJK/emoji.
+      // Encode for an accurate byte count -- a 4K-character BMP CJK
+      // paste is 4K code units but ~12K UTF-8 bytes and should trip
+      // this. Skipped for fields that opt out (Infinity sentinel) so
+      // we don't allocate a TextEncoder for label/passphrase pastes
+      // that never use this branch.
+      const pastedBytes = new TextEncoder().encode(pasted).length;
+      if (pastedBytes >= pasteLargeThreshold) {
+        pasteOverrideMessage = window.i18n.t('hint.content_paste_large', {
+          size: _formatBytes(pastedBytes),
+        });
+        pasteOverrideModifier = 'warning';
+        if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
+      } else {
+        pasteOverrideMessage = null;
+      }
     } else {
       pasteOverrideMessage = null;
     }
