@@ -38,6 +38,12 @@ export default defineConfig({
           functions: 90,
           lines: 90,
         },
+        'app/static/chrome-menu.js': {
+          statements: 88,
+          branches: 73,
+          functions: 90,
+          lines: 92,
+        },
       },
     },
   },
