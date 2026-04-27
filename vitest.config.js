@@ -16,11 +16,11 @@ export default defineConfig({
       // Per-file thresholds. Each entry pins a floor for one module; CI
       // breaks if coverage on that file slides below the listed numbers.
       // Globs without an entry here have no enforced floor -- this is
-      // intentional during the build-out phase, where reveal.js and
-      // copy.js still sit at 46-48% and their thresholds will land
-      // alongside their test suites in their own PRs. Adding a file here
-      // without a matching test suite would either fail CI (over-tight
-      // floor) or be vacuous (zero floor).
+      // intentional during the build-out phase, where copy.js still sits
+      // at 46% and its threshold will land alongside its test suite in
+      // its own PR. Adding a file here without a matching test suite
+      // would either fail CI (over-tight floor) or be vacuous (zero
+      // floor).
       //
       // Numbers are set ~3 points below current actuals so a benign
       // refactor doesn't tip CI red on noise; substantive coverage
@@ -55,6 +55,12 @@ export default defineConfig({
           branches: 85,
           functions: 95,
           lines: 92,
+        },
+        'app/static/reveal.js': {
+          statements: 96,
+          branches: 87,
+          functions: 95,
+          lines: 97,
         },
       },
     },
