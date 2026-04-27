@@ -7,7 +7,7 @@
 # Dependabot also regenerates requirements.txt automatically on version-bump
 # PRs (it detects the .in -> .txt pip-tools pattern).
 
-fastapi>=0.110
+fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
 python-multipart>=0.0.27
 pydantic-settings>=2.14.0
