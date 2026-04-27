@@ -498,6 +498,61 @@ describe('sender.js — copy passphrase + show/hide on the result screen', () =>
     expect(passphraseEl().textContent).toBe('');
     expect(passphraseRow().hidden).toBe(true);
   });
+
+  it('"Create another" clears char-limit hints so a prior warning/error doesn\'t outlive form.reset()', async () => {
+    // Regression guard: form.reset() wipes input values but doesn't fire
+    // input events, so without an explicit reset path the previous session's
+    // hint state stays visible above an empty form. Reproduces all three
+    // bound hints (content/label/passphrase) at once because the underlying
+    // bug is the same for each.
+    vi.stubGlobal('fetch', stubCreateSuccess());
+    await loadModule('sender');
+    await flushAsync();
+
+    // Reveal label-wrap so labelHint is bound and can hold an at-ceiling error.
+    document.getElementById('track').checked = true;
+    document.getElementById('track').dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Push each hint into a non-idle state.
+    const content = document.getElementById('content');
+    content.value = 'a'.repeat(96_000);
+    content.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    const label = document.getElementById('label');
+    label.value = 'a'.repeat(60); // at the 60-char ceiling -> error
+    label.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    const passphrase = document.getElementById('passphrase');
+    passphrase.value = 'a'.repeat(190); // 95% of 200-char cap -> warning
+    passphrase.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    expect(document.getElementById('content-hint').classList.contains('is-warning')).toBe(true);
+    expect(document.getElementById('label-hint').classList.contains('is-error')).toBe(true);
+    expect(document.getElementById('passphrase-hint').classList.contains('is-warning')).toBe(true);
+
+    // Submit, then start a new compose session.
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+    document.getElementById('create-another').click();
+
+    // Content hint: idle = hidden + empty.
+    const contentHint = document.getElementById('content-hint');
+    expect(contentHint.hidden).toBe(true);
+    expect(contentHint.textContent).toBe('');
+    expect(contentHint.classList.contains('is-warning')).toBe(false);
+    expect(contentHint.classList.contains('is-error')).toBe(false);
+
+    // Label hint: idle = visible with the static "Up to 60 characters..."
+    // template text, no modifier classes. (The binder captures this idle
+    // text on init and restores it when length falls below counterAt.)
+    const labelHint = document.getElementById('label-hint');
+    expect(labelHint.classList.contains('is-error')).toBe(false);
+    expect(labelHint.classList.contains('is-warning')).toBe(false);
+
+    // Passphrase hint: idle = hidden.
+    const passphraseHint = document.getElementById('passphrase-hint');
+    expect(passphraseHint.hidden).toBe(true);
+    expect(passphraseHint.classList.contains('is-warning')).toBe(false);
+  });
 });
 
 describe('sender.js — char-limit hints (content / label / passphrase)', () => {
@@ -635,6 +690,28 @@ describe('sender.js — char-limit hints (content / label / passphrase)', () => 
     // implicit.
     expect(hint.textContent).toContain('60');
     expect(hint.textContent).not.toContain('120');
+  });
+
+  it('unchecking track clears the label hint along with the label value', async () => {
+    // Regression guard: syncLabelVisibility() wipes label.value when track
+    // is unchecked, but didn't fire an input event -- so a stale at-error
+    // hint would still be sitting in the slot when track is re-checked.
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('track').checked = true;
+    document.getElementById('track').dispatchEvent(new Event('change', { bubbles: true }));
+
+    const input = document.getElementById('label');
+    pasteInto(input, 'a'.repeat(120));
+    const hint = document.getElementById('label-hint');
+    expect(hint.classList.contains('is-error')).toBe(true);
+
+    document.getElementById('track').checked = false;
+    document.getElementById('track').dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(hint.classList.contains('is-error')).toBe(false);
+    expect(hint.classList.contains('is-warning')).toBe(false);
   });
 
   it('passphrase: shows approaching-max warning at 90% of the 200-char cap', async () => {

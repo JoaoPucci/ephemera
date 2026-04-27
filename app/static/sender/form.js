@@ -519,6 +519,16 @@ document.getElementById('create-another').addEventListener('click', () => {
   // subsequent submit, even if the new content is small.
   intendedContentSize = 0;
   nearCapHit = false;
+  // form.reset() above clears input values but doesn't dispatch the input
+  // events that drive the cap-proximity hints, so a previous warning or
+  // error stays visible above the now-empty inputs. Synthesize an input
+  // event per bound field; the binder's terminal `else` branch recomputes
+  // against the empty value and restores idle state (hidden / static
+  // idle-text). Kept here rather than duplicated in each binder so the
+  // idle logic stays single-sourced.
+  if (contentInput) contentInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  if (labelInput) labelInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  if (ppInput) ppInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
   // Wipe the previous passphrase from the result-row's dataset so it
   // doesn't outlive the visible UI. Without this, a user who clicks
   // "Create another" and then walks away leaves the previous plaintext
@@ -535,7 +545,14 @@ const trackCheckbox = document.getElementById('track');
 const labelWrap = document.getElementById('label-wrap');
 function syncLabelVisibility() {
   labelWrap.hidden = !trackCheckbox.checked;
-  if (!trackCheckbox.checked) document.getElementById('label').value = '';
+  if (!trackCheckbox.checked) {
+    document.getElementById('label').value = '';
+    // Same stale-hint problem as create-another: the value is wiped without
+    // an input event firing, so a prior at-ceiling error would still be
+    // sitting in the hint slot when the user re-checks track. Synthesize
+    // an input event so the binder restores idle.
+    if (labelInput) labelInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
 }
 trackCheckbox.addEventListener('change', syncLabelVisibility);
 
