@@ -207,3 +207,371 @@ describe('reveal.js — passphrase visibility toggle', () => {
     expect(toggle.getAttribute('aria-label')).toBe('show passphrase');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Init / meta lookup
+// ---------------------------------------------------------------------------
+
+describe('reveal.js — init() / meta lookup', () => {
+  beforeEach(() => {
+    stubLocation();
+    mountLanding();
+  });
+
+  it('shows state-gone when /meta returns 404', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(null, { status: 404 })))
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('state-gone').hidden).toBe(false);
+    expect(document.getElementById('state-ready').hidden).toBe(true);
+  });
+
+  it('shows state-gone when /meta throws (network blip)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('network')))
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('state-gone').hidden).toBe(false);
+  });
+
+  it('unhides the passphrase wrap when /meta reports passphrase_required: true', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url) => {
+        if (url.endsWith('/meta')) {
+          return Promise.resolve(jsonResponse({ passphrase_required: true }));
+        }
+        return new Promise(() => {});
+      })
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('passphrase-wrap').hidden).toBe(false);
+    expect(document.getElementById('state-ready').hidden).toBe(false);
+  });
+
+  it('keeps the passphrase wrap hidden when no passphrase is required', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url) => {
+        if (url.endsWith('/meta')) {
+          return Promise.resolve(jsonResponse({ passphrase_required: false }));
+        }
+        return new Promise(() => {});
+      })
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('passphrase-wrap').hidden).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reveal success — text
+// ---------------------------------------------------------------------------
+
+describe('reveal.js — text reveal success path', () => {
+  beforeEach(() => {
+    stubLocation();
+    mountLanding();
+  });
+
+  function metaPlusText(content) {
+    return vi.fn((url) => {
+      if (url.endsWith('/meta')) {
+        return Promise.resolve(jsonResponse({ passphrase_required: false }));
+      }
+      return Promise.resolve(jsonResponse({ content_type: 'text', content }));
+    });
+  }
+
+  it('renders the decrypted text into #revealed-text and shows state-text', async () => {
+    vi.stubGlobal('fetch', metaPlusText('hello world'));
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('revealed-text').textContent).toBe('hello world');
+    expect(document.getElementById('state-text').hidden).toBe(false);
+    expect(document.getElementById('state-ready').hidden).toBe(true);
+  });
+
+  it('preserves whitespace and newlines verbatim (.textContent, not .innerHTML)', async () => {
+    // The /pre/ tag in the fixture is the DOM-side preservation; the
+    // assignment must use textContent so HTML in the secret isn't parsed.
+    vi.stubGlobal('fetch', metaPlusText('line1\n  indented\n<b>not bold</b>'));
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+
+    const pre = document.getElementById('revealed-text');
+    expect(pre.textContent).toBe('line1\n  indented\n<b>not bold</b>');
+    // No <b> element should have been parsed -- it must be a literal string.
+    expect(pre.querySelector('b')).toBeNull();
+  });
+
+  it('unhides the copy button and wires it to copy the revealed text', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    vi.stubGlobal('fetch', metaPlusText('the secret'));
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+
+    const copyBtn = document.getElementById('copy-btn');
+    expect(copyBtn.hidden).toBe(false);
+
+    copyBtn.click();
+    await flushAsync();
+
+    expect(writeText).toHaveBeenCalledWith('the secret');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reveal success — image + zoom overlay
+// ---------------------------------------------------------------------------
+
+describe('reveal.js — image reveal success path', () => {
+  beforeEach(() => {
+    stubLocation();
+    mountLanding();
+  });
+
+  // Smallest legal PNG (1x1 transparent), base64-encoded the way the server
+  // sends it. Real pixels don't matter for these assertions; the test just
+  // needs SOMETHING that goes through the data: URI assembly path.
+  const TINY_PNG_B64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==';
+
+  function metaPlusImage(mime = 'image/png', content = TINY_PNG_B64) {
+    return vi.fn((url) => {
+      if (url.endsWith('/meta')) {
+        return Promise.resolve(jsonResponse({ passphrase_required: false }));
+      }
+      return Promise.resolve(jsonResponse({ content_type: 'image', mime_type: mime, content }));
+    });
+  }
+
+  async function revealImage(mime, content) {
+    vi.stubGlobal('fetch', metaPlusImage(mime, content));
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+  }
+
+  it('sets the img src to a data: URI assembled from mime_type + base64 content', async () => {
+    await revealImage('image/png');
+
+    const img = document.getElementById('revealed-image');
+    expect(img.getAttribute('src')).toBe(`data:image/png;base64,${TINY_PNG_B64}`);
+    expect(document.getElementById('state-image').hidden).toBe(false);
+    expect(document.getElementById('state-text').hidden).toBe(true);
+  });
+
+  it('adds the .wide class to #main-card so images get the wider layout', async () => {
+    await revealImage('image/jpeg');
+
+    expect(document.getElementById('main-card').classList.contains('wide')).toBe(true);
+  });
+
+  it('opens the zoom overlay on image click, locks body scroll, focuses close', async () => {
+    await revealImage('image/png');
+
+    const img = document.getElementById('revealed-image');
+    const overlay = document.getElementById('zoom-overlay');
+    const closeBtn = document.getElementById('zoom-close');
+    const closeFocus = vi.spyOn(closeBtn, 'focus');
+
+    img.click();
+
+    expect(overlay.hidden).toBe(false);
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(closeFocus).toHaveBeenCalled();
+    // Zoom image carries the same data: URI as the thumbnail.
+    expect(document.getElementById('zoom-image').getAttribute('src')).toBe(img.getAttribute('src'));
+  });
+
+  it('opens the zoom overlay via keyboard (Enter on the focused image)', async () => {
+    await revealImage('image/png');
+
+    const img = document.getElementById('revealed-image');
+    img.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+
+    expect(document.getElementById('zoom-overlay').hidden).toBe(false);
+  });
+
+  it('opens the zoom overlay via keyboard (Space on the focused image)', async () => {
+    await revealImage('image/png');
+
+    const img = document.getElementById('revealed-image');
+    img.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+
+    expect(document.getElementById('zoom-overlay').hidden).toBe(false);
+  });
+
+  it('closes the zoom overlay when the close button is clicked, restores body scroll + focus', async () => {
+    await revealImage('image/png');
+
+    const img = document.getElementById('revealed-image');
+    const overlay = document.getElementById('zoom-overlay');
+    const closeBtn = document.getElementById('zoom-close');
+    const thumbFocus = vi.spyOn(img, 'focus');
+
+    img.click(); // open
+    expect(overlay.hidden).toBe(false);
+
+    closeBtn.click();
+
+    expect(overlay.hidden).toBe(true);
+    expect(document.body.style.overflow).toBe('');
+    expect(thumbFocus).toHaveBeenCalled();
+    // Zoom image's src is wiped on close so the next open re-renders fresh.
+    expect(document.getElementById('zoom-image').getAttribute('src')).toBe('');
+  });
+
+  it('closes the zoom overlay when the backdrop (overlay itself) is clicked', async () => {
+    await revealImage('image/png');
+
+    const img = document.getElementById('revealed-image');
+    const overlay = document.getElementById('zoom-overlay');
+    img.click();
+    expect(overlay.hidden).toBe(false);
+
+    overlay.click();
+
+    expect(overlay.hidden).toBe(true);
+  });
+
+  it('closes the zoom overlay on Escape', async () => {
+    await revealImage('image/png');
+
+    const img = document.getElementById('revealed-image');
+    const overlay = document.getElementById('zoom-overlay');
+    img.click();
+    expect(overlay.hidden).toBe(false);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(overlay.hidden).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reveal failure shapes (the ones not already covered above)
+// ---------------------------------------------------------------------------
+
+describe('reveal.js — failure shapes', () => {
+  beforeEach(() => {
+    stubLocation();
+    mountLanding();
+  });
+
+  function metaThen(revealResp) {
+    return vi.fn((url) => {
+      if (url.endsWith('/meta')) {
+        return Promise.resolve(jsonResponse({ passphrase_required: false }));
+      }
+      return revealResp();
+    });
+  }
+
+  it('shows a rate-limit error on a 429', async () => {
+    vi.stubGlobal(
+      'fetch',
+      metaThen(() => Promise.resolve(new Response(null, { status: 429 })))
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+
+    const err = document.getElementById('reveal-error');
+    expect(err.hidden).toBe(false);
+    // Button restored so the user can retry once the limiter resets.
+    expect(revealBtn().disabled).toBe(false);
+  });
+
+  it('shows the gone state on a 404 (the secret was never live or already burned)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      metaThen(() => Promise.resolve(new Response(null, { status: 404 })))
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('state-gone').hidden).toBe(false);
+  });
+
+  it('shows a generic error on any other non-2xx (e.g. 500)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      metaThen(() => Promise.resolve(new Response(null, { status: 500 })))
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('reveal-error').hidden).toBe(false);
+    expect(revealBtn().disabled).toBe(false);
+  });
+
+  it('shows a network error and restores the button when fetch throws', async () => {
+    vi.stubGlobal(
+      'fetch',
+      metaThen(() => Promise.reject(new Error('network')))
+    );
+    await loadModule('reveal');
+    await flushAsync();
+    await flushAsync();
+
+    revealBtn().click();
+    await flushAsync();
+    await flushAsync();
+
+    expect(document.getElementById('reveal-error').hidden).toBe(false);
+    expect(revealBtn().disabled).toBe(false);
+  });
+});
