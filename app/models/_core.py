@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
     lockout_until         TEXT,
     session_generation    INTEGER NOT NULL DEFAULT 0,    -- bumped to invalidate live sessions
     preferred_language    TEXT,                           -- BCP-47 tag (e.g. 'ja', 'pt-BR'); NULL = fall back to request signals
+    analytics_opt_in      INTEGER NOT NULL DEFAULT 0 CHECK (analytics_opt_in IN (0,1)),  -- 1=user explicitly consented to aggregate-only telemetry; gates emit alongside the operator env. Boolean (not nullable) is deliberate: under opt-in default, "never saw the toggle" and "explicitly declined" are operationally identical -- both mean "do not emit" -- and indistinguishability in the row is the right disclosure posture.
     created_at            TEXT NOT NULL,
     updated_at            TEXT NOT NULL
 );
@@ -198,7 +199,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 # the first boot after upgrade; fresh DBs are stamped to CURRENT on creation.
 # -----------------------------------------------------------------------------
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 
 def _migrate_to_v2(conn: sqlite3.Connection) -> None:
@@ -495,11 +496,26 @@ def _migrate_to_v5(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_to_v6(conn: sqlite3.Connection) -> None:
+    """Add users.analytics_opt_in for per-user analytics opt-in. Default 0
+    (opt-in by default; user must explicitly enable). Gates `record_event*`
+    emission alongside the operator-level env (`EPHEMERA_ANALYTICS_ENABLED`)
+    -- two-gate model. Idempotent: fresh DBs already have the column from
+    TABLES_SCRIPT, so this only fires on legacy DBs that landed at v5 before
+    the per-user toggle existed."""
+    if "analytics_opt_in" not in _cols(conn, "users"):
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN analytics_opt_in INTEGER "
+            "NOT NULL DEFAULT 0 CHECK (analytics_opt_in IN (0,1))"
+        )
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_to_v2,
     3: _migrate_to_v3,
     4: _migrate_to_v4,
     5: _migrate_to_v5,
+    6: _migrate_to_v6,
 }
 
 

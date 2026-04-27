@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-26 21:36+0900\n"
+"POT-Creation-Date: 2026-04-27 20:09+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: ja\n"
@@ -42,16 +42,16 @@ msgstr "言語"
 msgid "dark mode"
 msgstr "ダークモード"
 
-#: app/templates/_layout.html:135 app/templates/_layout.html:140
+#: app/templates/_layout.html:177 app/templates/_layout.html:182
 #: app/templates/sender.html:4 app/templates/sender.html:7
 msgid "sign out"
 msgstr "サインアウト"
 
-#: app/templates/_layout.html:148
+#: app/templates/_layout.html:190
 msgid "Language"
 msgstr "言語"
 
-#: app/templates/_layout.html:154
+#: app/templates/_layout.html:235
 msgid "toggle theme"
 msgstr "テーマを切り替え"
 
@@ -73,53 +73,53 @@ msgstr "このメッセージは一度だけ閲覧できます。表示すると
 msgid "Passphrase"
 msgstr "パスフレーズ"
 
-#: app/templates/landing.html:20 app/templates/sender.html:86
+#: app/templates/landing.html:17 app/templates/sender.html:86
 #: app/templates/sender.html:127
 msgid "show passphrase"
 msgstr "パスフレーズを表示"
 
-#: app/templates/landing.html:20 app/templates/login.html:14
+#: app/templates/landing.html:17 app/templates/login.html:14
 #: app/templates/login.html:33 app/templates/sender.html:87
 msgid "show"
 msgstr "表示"
 
-#: app/templates/landing.html:24
+#: app/templates/landing.html:20
 msgid "Reveal Secret"
 msgstr "秘密を表示"
 
-#: app/templates/landing.html:30
+#: app/templates/landing.html:26
 msgid "Copy to clipboard"
 msgstr "クリップボードにコピー"
 
-#: app/templates/landing.html:31
+#: app/templates/landing.html:27
 msgid "This secret has been destroyed."
 msgstr "この秘密は破棄されました。"
 
-#: app/templates/landing.html:36
+#: app/templates/landing.html:32
 msgid "Click to view full size"
 msgstr "クリックして原寸大で表示"
 
-#: app/templates/landing.html:37
+#: app/templates/landing.html:33
 msgid "Click the image for full size · this secret has been destroyed."
 msgstr "画像をクリックして原寸大で表示・この秘密は破棄されました。"
 
-#: app/templates/landing.html:41
+#: app/templates/landing.html:37
 msgid "This secret is no longer available."
 msgstr "この秘密はもう利用できません。"
 
-#: app/templates/landing.html:42
+#: app/templates/landing.html:38
 msgid "It may have already been viewed or has expired."
 msgstr "すでに閲覧されたか、有効期限が切れた可能性があります。"
 
-#: app/templates/landing.html:46
+#: app/templates/landing.html:42
 msgid "Full-size image"
 msgstr "原寸大の画像"
 
-#: app/templates/landing.html:48
+#: app/templates/landing.html:44
 msgid "Close full-size view"
 msgstr "原寸大表示を閉じる"
 
-#: app/templates/landing.html:48
+#: app/templates/landing.html:44
 msgid "close"
 msgstr "閉じる"
 
@@ -288,4 +288,16 @@ msgstr "ステータス"
 #: app/templates/sender.html:140
 msgid "Create another"
 msgstr "もう1つ作成"
+
+#~ msgid "usage counts"
+#~ msgstr "サインアウト"
+
+#~ msgid "share anonymous usage counts"
+#~ msgstr ""
+
+#~ msgid ""
+#~ "Counts events like “someone hit the "
+#~ "message length cap” — never your "
+#~ "messages, links, or identity."
+#~ msgstr ""
 

@@ -83,5 +83,15 @@
     "time_burned": "zerstört {{when}}",
     "time_canceled": "abgebrochen {{when}}",
     "time_expired": "abgelaufen {{when}}"
+  },
+  "analytics": {
+    "label": "Analyse",
+    "dialog_title": "Anonyme Nutzungsdaten teilen",
+    "dialog_body": "ephemera erfasst Ereignisse wie „eine Nutzerin hat das Längenlimit erreicht\" oder „ein Empfänger hat ein Geheimnis geöffnet\" — aggregiert, ohne Nachrichtentext, ohne Links, ohne IP, ohne Identität.",
+    "dialog_note": "Du kannst das jederzeit ausschalten. Es ändert nichts an dem, was hier möglich ist.",
+    "confirm": "Aktivieren",
+    "cancel": "Abbrechen",
+    "disabled_ack": "Teilen ausgeschaltet",
+    "enabled_ack": "Teilen eingeschaltet"
   }
 }

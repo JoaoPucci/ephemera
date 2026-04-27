@@ -84,5 +84,15 @@
     "time_burned": "destruído {{when}}",
     "time_canceled": "cancelado {{when}}",
     "time_expired": "expirado {{when}}"
+  },
+  "analytics": {
+    "label": "Métricas",
+    "dialog_title": "Compartilhar dados de uso anônimos",
+    "dialog_body": "O ephemera vai registrar eventos como \"um usuário atingiu o limite de tamanho da mensagem\" ou \"um destinatário abriu um segredo\" — agregados, sem texto da mensagem, sem links, sem IP, sem identidade.",
+    "dialog_note": "Você pode desligar isso a qualquer momento. Não muda nada do que dá para fazer aqui.",
+    "confirm": "Ativar",
+    "cancel": "Cancelar",
+    "disabled_ack": "Compartilhamento desativado",
+    "enabled_ack": "Compartilhamento ativado"
   }
 }

@@ -8,6 +8,21 @@ signals belong in security_log.py; this module is for aggregate
 product metrics only. The on-disk table is `analytics_events` (see
 app/models/_core.py).
 
+# Two-gate emit model
+
+Emissions are gated by BOTH:
+  1. Operator: `settings.analytics_enabled` (env `EPHEMERA_ANALYTICS_ENABLED`,
+     default false). Instance-level kill switch.
+  2. User: `user["analytics_opt_in"]`. Per-account consent. Default false.
+The gate is checked inside `record_event*`, not at the call site -- a future
+emitter that forgets the gate is a class of bug we want the audit-internal
+contract to make impossible. Call sites pass the authenticated user; the
+sentinel `NO_USER` documents "this caller has no user context" and refuses
+the emit (system events have no consent path today).
+
+The opt-in is checked at emit time but never stored on the row -- the
+row remains presence-only, structurally un-joinable to identity.
+
 Events are append-only; no end-user-facing read API. The admin CLI
 (`ephemera-admin analytics-summary <event_type>`) is the only query
 path. Single-admin tool, low volume, no GDPR right-to-be-forgotten
@@ -59,7 +74,16 @@ import math
 import sqlite3
 from typing import Any
 
+from .config import get_settings
 from .models import _core
+
+# Sentinel for callers that genuinely have no user context (admin CLI,
+# future system event, bg job). Distinct from `None` so the absence is
+# intentional in source rather than a forgotten kwarg. Reaching the
+# emit path with this sentinel still refuses -- presence-only events
+# need a user-consent context to count toward an aggregate -- but the
+# sentinel makes the design choice grep-able.
+NO_USER = object()
 
 # Per-event-type payload schema. Each entry: event type -> {key: type}.
 # An empty {} means "presence-only": the event has no payload, the row's
@@ -70,9 +94,25 @@ from .models import _core
 #
 # Keys absent from the schema reject; values not matching the declared
 # type reject; nested containers reject. See _validate_payload.
+#
+# IMPORTANT (presence-only invariant): every entry in this registry MUST
+# have an empty schema. The user-facing copy at `settings.analytics_help`
+# in app/static/i18n/en.json reads "Counts events like 'someone hit the
+# message length cap' -- never your messages, links, or identity." That
+# promise is honest only as long as no event carries a payload that could
+# correlate with a user under aggregation. A future event that genuinely
+# needs a payload should ship with its own per-feature opt-in, not relax
+# this invariant. tests/test_analytics.py guards the invariant with an
+# assertion over the registry.
 EVENT_REGISTRY: dict[str, dict[str, type]] = {
     "content.limit_hit": {},  # presence-only: count(*) is the signal
 }
+
+# Module-level marker for the presence-only invariant above. The constant
+# itself isn't read at runtime -- it exists so a future contributor who
+# wants to add a payload field has to delete this line and the matching
+# test in tests/test_analytics.py, which surfaces the decision in diff.
+_PRESENCE_ONLY_INVARIANT = True
 
 # Maximum value-cap for str-type payload fields. 64 chars fits enum-style
 # categorical labels but not a leaked passphrase / label / content snippet
@@ -180,13 +220,35 @@ def _validate_payload(event_type: str, payload: dict | None) -> dict:
     return out
 
 
+def _gate(user: object) -> bool:
+    """Return True iff both gates pass for this `user` arg. Single-source
+    so route call sites don't carry the two-gate logic (a future emitter
+    can't forget a check that's structurally part of the recording API).
+    See module docstring for the operator/user gate semantics.
+    """
+    if user is NO_USER:
+        return False
+    if not isinstance(user, dict):
+        raise TypeError(
+            "record_event*: user must be a dict (authenticated user row) "
+            f"or analytics.NO_USER sentinel; got {type(user).__name__}"
+        )
+    if not user.get("analytics_opt_in"):
+        return False
+    return get_settings().analytics_enabled
+
+
 def record_event(
     conn: sqlite3.Connection,
     event_type: str,
     *,
+    user: object,
     payload: dict | None = None,
 ) -> None:
-    """Append a row to analytics_events after validating the payload.
+    """Append a row to analytics_events after validating the payload AND
+    confirming both gates (operator env + per-user opt-in) are open. If
+    either gate is closed the call is a silent no-op -- callers can emit
+    unconditionally, the gating is the analytics module's job.
 
     Privacy invariant: rows carry no user identity (no user_id, no IP, no
     session token), and payloads are metadata-only -- sizes, counts,
@@ -200,6 +262,8 @@ def record_event(
     Today's only emitter is fire-and-forget post-create, but other
     future emitters might want unification.
     """
+    if not _gate(user):
+        return
     validated = _validate_payload(event_type, payload)
     conn.execute(
         "INSERT INTO analytics_events (event_type, payload) VALUES (?, ?)",
@@ -210,6 +274,7 @@ def record_event(
 def record_event_standalone(
     event_type: str,
     *,
+    user: object,
     payload: dict | None = None,
 ) -> None:
     """Convenience wrapper that opens a fresh connection, records one event,
@@ -217,9 +282,13 @@ def record_event_standalone(
     its own and doesn't need atomicity with surrounding writes -- e.g., the
     sender route's post-create `content.limit_hit` emitter. Use record_event()
     with an explicit conn when joining an existing transaction.
+
+    Same gating + privacy invariants as record_event.
     """
+    if not _gate(user):
+        return
     with _core._connect() as conn:
-        record_event(conn, event_type, payload=payload)
+        record_event(conn, event_type, user=user, payload=payload)
 
 
 def _percentile_index(n: int, p: float) -> int:

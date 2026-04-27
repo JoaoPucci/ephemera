@@ -51,6 +51,7 @@ from .users import (
     get_user_with_totp_by_id,
     get_user_with_totp_by_username,
     list_users,
+    set_analytics_opt_in,
     update_user,
     user_count,
 )
@@ -87,6 +88,7 @@ __all__ = [
     "get_user_with_totp_by_id",
     "get_user_with_totp_by_username",
     "list_users",
+    "set_analytics_opt_in",
     "update_user",
     "user_count",
     # api_tokens

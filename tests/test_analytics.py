@@ -39,6 +39,32 @@ def cap_metric_event():
         del analytics._INT_FIELD_BOUNDS["intended_size_bytes"]
 
 
+@pytest.fixture
+def opted_in_user():
+    """Dict shape `record_event*` accepts: `analytics_opt_in` truthy."""
+    return {"id": 1, "username": "alice", "analytics_opt_in": 1}
+
+
+@pytest.fixture
+def opted_out_user():
+    return {"id": 2, "username": "bob", "analytics_opt_in": 0}
+
+
+@pytest.fixture(autouse=True)
+def _analytics_operator_gate_open(monkeypatch):
+    """Open the operator gate by default for this file. Gate-closed tests
+    override via their own monkeypatch.setenv + get_settings.cache_clear()
+    inside the test body. This keeps the happy-path tests focused on
+    payload/registry semantics without per-test boilerplate to open the
+    operator gate."""
+    monkeypatch.setenv("EPHEMERA_ANALYTICS_ENABLED", "true")
+    from app import config
+
+    config.get_settings.cache_clear()
+    yield
+    config.get_settings.cache_clear()
+
+
 # ---------------------------------------------------------------------------
 # Registry shape
 # ---------------------------------------------------------------------------
@@ -214,12 +240,13 @@ def _make_in_memory_db():
     return conn
 
 
-def test_record_event_writes_presence_only_row():
+def test_record_event_writes_presence_only_row(opted_in_user):
     """Happy path: the shipped event type is presence-only. The row records
     `event_type` + auto `occurred_at`; payload is `{}`. No user identity
-    is persisted -- the schema has no user_id column."""
+    is persisted -- the schema has no user_id column. The opt-in is
+    checked at emit but never written to the row."""
     conn = _make_in_memory_db()
-    analytics.record_event(conn, "content.limit_hit")
+    analytics.record_event(conn, "content.limit_hit", user=opted_in_user)
     rows = conn.execute("SELECT event_type, payload FROM analytics_events").fetchall()
     assert len(rows) == 1
     event_type, payload_json = rows[0]
@@ -227,7 +254,7 @@ def test_record_event_writes_presence_only_row():
     assert json.loads(payload_json) == {}
 
 
-def test_record_event_writes_validated_row(cap_metric_event):
+def test_record_event_writes_validated_row(cap_metric_event, opted_in_user):
     """A non-presence-only event round-trips its payload through the
     validator. Uses the synthetic test event so we exercise int + bool
     fields without coupling to a shipped event's payload shape."""
@@ -235,6 +262,7 @@ def test_record_event_writes_validated_row(cap_metric_event):
     analytics.record_event(
         conn,
         cap_metric_event,
+        user=opted_in_user,
         payload={"intended_size_bytes": 250_000, "was_paste": True},
     )
     rows = conn.execute("SELECT event_type, payload FROM analytics_events").fetchall()
@@ -247,19 +275,111 @@ def test_record_event_writes_validated_row(cap_metric_event):
     }
 
 
-def test_record_event_propagates_validation_error():
-    """A bad call doesn't silently no-op; the writer raises so the call
-    site sees the bug at first run."""
+def test_record_event_propagates_validation_error(opted_in_user):
+    """A bad call doesn't silently no-op on validation; the writer raises
+    so the call site sees the bug at first run. (Distinct from the gate-
+    closed silent-no-op path: gates are policy, validation is correctness.)
+    """
     conn = _make_in_memory_db()
     with pytest.raises(analytics.AnalyticsValidationError):
         analytics.record_event(
             conn,
             "content.limit_hit",
+            user=opted_in_user,
             payload={"unknown_key": 1},
         )
     # Nothing was written.
     rows = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
     assert rows[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Two-gate emit matrix: operator env x per-user opt-in
+# ---------------------------------------------------------------------------
+
+
+def _set_operator_gate(enabled: bool, monkeypatch):
+    monkeypatch.setenv("EPHEMERA_ANALYTICS_ENABLED", "true" if enabled else "false")
+    from app import config
+
+    config.get_settings.cache_clear()
+
+
+def test_gate_silent_noop_when_user_opted_out(opted_out_user):
+    """Operator on, user off -> no row, no exception. Silent so call sites
+    can emit unconditionally."""
+    conn = _make_in_memory_db()
+    analytics.record_event(conn, "content.limit_hit", user=opted_out_user)
+    rows = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
+    assert rows[0] == 0
+
+
+def test_gate_silent_noop_when_operator_disabled(opted_in_user, monkeypatch):
+    """Operator off, user on -> no row. Operator kill switch wins."""
+    _set_operator_gate(False, monkeypatch)
+    conn = _make_in_memory_db()
+    analytics.record_event(conn, "content.limit_hit", user=opted_in_user)
+    rows = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
+    assert rows[0] == 0
+
+
+def test_gate_silent_noop_when_both_closed(opted_out_user, monkeypatch):
+    _set_operator_gate(False, monkeypatch)
+    conn = _make_in_memory_db()
+    analytics.record_event(conn, "content.limit_hit", user=opted_out_user)
+    rows = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
+    assert rows[0] == 0
+
+
+def test_gate_emits_only_when_both_open(opted_in_user):
+    """Both gates open is the only configuration that lands a row.
+    Sanity-pin for the matrix."""
+    conn = _make_in_memory_db()
+    analytics.record_event(conn, "content.limit_hit", user=opted_in_user)
+    rows = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
+    assert rows[0] == 1
+
+
+def test_no_user_sentinel_silently_refuses_emit():
+    """`NO_USER` is the explicit "this caller has no user context" marker.
+    Reaching the emit path with it still refuses (presence-only events need
+    a user-consent context to count toward an aggregate), but unlike a
+    bogus user value, NO_USER doesn't raise -- it documents the choice
+    in source instead of bombing out at runtime."""
+    conn = _make_in_memory_db()
+    analytics.record_event(conn, "content.limit_hit", user=analytics.NO_USER)
+    rows = conn.execute("SELECT COUNT(*) FROM analytics_events").fetchone()
+    assert rows[0] == 0
+
+
+def test_record_event_raises_typeerror_on_bogus_user_value():
+    """Passing a non-dict, non-NO_USER value to `user` is a programmer
+    error -- raise so the call site sees it at first run instead of
+    silently dropping events."""
+    conn = _make_in_memory_db()
+    with pytest.raises(TypeError, match="must be a dict"):
+        analytics.record_event(conn, "content.limit_hit", user="alice")
+
+
+# ---------------------------------------------------------------------------
+# Presence-only invariant guard
+# ---------------------------------------------------------------------------
+
+
+def test_event_registry_is_presence_only():
+    """The user-facing toggle copy at `settings.analytics_help` (en.json)
+    promises no payload data is collected. That promise is honest only
+    as long as every entry in EVENT_REGISTRY has an empty payload schema.
+    A future contributor adding a payload field has to delete this test
+    AND the `_PRESENCE_ONLY_INVARIANT` module-level marker, which forces
+    the decision to surface in diff."""
+    assert analytics._PRESENCE_ONLY_INVARIANT is True
+    for event_type, schema in analytics.EVENT_REGISTRY.items():
+        assert schema == {}, (
+            f"event_type {event_type!r} has a non-empty payload schema "
+            f"({schema}); this violates the presence-only invariant. "
+            "Either drop the payload or add a per-feature opt-in."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +392,7 @@ def test_summarize_zero_events(tmp_db_path):
     assert out == {"count": 0, "fields": {}}
 
 
-def test_summarize_presence_only_event_returns_count(tmp_db_path):
+def test_summarize_presence_only_event_returns_count(tmp_db_path, opted_in_user):
     """For presence-only events (`content.limit_hit`), summarize should
     return only count -- there are no int fields to percentile-aggregate.
     Counts over time are the entire query surface for these events."""
@@ -280,12 +400,14 @@ def test_summarize_presence_only_event_returns_count(tmp_db_path):
 
     with _connect() as conn:
         for _ in range(7):
-            analytics.record_event(conn, "content.limit_hit")
+            analytics.record_event(conn, "content.limit_hit", user=opted_in_user)
     out = analytics.summarize("content.limit_hit")
     assert out == {"count": 7, "fields": {}}
 
 
-def test_summarize_aggregates_int_field_percentiles(tmp_db_path, cap_metric_event):
+def test_summarize_aggregates_int_field_percentiles(
+    tmp_db_path, cap_metric_event, opted_in_user
+):
     """Insert a small distribution and assert the percentile slots work.
     Uses the synthetic test event (with an int field) so we exercise the
     aggregation path without depending on a shipped event having an int
@@ -299,6 +421,7 @@ def test_summarize_aggregates_int_field_percentiles(tmp_db_path, cap_metric_even
             analytics.record_event(
                 conn,
                 cap_metric_event,
+                user=opted_in_user,
                 payload={"intended_size_bytes": sz, "was_paste": False},
             )
     out = analytics.summarize(cap_metric_event)
@@ -314,7 +437,7 @@ def test_summarize_aggregates_int_field_percentiles(tmp_db_path, cap_metric_even
 
 
 def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(
-    tmp_db_path, cap_metric_event
+    tmp_db_path, cap_metric_event, opted_in_user
 ):
     """Regression for the int(n*p) overshoot bug. For n=20 and p=0.95,
     n*p is exactly 19.0; the buggy formula `int(19.0) = 19` returns
@@ -329,6 +452,7 @@ def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(
             analytics.record_event(
                 conn,
                 cap_metric_event,
+                user=opted_in_user,
                 payload={"intended_size_bytes": sz, "was_paste": False},
             )
     stats = analytics.summarize(cap_metric_event)["fields"]["intended_size_bytes"]
