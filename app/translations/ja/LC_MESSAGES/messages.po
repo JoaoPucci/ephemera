@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-04-27 13:56+0900\n"
+"POT-Creation-Date: 2026-04-27 19:41+0900\n"
 "PO-Revision-Date: 2026-04-23 05:49+0900\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: ja\n"
@@ -42,14 +42,14 @@ msgstr "言語"
 msgid "dark mode"
 msgstr "ダークモード"
 
-#: app/templates/_layout.html:139 app/templates/_layout.html:149
+#: app/templates/_layout.html:144
+msgid "share anonymous usage counts"
+msgstr ""
+
+#: app/templates/_layout.html:145 app/templates/_layout.html:194
 msgid ""
 "Counts events like “someone hit the message length cap” — never your "
 "messages, links, or identity."
-msgstr ""
-
-#: app/templates/_layout.html:145
-msgid "share anonymous usage counts"
 msgstr ""
 
 #: app/templates/_layout.html:160 app/templates/_layout.html:165
@@ -61,7 +61,12 @@ msgstr "サインアウト"
 msgid "Language"
 msgstr "言語"
 
-#: app/templates/_layout.html:179
+#: app/templates/_layout.html:200
+#, fuzzy
+msgid "usage counts"
+msgstr "サインアウト"
+
+#: app/templates/_layout.html:205
 msgid "toggle theme"
 msgstr "テーマを切り替え"
 

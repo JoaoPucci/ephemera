@@ -15,6 +15,28 @@
   const drawerBtn = document.getElementById('chrome-menu-analytics');
   if (!desktopBtn && !drawerBtn) return;
 
+  // Adjacent status pill (desktop only). Empty on render; we write a
+  // transient confirmation here after a successful PATCH and clear it
+  // after a couple of seconds. role=status + aria-live=polite makes
+  // screen readers announce the same text without stealing focus.
+  const statusEl = document.getElementById('analytics-toggle-status');
+  let statusTimer = null;
+  function showStatus(text) {
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.classList.add('is-visible');
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      statusEl.classList.remove('is-visible');
+      // Wait for the fade transition to finish before clearing the
+      // textContent, so the text doesn't pop out before the opacity
+      // animation completes. Matches the 200ms transition in style.css.
+      setTimeout(() => {
+        if (!statusEl.classList.contains('is-visible')) statusEl.textContent = '';
+      }, 250);
+    }, 2500);
+  }
+
   function setState(enabled) {
     if (desktopBtn) desktopBtn.setAttribute('aria-checked', enabled ? 'true' : 'false');
     if (drawerBtn) drawerBtn.setAttribute('aria-checked', enabled ? 'true' : 'false');
@@ -50,6 +72,13 @@
       const me = await res.json();
       const persisted = Boolean(me.analytics_opt_in);
       setState(persisted);
+      // Transient confirmation. Two strings so the language stays
+      // congruent with the action ("now sharing" / "now private")
+      // rather than a generic "changed". Falls back to English when
+      // window.i18n isn't installed (e.g., test fixtures).
+      const onText = window.i18n?.t ? window.i18n.t('toggle.now_sharing') : 'Now sharing.';
+      const offText = window.i18n?.t ? window.i18n.t('toggle.now_private') : 'Now private.';
+      showStatus(persisted ? onText : offText);
       window.dispatchEvent(new CustomEvent('ephemera:me-updated', { detail: me }));
     } catch {
       // Rollback. No error toast: the toggle is small, the failure mode

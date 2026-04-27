@@ -663,6 +663,39 @@ button.copy-error:hover {
 
 .analytics-toggle svg {
   display: block;
+  flex-shrink: 0;
+}
+
+/* Visible short label next to the icon. The longer help text stays in
+   `title` (hover tooltip); the inline label is the primary affordance
+   for sighted users on first encounter. Letter-spacing matches .user-btn
+   so the chrome-row pills read as a coherent group. */
+.analytics-toggle {
+  gap: 0.4rem;
+}
+.analytics-toggle-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+/* Transient post-click status: empty on render; analytics-toggle.js
+   writes a short confirmation ("Now sharing." / "Now private.") after
+   a successful PATCH and clears it after a couple of seconds. role=status
+   + aria-live=polite makes screen readers announce the change without
+   stealing focus. opacity-driven fade so the visual doesn't flicker. */
+.analytics-toggle-status {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-left: 0.5rem;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.analytics-toggle-status.is-visible {
+  opacity: 1;
 }
 
 .user-btn {
@@ -1863,6 +1896,37 @@ button.copy-error:hover {
   .chrome-menu-row-label {
     flex: 0 1 auto;
   }
+  /* Stacked label + help. Used by the analytics-opt-in toggle, where
+     the help describes the consequences of flipping the switch. Help
+     line clamps to 2 lines so the row stays scannable on 320px-class
+     viewports; the full text remains accessible to assistive tech via
+     aria-describedby (textContent is unaffected by visual clamping). */
+  .chrome-menu-row-toggle-stacked {
+    align-items: flex-start;
+    padding-block: 0.6rem;
+  }
+  .chrome-menu-row-toggle-stacked .chrome-menu-row-icon {
+    margin-top: 0.15rem;
+  }
+  .chrome-menu-row-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 0.15rem;
+  }
+  .chrome-menu-row-help {
+    font-size: 0.75rem;
+    line-height: 1.35;
+    color: var(--muted);
+    font-weight: 400;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   .chrome-menu-row-value {
     margin-inline-start: auto;
     font-size: 0.85rem;
@@ -1953,6 +2017,13 @@ button.copy-error:hover {
   }
   [dir="rtl"] html[data-theme="dark"] .chrome-menu-switch-thumb {
     transform: translateX(-1.1rem);
+  }
+  /* Nudge the switch down a hair on the stacked-help variant so it sits
+     visually centered against the two-line label/help block. Placed after
+     the base .chrome-menu-switch rule to keep selectors in ascending
+     specificity order (Biome lint). */
+  .chrome-menu-row-toggle-stacked .chrome-menu-switch {
+    margin-top: 0.2rem;
   }
 
   /* Danger row (sign-out) + armed state */

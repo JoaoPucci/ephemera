@@ -83,5 +83,9 @@
     "time_burned": "burned {{when}}",
     "time_canceled": "canceled {{when}}",
     "time_expired": "expired {{when}}"
+  },
+  "toggle": {
+    "now_sharing": "Now sharing.",
+    "now_private": "Now private."
   }
 }
