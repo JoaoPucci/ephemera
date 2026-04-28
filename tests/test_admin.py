@@ -195,3 +195,475 @@ def test_diagnose_main_recognises_show_secret_flag(provisioned_user, capsys):
     out = capsys.readouterr().out
 
     assert provisioned_user["totp_secret"] in out
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by the bulk of cmd_* tests below.
+#
+# The interactive cmd_* functions (init, add-user, rotation, token mint)
+# all chain getpass + input + reauth + a few "print this banner" helpers.
+# We don't want each test to drive the full interactive flow; instead
+# we stub _reauth and _prompt_new_password (covered separately above)
+# and the QR printer, then call the cmd_ function directly. The
+# behaviour we care about -- DB writes, audit emit, session_generation
+# bumps, exit codes -- is covered without 6 lines of getpass mocks per
+# test.
+# ---------------------------------------------------------------------------
+
+
+def _stub_interactive(monkeypatch, *, new_password="freshly-picked-phrase-A1!"):
+    """Skip the password / TOTP prompts and the QR ASCII print. Tests that
+    care about a specific password value pass it via `new_password`."""
+    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin, "_prompt_new_password", lambda: new_password)
+    monkeypatch.setattr(admin, "_print_totp_setup", lambda secret, username: None)
+
+
+# ---------------------------------------------------------------------------
+# cmd_init: refuses-if-exists invariant + happy path
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_init_refuses_when_a_user_already_exists(provisioned_user, capsys):
+    """init is a one-shot bootstrap. Running it on a non-empty DB must
+    refuse rather than silently provision a second user (which would also
+    side-step the re-auth gate add-user enforces)."""
+    with pytest.raises(SystemExit) as exc:
+        admin.cmd_init("would-be-second")
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "already exists" in err
+    # Operator gets pointed at the right next command.
+    assert "add-user" in err
+
+
+def test_cmd_init_creates_first_user_and_emits_audit(tmp_db_path, monkeypatch, capsys):
+    """Happy path: empty DB -> init creates user + writes a user.added audit
+    line. We assert on observable side effects, not the QR print itself."""
+    _stub_interactive(monkeypatch)
+    audit_events = []
+    monkeypatch.setattr(
+        admin, "audit", lambda event, **kw: audit_events.append((event, kw))
+    )
+
+    admin.cmd_init("alice")
+
+    assert models.get_user_by_username("alice") is not None
+    assert ("user.added", {"user_id": 1, "username": "alice"}) in audit_events
+    out = capsys.readouterr().out
+    assert "Bootstrap complete" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_add_user: refuses-if-empty + reauth gate + provision
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_add_user_refuses_when_no_users_exist(tmp_db_path, capsys):
+    """add-user requires reauth as an existing user. With no users present,
+    the reauth subject doesn't exist -- bail with a hint to run init first."""
+    with pytest.raises(SystemExit) as exc:
+        admin.cmd_add_user("bob")
+    assert exc.value.code == 1
+    assert "init" in capsys.readouterr().err.lower()
+
+
+def test_cmd_add_user_provisions_after_reauth(provisioned_user, monkeypatch, capsys):
+    """Existing user signs in; new user is created + audit fires."""
+    _stub_interactive(monkeypatch)
+    audit_events = []
+    monkeypatch.setattr(
+        admin, "audit", lambda event, **kw: audit_events.append((event, kw))
+    )
+
+    admin.cmd_add_user("bob")
+
+    assert models.get_user_by_username("bob") is not None
+    assert any(
+        e[0] == "user.added" and e[1].get("username") == "bob" for e in audit_events
+    )
+
+
+# ---------------------------------------------------------------------------
+# cmd_list_users
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_list_users_prints_no_users_marker_on_empty_db(tmp_db_path, capsys):
+    admin.cmd_list_users()
+    assert capsys.readouterr().out.strip() == "(no users)"
+
+
+def test_cmd_list_users_prints_each_user_with_id_and_creation_date(
+    provisioned_user, make_user, capsys
+):
+    bob = make_user("bob")
+    admin.cmd_list_users()
+    out = capsys.readouterr().out
+    # Both usernames are in the output.
+    assert provisioned_user["username"] in out
+    assert "bob" in out
+    # Format carries the id (numeric) and the "created" prefix.
+    assert "created" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_remove_user (non-force)
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_remove_user_rejects_unknown_username(provisioned_user, capsys):
+    """Targeting a non-existent username fails fast before any reauth flow."""
+    with pytest.raises(SystemExit) as exc:
+        admin.cmd_remove_user("ghost-nobody-here")
+    assert exc.value.code == 1
+    assert "no user named" in capsys.readouterr().err.lower()
+
+
+def test_cmd_remove_user_normal_mode_reauths_as_target_and_cascades(
+    provisioned_user, make_user, monkeypatch
+):
+    """Non-force path: target authenticates as themselves (we stub _reauth);
+    their row is dropped + their secrets cascade."""
+    bob = make_user("bob")
+    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    secret = models.create_secret(
+        user_id=bob["id"],
+        content_type="text",
+        mime_type=None,
+        ciphertext=b"x" * 16,
+        server_key=b"y" * 16,
+        passphrase_hash=None,
+        track=False,
+        expires_in=3600,
+    )
+
+    admin.cmd_remove_user("bob")
+
+    assert models.get_user_by_username("bob") is None
+    assert models.get_by_token(secret["token"]) is None
+
+
+# ---------------------------------------------------------------------------
+# cmd_reset_password / cmd_rotate_totp / cmd_regen_recovery_codes
+#
+# All three rotate credentials AND bump session_generation -- the
+# bump is what invalidates outstanding session cookies, so it's the
+# most important property of these commands beyond the credential swap.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_reset_password_bumps_session_generation_and_swaps_hash(
+    provisioned_user, monkeypatch
+):
+    _stub_interactive(monkeypatch, new_password="another-strong-phrase-1!")
+    before = models.get_user_by_id(provisioned_user["id"])
+    old_gen = int(before["session_generation"])
+    old_hash = models.get_user_with_totp_by_id(provisioned_user["id"])["password_hash"]
+
+    admin.cmd_reset_password(provisioned_user["username"])
+
+    after = models.get_user_by_id(provisioned_user["id"])
+    after_full = models.get_user_with_totp_by_id(provisioned_user["id"])
+    assert int(after["session_generation"]) == old_gen + 1
+    assert after_full["password_hash"] != old_hash
+
+
+def test_cmd_rotate_totp_writes_new_secret_resets_step_and_bumps_session(
+    provisioned_user, monkeypatch
+):
+    _stub_interactive(monkeypatch)
+    before = models.get_user_with_totp_by_id(provisioned_user["id"])
+    old_secret = before["totp_secret"]
+    old_gen = int(before["session_generation"])
+
+    admin.cmd_rotate_totp(provisioned_user["username"])
+
+    after = models.get_user_with_totp_by_id(provisioned_user["id"])
+    assert after["totp_secret"] != old_secret
+    assert int(after["totp_last_step"]) == 0  # anti-replay counter reset
+    assert int(after["session_generation"]) == old_gen + 1
+
+
+def test_cmd_regen_recovery_codes_replaces_hashes_and_bumps_session(
+    provisioned_user, monkeypatch, capsys
+):
+    _stub_interactive(monkeypatch)
+    before = models.get_user_with_totp_by_id(provisioned_user["id"])
+    old_codes_json = before["recovery_code_hashes"]
+    old_gen = int(before["session_generation"])
+
+    admin.cmd_regen_recovery_codes(provisioned_user["username"])
+
+    after = models.get_user_with_totp_by_id(provisioned_user["id"])
+    assert after["recovery_code_hashes"] != old_codes_json
+    assert int(after["session_generation"]) == old_gen + 1
+    out = capsys.readouterr().out
+    # The codes themselves are printed exactly once (the "save these now" copy).
+    assert "shown ONCE" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_list_tokens
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_list_tokens_prints_empty_marker_when_user_has_none(
+    provisioned_user, capsys
+):
+    admin.cmd_list_tokens(provisioned_user["username"])
+    assert capsys.readouterr().out.strip() == "(no tokens)"
+
+
+def test_cmd_list_tokens_prints_active_and_revoked_status_per_row(
+    provisioned_user, capsys
+):
+    """Status string in the output distinguishes [active] vs [revoked]."""
+    from app import auth
+
+    _, digest_a = auth.mint_api_token()
+    models.create_token(
+        user_id=provisioned_user["id"], name="ci-runner", token_hash=digest_a
+    )
+    _, digest_b = auth.mint_api_token()
+    models.create_token(
+        user_id=provisioned_user["id"], name="laptop", token_hash=digest_b
+    )
+    models.revoke_token(provisioned_user["id"], "laptop")
+
+    admin.cmd_list_tokens(provisioned_user["username"])
+    out = capsys.readouterr().out
+
+    assert "[active]" in out and "ci-runner" in out
+    assert "[revoked]" in out and "laptop" in out
+    # "never" appears for tokens with no last_used_at.
+    assert "never" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_create_token / cmd_revoke_token
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_create_token_mints_and_prints_plaintext_once(
+    provisioned_user, monkeypatch, capsys
+):
+    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+
+    admin.cmd_create_token("ci-runner", provisioned_user["username"])
+
+    out = capsys.readouterr().out
+    # Plaintext token is shown with its eph_ prefix; only its hash is in the DB.
+    assert "eph_" in out
+    rows = models.list_tokens(provisioned_user["id"])
+    assert any(r["name"] == "ci-runner" and r["revoked_at"] is None for r in rows)
+
+
+def test_cmd_create_token_rejects_duplicate_name_per_user(
+    provisioned_user, monkeypatch, capsys
+):
+    """Token names are unique per user. A second create with the same name
+    must fail with a clear message rather than a raw IntegrityError."""
+    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    admin.cmd_create_token("ci-runner", provisioned_user["username"])
+    capsys.readouterr()  # drop the success-path output
+
+    with pytest.raises(SystemExit) as exc:
+        admin.cmd_create_token("ci-runner", provisioned_user["username"])
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "already exists" in err
+
+
+def test_cmd_revoke_token_marks_token_revoked(provisioned_user, monkeypatch, capsys):
+    """Mints, revokes, asserts revoked_at set + token no longer authenticates."""
+    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    admin.cmd_create_token("ci-runner", provisioned_user["username"])
+    capsys.readouterr()
+
+    admin.cmd_revoke_token("ci-runner", provisioned_user["username"])
+
+    rows = models.list_tokens(provisioned_user["id"])
+    assert any(r["name"] == "ci-runner" and r["revoked_at"] is not None for r in rows)
+
+
+def test_cmd_revoke_token_errors_on_unknown_name(provisioned_user, monkeypatch, capsys):
+    """Revoking a name that doesn't exist (or is already revoked) exits 1
+    with a clear message -- silent success would hide a typo."""
+    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+
+    with pytest.raises(SystemExit) as exc:
+        admin.cmd_revoke_token("does-not-exist", provisioned_user["username"])
+    assert exc.value.code == 1
+    assert "no active token" in capsys.readouterr().err.lower()
+
+
+# ---------------------------------------------------------------------------
+# cmd_verify
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_verify_reports_both_correct(provisioned_user, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "getpass.getpass", lambda *a, **kw: provisioned_user["password"]
+    )
+    monkeypatch.setattr(
+        "builtins.input", lambda *a, **kw: provisioned_user["totp"].now()
+    )
+
+    admin.cmd_verify(provisioned_user["username"])
+    out = capsys.readouterr().out
+
+    assert "Both correct" in out
+    assert "password:  OK" in out
+    assert "totp:      OK" in out
+
+
+def test_cmd_verify_reports_password_wrong_totp_right(
+    provisioned_user, monkeypatch, capsys
+):
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "definitely-wrong-password")
+    monkeypatch.setattr(
+        "builtins.input", lambda *a, **kw: provisioned_user["totp"].now()
+    )
+
+    admin.cmd_verify(provisioned_user["username"])
+    out = capsys.readouterr().out
+
+    assert "Password is wrong" in out
+    assert "password:  MISMATCH" in out
+
+
+def test_cmd_verify_reports_both_wrong(provisioned_user, monkeypatch, capsys):
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "definitely-wrong")
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: "000000")
+
+    admin.cmd_verify(provisioned_user["username"])
+    out = capsys.readouterr().out
+
+    assert "Both password and TOTP are wrong" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_analytics_summary
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_analytics_summary_rejects_unknown_event_type(tmp_db_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        admin.cmd_analytics_summary("not.a.real.event")
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "unknown event_type" in err
+
+
+def test_cmd_analytics_summary_handles_empty_table(tmp_db_path, capsys):
+    """Known event type but no rows yet -- prints count: 0, no field stats."""
+    admin.cmd_analytics_summary("content.limit_hit")
+    out = capsys.readouterr().out
+    assert "event_type: content.limit_hit" in out
+    assert "count: 0" in out
+
+
+# ---------------------------------------------------------------------------
+# Dispatch (main)
+# ---------------------------------------------------------------------------
+
+
+def test_main_with_no_args_prints_usage_and_exits_zero(tmp_db_path, capsys):
+    """Bare `python -m app.admin` is documentation -- prints help, exit 0."""
+    with pytest.raises(SystemExit) as exc:
+        admin.main([])
+    assert exc.value.code == 0
+    # The module docstring is what's printed.
+    out = capsys.readouterr().out
+    assert "init" in out and "add-user" in out
+
+
+def test_main_with_unknown_command_exits_two(tmp_db_path, capsys):
+    """Mistyped subcommand -- exit 2 (argv error), print usage."""
+    with pytest.raises(SystemExit) as exc:
+        admin.main(["totally-not-a-command"])
+    assert exc.value.code == 2
+
+
+def test_main_arity_mismatch_exits_two(provisioned_user, capsys):
+    """`init` takes one positional username; calling it with two trips the
+    arity check before any DB work happens."""
+    with pytest.raises(SystemExit) as exc:
+        admin.main(["init", "alice", "extra-arg"])
+    assert exc.value.code == 2
+    assert "expects" in capsys.readouterr().err.lower()
+
+
+def test_main_strips_force_flag_before_arity_check(
+    provisioned_user, make_user, monkeypatch
+):
+    """`--force` is a flag on remove-user; the dispatcher must filter it
+    out of the positional count so `remove-user --force <name>` parses as
+    one positional, not two."""
+    make_user("bob")
+    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: provisioned_user["username"])
+
+    admin.main(["remove-user", "--force", "bob"])
+
+    assert models.get_user_by_username("bob") is None
+
+
+# ---------------------------------------------------------------------------
+# _parse_user_flag / _resolve_user
+# ---------------------------------------------------------------------------
+
+
+def test_parse_user_flag_extracts_long_form_and_leaves_other_args():
+    name, rest = admin._parse_user_flag(["--user", "alice", "create-token", "ci"])
+    assert name == "alice"
+    assert rest == ["create-token", "ci"]
+
+
+def test_parse_user_flag_extracts_short_form():
+    name, rest = admin._parse_user_flag(["-u", "alice", "ci"])
+    assert name == "alice"
+    assert rest == ["ci"]
+
+
+def test_parse_user_flag_returns_none_when_absent():
+    name, rest = admin._parse_user_flag(["create-token", "ci"])
+    assert name is None
+    assert rest == ["create-token", "ci"]
+
+
+def test_resolve_user_returns_sole_user_when_no_flag_passed(provisioned_user):
+    """With exactly one user in the DB, omitting --user is a convenience
+    shortcut -- pick them automatically."""
+    user = admin._resolve_user(None)
+    assert user["username"] == provisioned_user["username"]
+
+
+def test_resolve_user_errors_when_multiple_users_and_no_flag(
+    provisioned_user, make_user, capsys
+):
+    make_user("bob")
+    with pytest.raises(SystemExit) as exc:
+        admin._resolve_user(None)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "multiple users" in err.lower()
+    # Both candidates are listed so the operator can pick.
+    assert "bob" in err
+    assert provisioned_user["username"] in err
+
+
+def test_resolve_user_errors_when_named_user_does_not_exist(provisioned_user, capsys):
+    with pytest.raises(SystemExit) as exc:
+        admin._resolve_user("ghost-nobody-here")
+    assert exc.value.code == 1
+    assert "no user named" in capsys.readouterr().err.lower()
+
+
+def test_resolve_user_errors_when_db_has_no_users(tmp_db_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        admin._resolve_user(None)
+    assert exc.value.code == 1
+    assert "no users yet" in capsys.readouterr().err.lower()
