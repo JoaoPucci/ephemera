@@ -5,10 +5,16 @@
 //   - basic focus trap while open
 //   - language row: delegates to window.i18n.setLocale
 //   - theme row: delegates to the desktop toggle, syncs the switch state
-//   - sign-out row: two-click confirm (label swap + 3s auto-disarm), same
-//     pattern as the desktop user pill
+//   - sign-out row: two-click confirm via shared helper -- same pattern
+//     as the desktop user pill, just a different confirm-key scope
 //   - user name: mirrors #user-name so the drawer header populates once
 //     sender.js resolves /api/me
+//
+// Loaded as `<script type="module">` from _layout.html so the import
+// below resolves; window.i18n is set by the classic-script i18n.js
+// in <head> before this module's deferred load runs.
+import { bindTwoClickConfirm } from './two-click.js';
+
 (() => {
   const root = document.documentElement;
   const menu = document.getElementById('chrome-menu');
@@ -168,38 +174,19 @@
   }
 
   // ---- Sign-out row (two-click confirm) ----
-  if (signoutBtn && signoutLabel) {
-    const defaultLabel = signoutBtn.dataset.labelDefault || signoutLabel.textContent;
-    let armed = false;
-    let armTimer = null;
-
-    function disarm() {
-      armed = false;
-      signoutBtn.classList.remove('armed');
-      signoutLabel.textContent = defaultLabel;
-    }
-
-    signoutBtn.addEventListener('click', async () => {
-      if (!armed) {
-        armed = true;
-        signoutBtn.classList.add('armed');
-        // Drawer-scoped confirm key (menu.sign_out_confirm). Distinct
-        // from the desktop pill's button.sign_out_confirm because the
-        // drawer row has full width -- the pill is width-constrained to
-        // avoid colliding with the language picker. Splitting the keys
-        // lets each surface have register-appropriate copy.
-        const confirmText = window.i18n?.t
-          ? window.i18n.t('menu.sign_out_confirm')
-          : 'really sign out?';
-        signoutLabel.textContent = confirmText;
-        armTimer = setTimeout(disarm, 3000);
-        return;
-      }
-      if (armTimer) clearTimeout(armTimer);
+  // Drawer-scoped confirm key (menu.sign_out_confirm) is distinct from
+  // the desktop pill's button.sign_out_confirm: the drawer row has full
+  // width so it can show the longer copy, while the pill is width-
+  // constrained to avoid colliding with the language picker. Splitting
+  // the keys lets each surface have register-appropriate phrasing.
+  bindTwoClickConfirm(signoutBtn, {
+    labelEl: signoutLabel,
+    confirmKey: 'menu.sign_out_confirm',
+    onConfirm: async () => {
       try {
         await fetch('/send/logout', { method: 'POST' });
       } catch {}
       window.location.reload();
-    });
-  }
+    },
+  });
 })();

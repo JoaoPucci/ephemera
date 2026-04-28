@@ -3,6 +3,7 @@
 //
 // Single-source-of-truth is the server (/api/secrets/tracked); the browser
 // just joins in its local URL cache to decide which rows are re-copyable.
+import { bindTwoClickConfirm } from '../two-click.js';
 import { forgetUrl, gcUrls, getUrl } from './url-cache.js';
 
 // ---------- polling ----------
@@ -248,24 +249,15 @@ export async function renderTrackedList() {
       cancelBtn.textContent = window.i18n.t('button.cancel');
       cancelBtn.title = window.i18n.t('tracked.tooltip_cancel');
       cancelBtn.setAttribute('aria-label', window.i18n.t('tracked.aria_cancel'));
-      let armTimer = null;
-      cancelBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (!cancelBtn.classList.contains('armed')) {
-          cancelBtn.classList.add('armed');
-          cancelBtn.textContent = window.i18n.t('button.confirm');
-          armTimer = setTimeout(() => {
-            cancelBtn.classList.remove('armed');
-            cancelBtn.textContent = window.i18n.t('button.cancel');
-          }, 3000);
-          return;
-        }
-        if (armTimer) clearTimeout(armTimer);
-        cancelBtn.disabled = true;
-        cancelBtn.textContent = window.i18n.t('button.canceling');
-        await cancelOnServer(item.id);
-        forgetUrl(item.id);
-        renderTrackedList();
+      bindTwoClickConfirm(cancelBtn, {
+        stopPropagation: true,
+        onConfirm: async () => {
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = window.i18n.t('button.canceling');
+          await cancelOnServer(item.id);
+          forgetUrl(item.id);
+          renderTrackedList();
+        },
       });
       right.appendChild(cancelBtn);
     }
@@ -337,42 +329,28 @@ export async function renderTrackedList() {
 
 // ---------- top-level wiring ----------
 
-// Clear-history action: same 2-click arm pattern as per-row cancel. First
-// click arms (danger tint + "confirm?"), second click within 3s executes.
-// We mutate only the #tracked-clear-label span so the icon (a sibling SVG)
-// stays put across state transitions.
+// Clear-history action: same 2-click pattern as per-row cancel, via the
+// shared helper. Targets the #tracked-clear-label span specifically so
+// the icon (a sibling SVG inside the same button) stays put across state
+// transitions. The helper captures the rest-state label at arm time, so
+// the count-bearing pluralization ("Clear 3 past entries") is restored
+// correctly even though the label changes between renders.
 (function wireClearHistory() {
   const clearBtn = document.getElementById('tracked-clear');
   const clearLbl = document.getElementById('tracked-clear-label');
   if (!clearBtn || !clearLbl) return;
-  let armTimer = null;
-  // Remember the last "idle" label so we can restore it (it carries the
-  // current count, set by renderTrackedList, and may differ between calls).
-  function idleLabel() {
-    return clearBtn.dataset.idleLabel || window.i18n.t(pluralKey('button.clear_past', 0), { n: 0 });
-  }
-  clearBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (!clearBtn.classList.contains('armed')) {
-      clearBtn.dataset.idleLabel = clearLbl.textContent;
-      clearBtn.classList.add('armed');
-      clearLbl.textContent = window.i18n.t('button.confirm');
-      armTimer = setTimeout(() => {
-        clearBtn.classList.remove('armed');
-        clearLbl.textContent = idleLabel();
-      }, 3000);
-      return;
-    }
-    if (armTimer) clearTimeout(armTimer);
-    clearBtn.disabled = true;
-    clearLbl.textContent = window.i18n.t('button.clearing');
-    try {
-      await fetch('/api/secrets/tracked/clear', { method: 'POST' });
-    } catch {}
-    clearBtn.classList.remove('armed');
-    clearLbl.textContent = idleLabel();
-    clearBtn.disabled = false;
-    renderTrackedList();
+  bindTwoClickConfirm(clearBtn, {
+    labelEl: clearLbl,
+    stopPropagation: true,
+    onConfirm: async () => {
+      clearBtn.disabled = true;
+      clearLbl.textContent = window.i18n.t('button.clearing');
+      try {
+        await fetch('/api/secrets/tracked/clear', { method: 'POST' });
+      } catch {}
+      clearBtn.disabled = false;
+      renderTrackedList();
+    },
   });
 })();
 
