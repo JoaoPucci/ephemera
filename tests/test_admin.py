@@ -48,7 +48,7 @@ def test_force_removal_reauths_as_named_user(provisioned_user, make_user, monkey
     _patch_input(monkeypatch, "bob")
     reauth_calls = []
     monkeypatch.setattr(
-        admin, "_reauth", lambda user: reauth_calls.append(user["username"])
+        admin._core, "_reauth", lambda user: reauth_calls.append(user["username"])
     )
     admin._reauth_for_force_removal(provisioned_user)
     assert reauth_calls == ["bob"]
@@ -110,7 +110,7 @@ def test_remove_user_with_force_deletes_target_and_cascades(
     bob = make_user("bob")
     _patch_input(monkeypatch, "bob")
     monkeypatch.setattr(
-        admin, "_reauth", lambda user: None
+        admin._core, "_reauth", lambda user: None
     )  # skip password/TOTP prompt
 
     # Give the target something to cascade.
@@ -214,9 +214,9 @@ def test_diagnose_main_recognises_show_secret_flag(provisioned_user, capsys):
 def _stub_interactive(monkeypatch, *, new_password="freshly-picked-phrase-A1!"):
     """Skip the password / TOTP prompts and the QR ASCII print. Tests that
     care about a specific password value pass it via `new_password`."""
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)
-    monkeypatch.setattr(admin, "_prompt_new_password", lambda: new_password)
-    monkeypatch.setattr(admin, "_print_totp_setup", lambda secret, username: None)
+    monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin._core, "_prompt_new_password", lambda: new_password)
+    monkeypatch.setattr(admin._core, "_print_totp_setup", lambda secret, username: None)
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +243,7 @@ def test_cmd_init_creates_first_user_and_emits_audit(tmp_db_path, monkeypatch, c
     _stub_interactive(monkeypatch)
     audit_events = []
     monkeypatch.setattr(
-        admin, "audit", lambda event, **kw: audit_events.append((event, kw))
+        admin._core, "audit", lambda event, **kw: audit_events.append((event, kw))
     )
 
     admin.cmd_init("alice")
@@ -273,7 +273,7 @@ def test_cmd_add_user_provisions_after_reauth(provisioned_user, monkeypatch, cap
     _stub_interactive(monkeypatch)
     audit_events = []
     monkeypatch.setattr(
-        admin, "audit", lambda event, **kw: audit_events.append((event, kw))
+        admin._core, "audit", lambda event, **kw: audit_events.append((event, kw))
     )
 
     admin.cmd_add_user("bob")
@@ -326,7 +326,7 @@ def test_cmd_remove_user_normal_mode_reauths_as_target_and_cascades(
     """Non-force path: target authenticates as themselves (we stub _reauth);
     their row is dropped + their secrets cascade."""
     bob = make_user("bob")
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
     secret = models.create_secret(
         user_id=bob["id"],
         content_type="text",
@@ -448,7 +448,7 @@ def test_cmd_list_tokens_prints_active_and_revoked_status_per_row(
 def test_cmd_create_token_mints_and_prints_plaintext_once(
     provisioned_user, monkeypatch, capsys
 ):
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
 
     admin.cmd_create_token("ci-runner", provisioned_user["username"])
 
@@ -464,7 +464,7 @@ def test_cmd_create_token_rejects_duplicate_name_per_user(
 ):
     """Token names are unique per user. A second create with the same name
     must fail with a clear message rather than a raw IntegrityError."""
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
     admin.cmd_create_token("ci-runner", provisioned_user["username"])
     capsys.readouterr()  # drop the success-path output
 
@@ -477,7 +477,7 @@ def test_cmd_create_token_rejects_duplicate_name_per_user(
 
 def test_cmd_revoke_token_marks_token_revoked(provisioned_user, monkeypatch, capsys):
     """Mints, revokes, asserts revoked_at set + token no longer authenticates."""
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
     admin.cmd_create_token("ci-runner", provisioned_user["username"])
     capsys.readouterr()
 
@@ -490,7 +490,7 @@ def test_cmd_revoke_token_marks_token_revoked(provisioned_user, monkeypatch, cap
 def test_cmd_revoke_token_errors_on_unknown_name(provisioned_user, monkeypatch, capsys):
     """Revoking a name that doesn't exist (or is already revoked) exits 1
     with a clear message -- silent success would hide a typo."""
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
 
     with pytest.raises(SystemExit) as exc:
         admin.cmd_revoke_token("does-not-exist", provisioned_user["username"])
@@ -603,7 +603,7 @@ def test_main_strips_force_flag_before_arity_check(
     out of the positional count so `remove-user --force <name>` parses as
     one positional, not two."""
     make_user("bob")
-    monkeypatch.setattr(admin, "_reauth", lambda user: None)
+    monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
     monkeypatch.setattr("builtins.input", lambda *a, **kw: provisioned_user["username"])
 
     admin.main(["remove-user", "--force", "bob"])
