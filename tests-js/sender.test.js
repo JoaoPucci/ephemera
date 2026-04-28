@@ -249,6 +249,58 @@ describe('sender.js — user button sign-out two-click confirm', () => {
 
     vi.useRealTimers();
   });
+
+  it('reloads the page after a successful logout', async () => {
+    // jsdom's window.location.reload is non-configurable. Replacing the
+    // whole window.location via Object.defineProperty IS allowed (the
+    // outer descriptor on window is configurable), so we swap a stub in
+    // for this test only, then restore the original on cleanup. Same
+    // workaround as i18n.test.js's setLocale tests.
+    const savedLocation = window.location;
+    const reloadMock = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        reload: reloadMock,
+        href: 'http://localhost/send',
+        search: '',
+        pathname: '/send',
+        origin: 'http://localhost',
+      },
+    });
+
+    // Resolve the logout fetch (rather than hanging it) so the
+    // onConfirm callback proceeds to reload().
+    const fetchMock = vi.fn((url) => {
+      if (url === '/send/logout') {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url === '/api/me') {
+        return Promise.resolve(jsonResponse({ id: 1, username: 'admin', email: null }));
+      }
+      if (url === '/api/secrets/tracked') {
+        return Promise.resolve(jsonResponse({ items: [] }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    userBtn().click(); // arm
+    await flushAsync();
+    userBtn().click(); // confirm -> fetch resolves -> reload
+    // Drain the awaited fetch + the helper's finally{disarm()}.
+    await flushAsync();
+    await flushAsync();
+
+    expect(reloadMock).toHaveBeenCalledOnce();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: savedLocation,
+    });
+  });
 });
 
 describe('sender.js — copy passphrase + show/hide on the result screen', () => {
