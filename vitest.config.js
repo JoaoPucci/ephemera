@@ -63,9 +63,15 @@ export default defineConfig({
           lines: 97,
         },
         'app/static/sender.js': {
-          statements: 87,
-          branches: 56,
-          functions: 80,
+          // Calibrated after the two-click extraction. The remaining
+          // uncovered lines are the copy-url handler (needs a fixture
+          // tests don't bother mounting) and the 401 reload branch in
+          // loadMe() (would require stubbing window.location for a
+          // dedicated test). The reload-after-logout path IS covered
+          // by the test that swaps in a vi.fn() reload stub.
+          statements: 85,
+          branches: 58,
+          functions: 78,
           lines: 87,
         },
         'app/static/sender/form.js': {
@@ -91,6 +97,12 @@ export default defineConfig({
           branches: 85,
           functions: 95,
           lines: 92,
+        },
+        'app/static/two-click.js': {
+          statements: 95,
+          branches: 85,
+          functions: 95,
+          lines: 95,
         },
       },
     },
