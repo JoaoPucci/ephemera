@@ -1,43 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mountI18n } from './fixtures/i18n.js';
 import { flushAsync, jsonResponse, loadModule } from './helpers.js';
-
-// ---------------------------------------------------------------------------
-// Fixture builder.
-//
-// i18n.js reads two <script type="application/json"> nodes from the DOM at
-// init: the active-locale catalog (#i18n-catalog) and the English fallback
-// (#i18n-fallback). The picker is a <select id="lang-picker">. The shim
-// also exposes window.i18n for everything else in the app to use.
-//
-// Each test gets a fresh DOM via mountI18n(). The catalog payloads are
-// passed in directly so tests can exercise specific lookup / fallback /
-// interpolation cases without entanglement between tests.
-// ---------------------------------------------------------------------------
-
-function mountI18n({
-  catalog = {},
-  fallback = {},
-  activeLocale = 'ja',
-  authenticated = false,
-  hasPicker = true,
-} = {}) {
-  document.documentElement.setAttribute('lang', activeLocale);
-  const authAttr = authenticated ? ' data-authenticated="true"' : '';
-  const picker = hasPicker
-    ? `<select id="lang-picker">
-         <option value="en">English</option>
-         <option value="ja"${activeLocale === 'ja' ? ' selected' : ''}>日本語</option>
-         <option value="es">Español</option>
-       </select>`
-    : '';
-  document.body.outerHTML = `
-    <body${authAttr}>
-      <script type="application/json" id="i18n-catalog">${JSON.stringify(catalog)}</script>
-      <script type="application/json" id="i18n-fallback">${JSON.stringify(fallback)}</script>
-      ${picker}
-    </body>
-  `;
-}
 
 // jsdom's `window.location.reload` is non-configurable, so individual
 // properties can't be spied on. Replacing the whole `window.location` via

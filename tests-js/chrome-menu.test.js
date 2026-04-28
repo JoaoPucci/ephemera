@@ -1,58 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makePanelFocusablesVisible, mountChromeMenu } from './fixtures/chrome-menu.js';
 import { flushAsync, loadModule } from './helpers.js';
-
-// ---------------------------------------------------------------------------
-// DOM fixture: the mobile drawer + its desktop "source-of-truth" siblings
-// (#user-name, #theme-toggle) that chrome-menu.js mirrors. Templates render
-// data-label-{open,closed} on the trigger so the locale resolves at gettext
-// time, not in JS; tests stand in fixed strings here.
-// ---------------------------------------------------------------------------
-
-function mountChromeMenu() {
-  document.documentElement.removeAttribute('data-theme');
-  delete document.documentElement.dataset.chromeMenuOpen;
-  document.body.innerHTML = `
-    <div id="chrome-menu">
-      <button id="chrome-menu-btn"
-              aria-expanded="false"
-              aria-label="open menu"
-              data-label-closed="open menu"
-              data-label-open="close menu"></button>
-      <div id="chrome-menu-scrim" aria-hidden="true"></div>
-      <div id="chrome-menu-panel" aria-hidden="true">
-        <span id="chrome-menu-user-name">…</span>
-        <select id="chrome-menu-lang">
-          <option value="en">English</option>
-          <option value="ja" selected>日本語</option>
-        </select>
-        <span id="chrome-menu-lang-label">日本語</span>
-        <button id="chrome-menu-theme" aria-checked="false"></button>
-        <button id="chrome-menu-signout" data-label-default="sign out">
-          <span id="chrome-menu-signout-label">sign out</span>
-        </button>
-      </div>
-    </div>
-    <span id="user-name">admin</span>
-    <button id="theme-toggle"></button>
-  `;
-}
-
-// jsdom doesn't compute layout, so every element has offsetParent === null
-// by default. chrome-menu.js's focusableInPanel() filters on
-// `el.offsetParent !== null`, which would drop every panel button under
-// jsdom and make the focus trap untestable. Patch offsetParent on the
-// panel's focusable elements so the trap sees a non-empty candidate list.
-// Real browsers compute this from layout; we're standing in.
-function makePanelFocusablesVisible() {
-  for (const el of document.querySelectorAll(
-    '#chrome-menu-panel button, #chrome-menu-panel select'
-  )) {
-    Object.defineProperty(el, 'offsetParent', {
-      configurable: true,
-      get: () => document.body,
-    });
-  }
-}
 
 afterEach(() => {
   vi.useRealTimers();

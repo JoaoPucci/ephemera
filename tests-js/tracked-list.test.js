@@ -1,28 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mountTrackedFixture } from './fixtures/tracked.js';
 import { flushAsync, jsonResponse, loadModule } from './helpers.js';
-
-// ---------------------------------------------------------------------------
-// DOM fixture: only the elements tracked-list.js touches. The two top-level
-// IIFEs (wireClearHistory, wireTrackedToggle) run on import and bail if their
-// elements are missing, so the fixture must be in place BEFORE loadModule().
-// ---------------------------------------------------------------------------
-
-function mountTrackedFixture() {
-  document.body.innerHTML = `
-    <section id="tracked-section" hidden>
-      <button type="button" id="tracked-header" aria-expanded="false">
-        <span class="tracked-panel-title">Tracked</span>
-        <span id="tracked-count">0</span>
-      </button>
-      <div id="tracked-body">
-        <ul id="tracked-list"></ul>
-        <button type="button" id="tracked-clear" hidden>
-          <span id="tracked-clear-label">Clear past entries</span>
-        </button>
-      </div>
-    </section>
-  `;
-}
 
 // ---------------------------------------------------------------------------
 // Item builders. Defaults match a pending text secret with no label and no
