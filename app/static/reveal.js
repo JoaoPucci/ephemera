@@ -1,6 +1,7 @@
 // ES module. Top-level code runs once on import, wiring listeners
 // against the DOM that's present when <script type="module"> executes.
 import { copyWithFeedback } from './copy.js';
+import { bindMaskToggle } from './mask-toggle.js';
 
 const token = window.location.pathname.split('/').pop();
 const states = {
@@ -19,18 +20,10 @@ const errBox = document.getElementById('reveal-error');
 // Passphrase visibility toggle. The receiver types the passphrase in a
 // potentially-shared context (coffee shop, screen share, colleague nearby);
 // masking by default protects it while typing, and a show button is there
-// for when it's genuinely needed. Same pattern as sender/form.js + login.js.
-if (passphraseInput && passphraseToggle) {
-  passphraseToggle.addEventListener('click', () => {
-    const showing = passphraseInput.getAttribute('type') === 'text';
-    passphraseInput.setAttribute('type', showing ? 'password' : 'text');
-    passphraseToggle.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
-    passphraseToggle.setAttribute('aria-pressed', String(!showing));
-    // aria-label stays at its template-rendered (gettext) value; aria-pressed
-    // carries the state per the ARIA Authoring Practices toggle pattern, so
-    // screen readers don't need a label swap.
-  });
-}
+// for when it's genuinely needed. Same shape as sender/form.js + login.js;
+// aria-label stays at its template-rendered value (no aria{Show,Hide}Key
+// here -- aria-pressed carries the state).
+bindMaskToggle(passphraseInput, passphraseToggle);
 
 function show(name) {
   for (const [k, el] of Object.entries(states)) {

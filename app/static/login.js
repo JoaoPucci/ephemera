@@ -1,5 +1,6 @@
 // ES module. Top-level code runs once on import, against the DOM present
 // at the time the html file loads this via <script type="module">.
+import { bindMaskToggle } from './mask-toggle.js';
 
 const form = document.getElementById('login-form');
 const err = document.getElementById('login-error');
@@ -62,19 +63,11 @@ let backupMode = false;
 // Password visibility toggle. Strings go through window.i18n.t so the
 // click-flipped label matches the page locale -- the template renders
 // the initial "show" via gettext, then JS had been writing back English
-// on every click, which produced a surprising locale-flip. Both toggles
-// in this file have the same issue; same fix shape.
-const pwInput = document.getElementById('password');
-const pwToggle = document.getElementById('toggle-password');
-pwToggle.addEventListener('click', () => {
-  const showing = pwInput.getAttribute('type') === 'text';
-  pwInput.setAttribute('type', showing ? 'password' : 'text');
-  pwToggle.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
-  pwToggle.setAttribute('aria-pressed', String(!showing));
-  pwToggle.setAttribute(
-    'aria-label',
-    window.i18n.t(showing ? 'login.aria_show_password' : 'login.aria_hide_password')
-  );
+// on every click, which produced a surprising locale-flip. The recovery-
+// code toggle below uses the same helper with its own aria-label keys.
+bindMaskToggle(document.getElementById('password'), document.getElementById('toggle-password'), {
+  ariaShowKey: 'login.aria_show_password',
+  ariaHideKey: 'login.aria_hide_password',
 });
 
 function setMode(backup) {
@@ -126,21 +119,14 @@ function setMode(backup) {
 
 toggle.addEventListener('click', () => setMode(!backupMode));
 
-// Show/hide toggle for the recovery-code field. Only wired when the toggle
-// exists in the DOM (defensive -- the button is part of the current html
-// but if a future refactor removes it, the handler just silently no-ops).
-if (codeToggleBtn) {
-  codeToggleBtn.addEventListener('click', () => {
-    const showing = codeInput.getAttribute('type') === 'text';
-    codeInput.setAttribute('type', showing ? 'password' : 'text');
-    codeToggleBtn.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
-    codeToggleBtn.setAttribute('aria-pressed', String(!showing));
-    codeToggleBtn.setAttribute(
-      'aria-label',
-      window.i18n.t(showing ? 'login.aria_show_code' : 'login.aria_hide_code')
-    );
-  });
-}
+// Show/hide toggle for the recovery-code field. Same shape as the
+// password toggle above, with its own aria-label keys. bindMaskToggle
+// silently no-ops when the button isn't in the DOM, so the existence
+// guard sites used to write inline isn't needed here.
+bindMaskToggle(codeInput, codeToggleBtn, {
+  ariaShowKey: 'login.aria_show_code',
+  ariaHideKey: 'login.aria_hide_code',
+});
 
 const submitBtn = form.querySelector('button[type="submit"]');
 const submitLabel = submitBtn.textContent;

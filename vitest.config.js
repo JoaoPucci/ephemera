@@ -50,6 +50,12 @@ export default defineConfig({
           functions: 72,
           lines: 85,
         },
+        'app/static/mask-toggle.js': {
+          statements: 95,
+          branches: 95,
+          functions: 95,
+          lines: 95,
+        },
         'app/static/reveal.js': {
           statements: 96,
           branches: 87,

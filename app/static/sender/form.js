@@ -2,6 +2,7 @@
 // drop dropzone, create-another reset, and the status widget that polls
 // the just-created secret's status after a successful create.
 
+import { bindMaskToggle } from '../mask-toggle.js';
 import { renderTrackedList } from './tracked-list.js';
 import { cacheUrl } from './url-cache.js';
 
@@ -284,19 +285,11 @@ const passphraseHintEl = document.getElementById('passphrase-hint');
 if (ppInput && passphraseHintEl) {
   _bindPassphraseHint(ppInput, passphraseHintEl, MAX_PASSPHRASE, 0.9);
 }
-if (ppInput && ppToggle) {
-  ppToggle.addEventListener('click', () => {
-    const showing = ppInput.getAttribute('type') === 'text';
-    ppInput.setAttribute('type', showing ? 'password' : 'text');
-    // Read i18n keys from data-i18n-* on the button so the same handler shape
-    // can serve any toggle that opts in via attributes.
-    ppToggle.textContent = window.i18n.t(showing ? 'button.show' : 'button.hide');
-    ppToggle.setAttribute('aria-pressed', String(!showing));
-    // aria-label stays at its template-rendered (gettext) value; aria-pressed
-    // carries the state per the ARIA Authoring Practices toggle pattern, so
-    // screen readers don't need a label swap.
-  });
-}
+// aria-label stays at its template-rendered (gettext) value; aria-pressed
+// carries the state per the ARIA Authoring Practices toggle pattern, so
+// screen readers don't need a label swap. We omit the aria{Show,Hide}Key
+// options to bindMaskToggle to opt out of the aria-label flip.
+bindMaskToggle(ppInput, ppToggle);
 
 let activeTab = 'text';
 
