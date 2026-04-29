@@ -1,0 +1,12 @@
+<!--
+  PWA install icon — `any` purpose, dark-OS variant (light disc, dark
+  glyph). Mirror of icon-master-any-light.svg; see that file's header
+  for the design notes (composition, cap-height, optical centring,
+  Geist Regular refinement note).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="ephemera">
+  <circle cx="512" cy="512" r="512" fill="#fafafa"/>
+  <g transform="translate(268.0312 737.3286) scale(0.84712 -0.84712)">
+    <path d="M294 -12C411 -12 498 54 526 153L416 160C399 110 357 79 295 79C210 79 157 131 152 235H534V262C534 441 436 544 291 544C139 544 42 434 42 266C42 98 139 -12 294 -12ZM152 315C164 405 215 454 291 454C363 454 415 409 422 315Z" fill="#18181b"/>
+  </g>
+</svg>

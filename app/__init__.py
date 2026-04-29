@@ -13,6 +13,7 @@ the route + static mounts. Concerns broken out into siblings:
 """
 
 import asyncio
+import mimetypes
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -40,6 +41,12 @@ from .security_headers import (  # noqa: F401  (public re-export)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
+# StaticFiles delegates Content-Type lookup to Python's mimetypes module,
+# which doesn't know about .webmanifest by default and falls back to
+# application/octet-stream. Browsers reject manifests served under that
+# MIME, so register the spec'd type before the static mount is built.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # Single shared Jinja2 environment. The i18n extension enables {% trans %}
 # blocks (we use {{ _("...") }} instead, but the extension also tells the

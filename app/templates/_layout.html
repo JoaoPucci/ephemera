@@ -14,6 +14,31 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon-light.svg" media="(prefers-color-scheme: light)">
   <link rel="icon" type="image/svg+xml" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)">
   <link rel="mask-icon" href="/static/favicon-dark.svg" color="#18181b">
+  {# PWA install surface. Browsers consult the manifest for "Add to
+     Home Screen" and the install affordance; iOS Safari additionally
+     reads the apple-* metas and the apple-touch-icon (it does not
+     parse the manifest). theme-color paints the OS chrome strip
+     (Android's title bar, iOS's status bar) and is paired with a
+     media query so the value flips with the OS theme; the manifest
+     itself takes a single static value (#09090b, our brand chrome,
+     readable against both light and dark wallpapers). status-bar-
+     style=black-translucent + viewport-fit=cover above gives iOS a
+     transparent status bar with white glyphs that reads correctly
+     over the page background in either theme. apple-mobile-web-app-
+     title pins the home-screen label to "ephemera" -- without it
+     iOS uses the per-page <title> ("ephemera -- create secret"),
+     which truncates ugly under the icon. The install icon captured
+     by the launcher is the variant referenced here at install time
+     and does NOT reflow on a later OS-theme change (platform limit
+     on both iOS and Android), so we ship the dark-bg/light-glyph
+     variant as the captured-at-install primary. #}
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ephemera">
   {# Stylesheets load in cascade order: tokens (CSS-var definitions) ->
      base (resets, typography, utilities) -> forms (inputs + buttons) ->
      components (card, tabs, dropzone, url-box, tracked panel, status
