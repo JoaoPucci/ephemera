@@ -1,0 +1,24 @@
+<!--
+  PWA install icon — `any` purpose, light-OS variant (dark disc, light
+  glyph). Captured by Android launchers and used as the apple-touch-icon
+  source for iOS at install time.
+
+  Composition: full-bleed disc on a transparent square. Cap-height ~46%
+  of canvas (designer brief: rebalanced from the favicon's ~42% so the
+  glyph doesn't read as small in the larger install tile). Same Geist
+  Medium e-glyph path as the favicon, scaled and re-centred for the
+  1024-canvas. Optical centring: the favicon is already on the
+  geometric centre at 32px (the eye does optical correction at install
+  sizes anyway), so the larger render keeps the geometric placement.
+
+  Future refinement: if Geist Regular path data becomes available, the
+  glyph can be redrawn ~10% lighter (Geist Medium reads heavier at
+  512px than at 32px because anti-aliasing fattens strokes at small
+  sizes). Not blocking; the current weight is acceptable as v1.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="ephemera">
+  <circle cx="512" cy="512" r="512" fill="#18181b"/>
+  <g transform="translate(268.0312 737.3286) scale(0.84712 -0.84712)">
+    <path d="M294 -12C411 -12 498 54 526 153L416 160C399 110 357 79 295 79C210 79 157 131 152 235H534V262C534 441 436 544 291 544C139 544 42 434 42 266C42 98 139 -12 294 -12ZM152 315C164 405 215 454 291 454C363 454 415 409 422 315Z" fill="#fafafa"/>
+  </g>
+</svg>

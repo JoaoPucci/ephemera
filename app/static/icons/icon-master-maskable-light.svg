@@ -1,0 +1,19 @@
+<!--
+  PWA install icon — `maskable` purpose, light-OS variant. Android's
+  adaptive-icon system applies an OS-shaped mask (circle, squircle,
+  teardrop, etc.) to maskable icons at runtime, so the icon must keep
+  its meaningful content inside a centred safe zone of radius 40% of
+  the canvas (per W3C maskable spec) and fill the entire 1024x1024
+  canvas with background colour to avoid any cropped edge revealing
+  transparency.
+
+  Composition: full-bleed background rectangle, centred glyph at ~38%
+  cap-height (designer brief: smaller than the `any` variant so the
+  glyph stays well within the safe zone after any OS shape mask).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="ephemera">
+  <rect width="1024" height="1024" fill="#18181b"/>
+  <g transform="translate(310.5152 698.0860) scale(0.69964 -0.69964)">
+    <path d="M294 -12C411 -12 498 54 526 153L416 160C399 110 357 79 295 79C210 79 157 131 152 235H534V262C534 441 436 544 291 544C139 544 42 434 42 266C42 98 139 -12 294 -12ZM152 315C164 405 215 454 291 454C363 454 415 409 422 315Z" fill="#fafafa"/>
+  </g>
+</svg>
