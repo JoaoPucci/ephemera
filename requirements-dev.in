@@ -4,7 +4,10 @@
 # `-r requirements.in` pulls in every runtime dep so one install covers both.
 #
 # Regenerate the hashed requirements-dev.txt after editing:
-#     ./venv/bin/pip-compile --generate-hashes --resolver=backtracking requirements-dev.in
+#     ./venv/bin/pip-compile --allow-unsafe --generate-hashes --resolver=backtracking requirements-dev.in
+#
+# (See requirements.in for the explanation of --allow-unsafe; same
+# rationale applies here.)
 
 -r requirements.in
 
