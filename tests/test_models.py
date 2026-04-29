@@ -854,6 +854,142 @@ def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
+# v3 pre-flight violation guards: a v2 DB containing rows that would violate
+# the new CHECK constraints must be refused with a remediable SchemaVersionError
+# (column + count) rather than crash mid-swap. These are pre-flight aborts;
+# the table rebuild never runs, so post-test the DB is still at v2.
+# ---------------------------------------------------------------------------
+
+
+def _run_init_db_against(db, monkeypatch):
+    """Boilerplate-cutter for the v3 violation tests below: point settings at
+    the supplied path and call init_db, returning whatever it raises (or None
+    on success)."""
+    from app import config
+
+    monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
+    monkeypatch.setenv("EPHEMERA_SECRET_KEY", "test-secret-key-abcdef0123456789")
+    config.get_settings.cache_clear()
+    try:
+        models.init_db()
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_v3_migration_aborts_when_passphrase_exceeds_check_limit(tmp_path, monkeypatch):
+    db = tmp_path / "v2_passphrase.db"
+    _seed_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) "
+            "VALUES ('u1', 'h', 's', 'now', 'now')"
+        )
+        # 81-char passphrase: just over the new <=80 cap.
+        conn.execute(
+            "INSERT INTO secrets (id, user_id, token, content_type, "
+            "passphrase, created_at, expires_at) "
+            "VALUES ('s1', 1, 't1', 'text', ?, 'now', 'later')",
+            ("p" * 81,),
+        )
+
+    from app.models._core import SchemaVersionError
+
+    with pytest.raises(SchemaVersionError) as exc:
+        _run_init_db_against(db, monkeypatch)
+    msg = str(exc.value)
+    assert "secrets.passphrase" in msg
+    assert "1 row(s) exceed 80 chars" in msg
+
+
+def test_v3_migration_aborts_when_label_exceeds_check_limit(tmp_path, monkeypatch):
+    db = tmp_path / "v2_label.db"
+    _seed_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) "
+            "VALUES ('u1', 'h', 's', 'now', 'now')"
+        )
+        # 61-char label: just over the new <=60 cap.
+        conn.execute(
+            "INSERT INTO secrets (id, user_id, token, content_type, "
+            "label, created_at, expires_at) "
+            "VALUES ('s1', 1, 't1', 'text', ?, 'now', 'later')",
+            ("L" * 61,),
+        )
+
+    from app.models._core import SchemaVersionError
+
+    with pytest.raises(SchemaVersionError) as exc:
+        _run_init_db_against(db, monkeypatch)
+    msg = str(exc.value)
+    assert "secrets.label" in msg
+    assert "1 row(s) exceed 60 chars" in msg
+
+
+def test_v3_migration_aborts_when_username_exceeds_check_limit(tmp_path, monkeypatch):
+    db = tmp_path / "v2_username.db"
+    _seed_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        # 257-char username: just over the new <=256 cap.
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) "
+            "VALUES (?, 'h', 's', 'now', 'now')",
+            ("u" * 257,),
+        )
+
+    from app.models._core import SchemaVersionError
+
+    with pytest.raises(SchemaVersionError) as exc:
+        _run_init_db_against(db, monkeypatch)
+    msg = str(exc.value)
+    assert "users.username" in msg
+    assert "1 row(s) exceed 256 chars" in msg
+
+
+def test_v3_migration_aborts_with_all_violations_in_one_message(tmp_path, monkeypatch):
+    """Multiple violations across columns are all reported together so an
+    operator can fix them in one pass instead of replaying init_db three times."""
+    db = tmp_path / "v2_all.db"
+    _seed_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, totp_secret, "
+            "created_at, updated_at) VALUES (?, 'h', 's', 'now', 'now')",
+            ("u" * 257,),
+        )
+        conn.execute(
+            "INSERT INTO secrets (id, user_id, token, content_type, "
+            "passphrase, label, created_at, expires_at) "
+            "VALUES ('s1', 1, 't1', 'text', ?, ?, 'now', 'later')",
+            ("p" * 81, "L" * 61),
+        )
+
+    from app.models._core import SchemaVersionError
+
+    with pytest.raises(SchemaVersionError) as exc:
+        _run_init_db_against(db, monkeypatch)
+    msg = str(exc.value)
+    assert "secrets.passphrase" in msg
+    assert "secrets.label" in msg
+    assert "users.username" in msg
+
+
+# Two more defensive branches in v3 (sqlite_sequence-table-absent fallback +
+# the post-swap UPDATE-then-INSERT fallback) are pragma'd in v3.py rather
+# than tested here. Driving them requires either constructing a v0 legacy
+# DB without AUTOINCREMENT anywhere (SQLite refuses to DROP sqlite_sequence,
+# so it has to be never-created in the fixture) or relying on undocumented
+# swap-time sqlite_sequence semantics that vary across SQLite versions. The
+# behaviour they protect (AUTOINCREMENT no-reuse guarantee preservation) is
+# already pinned at the test level by
+# test_v3_migration_preserves_users_autoincrement_no_reuse, which exercises
+# the common path with the same end-state assertion.
+
+
+# ---------------------------------------------------------------------------
 # Schema v4 -- analytics_events table
 # ---------------------------------------------------------------------------
 
