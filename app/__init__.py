@@ -46,23 +46,27 @@ def _build_pwa_manifest(settings) -> dict:
     """PWA manifest, with deployment-label-aware name and icon list.
 
     Empty `deployment_label` is the prod posture: name="ephemera" and
-    icons lists both colourways with the visually-dark variant first
-    (browsers capture the first matching size at install, so prod
-    home-screen tiles are dark-bg/light-glyph). Any non-empty label
-    suffixes the name ("ephemera-{label}") and lists only the
-    visually-light icon variants, so a dev / staging install on the
-    same phone is at-a-glance distinguishable from prod.
+    a visually-light tile (light-bg / dark-glyph). Any non-empty label
+    suffixes the name ("ephemera-{label}") and flips the tile to
+    visually-dark (dark-bg / light-glyph) so a dev / staging install
+    on the same phone is at-a-glance distinguishable from prod.
 
     File-naming reminder: in app/static/icons/ the suffixes describe
     the OS theme the variant is *for*, not how the variant looks.
-    `icon-*-light-*` is the dark-bg/light-glyph asset (used in a
+    `icon-*-light-*` is the dark-bg/light-glyph asset (intended for a
     light OS); `icon-*-dark-*` is the light-bg/dark-glyph asset
-    (used in a dark OS). Listing the "dark"-suffixed assets
-    therefore yields a visually-light tile.
+    (intended for a dark OS). Each posture pins ONE colourway so the
+    captured tile is consistent across OS themes -- the captured icon
+    doesn't auto-flip with the OS later, so listing both colourways
+    would leave install-time visual identity up to the browser's
+    chosen heuristic, which is exactly what we don't want for
+    distinguishability between dev and prod.
     """
     suffix = f"-{settings.deployment_label}" if settings.deployment_label else ""
     name = f"ephemera{suffix}"
-    variants = ("dark",) if settings.deployment_label else ("light", "dark")
+    # dev (any label) -> visually-dark tile via icon-*-light-* assets;
+    # prod (no label) -> visually-light tile via icon-*-dark-* assets.
+    variants = ("light",) if settings.deployment_label else ("dark",)
     icons = [
         {
             "src": f"/static/icons/icon-{purpose}-{variant}-{size}.png",

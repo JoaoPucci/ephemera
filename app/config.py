@@ -87,13 +87,13 @@ class Settings(BaseSettings):
     # to pick the apple-touch-icon when an operator runs more than one
     # ephemera instance (typical: a dev / staging box alongside prod).
     # Empty (default) is the prod posture: name="ephemera" and the
-    # dark-bg/light-glyph apple-touch-icon. Any non-empty value
-    # ("dev", "staging") flips both: name becomes "ephemera-{label}"
-    # and the apple-touch-icon switches to the visually-light variant
-    # so the two installs are at-a-glance distinguishable on the home
-    # screen. Captured icons don't auto-refresh from the manifest, so
-    # this only takes effect on a fresh install (or remove-and-re-add
-    # of the home-screen entry).
+    # visually-light apple-touch-icon (light bg, dark glyph). Any non-
+    # empty value ("dev", "staging") flips both: name becomes
+    # "ephemera-{label}" and the apple-touch-icon switches to the
+    # visually-dark variant (dark bg, light glyph) so the two installs
+    # are at-a-glance distinguishable on the home screen. Captured icons
+    # don't auto-refresh from the manifest, so this only takes effect on
+    # a fresh install (or remove-and-re-add of the home-screen entry).
     deployment_label: str = Field(default="")
 
     @property

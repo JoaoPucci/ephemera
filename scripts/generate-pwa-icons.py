@@ -14,12 +14,13 @@ Inputs (in app/static/icons/):
 Outputs (in app/static/icons/):
   icon-{purpose}-{theme}-{192,512}.png  manifest icon entries
   apple-touch-icon.png                  iOS Add-to-Home-Screen, prod
-                                        posture: 180px any-light master
-                                        (dark-bg/light-glyph -- stands
-                                        out on busy wallpapers).
-  apple-touch-icon-light.png            iOS Add-to-Home-Screen, non-prod
                                         posture: 180px any-DARK master
-                                        (light-bg/dark-glyph -- visually
+                                        (light-bg/dark-glyph -- the
+                                        default tile new operators see
+                                        on first install).
+  apple-touch-icon-dev.png              iOS Add-to-Home-Screen, non-prod
+                                        posture: 180px any-LIGHT master
+                                        (dark-bg/light-glyph -- visually
                                         the inverse of the prod tile so
                                         a dev / staging install on the
                                         same phone is at-a-glance
@@ -52,13 +53,14 @@ MASTERS = [
 ]
 MANIFEST_SIZES = (192, 512)
 APPLE_TOUCH_SIZE = 180
-# Two apple-touch-icons: prod ships the visually-dark master (any-light
-# in our naming -- "light" describes the OS theme it serves, not the
-# tile's appearance), non-prod ships the visually-light inverse so the
+# Two apple-touch-icons: prod (the default at the bare filename iOS
+# auto-discovers) ships the visually-light master (any-dark in our file
+# naming -- "dark" describes the OS theme it serves, not the tile's
+# appearance), non-prod / dev ships the visually-dark inverse so the
 # two installs are at-a-glance different on the home screen.
 APPLE_TOUCH_OUTPUTS = {
-    "apple-touch-icon.png": "icon-master-any-light.svg",
-    "apple-touch-icon-light.png": "icon-master-any-dark.svg",
+    "apple-touch-icon.png": "icon-master-any-dark.svg",
+    "apple-touch-icon-dev.png": "icon-master-any-light.svg",
 }
 
 

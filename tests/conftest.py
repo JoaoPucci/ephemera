@@ -24,6 +24,12 @@ def tmp_db_path(tmp_path, monkeypatch):
     # TestClient requests are http://; the Secure flag would prevent the
     # session cookie from round-tripping. Production default is True.
     monkeypatch.setenv("EPHEMERA_SESSION_COOKIE_SECURE", "false")
+    # Explicitly pin the prod posture so tests on a dev box that has
+    # EPHEMERA_DEPLOYMENT_LABEL set in its .env (the typical dev-vs-prod
+    # distinguishability case the setting exists for) don't flip the
+    # default-posture assertions in tests/test_pwa.py. Tests that need
+    # the dev posture override this via their own fixture.
+    monkeypatch.setenv("EPHEMERA_DEPLOYMENT_LABEL", "")
 
     from app import config
 

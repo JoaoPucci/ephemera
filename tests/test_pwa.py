@@ -34,12 +34,13 @@ in PR-thread; implementation contract:
     /static/icons/ at 200, served as image/png.
 
   - When EPHEMERA_DEPLOYMENT_LABEL is set, the manifest's name +
-    short_name become "ephemera-{label}", the icon list narrows to the
-    visually-light variants (icon-*-dark-* in our file naming, where
-    "dark" describes the OS theme the asset serves, not the tile's
+    short_name become "ephemera-{label}", the icon list pins the
+    visually-DARK variants (icon-*-light-* in our file naming, where
+    "light" describes the OS theme the asset serves, not the tile's
     appearance), and the apple-touch-icon link in the head points at
-    apple-touch-icon-light.png. This makes a non-prod install
-    at-a-glance distinguishable from prod on the same home screen.
+    apple-touch-icon-dev.png. This makes a non-prod install
+    at-a-glance distinguishable from prod (which always renders the
+    visually-light tile) on the same home screen.
 """
 
 import json
@@ -141,19 +142,20 @@ def test_manifest_icons_include_192_and_512(client):
     assert "512x512" in sizes, "manifest must declare a 512x512 icon"
 
 
-def test_manifest_default_lists_both_colourways(client):
-    # Prod posture: list both visually-dark (icon-*-light-*, the
-    # primary at install) and visually-light (icon-*-dark-*) variants
-    # so prefers-color-scheme-aware browsers can pick. Non-prod
-    # narrows this to the visually-light variants only -- that's
-    # exercised separately in test_dev_label.
+def test_manifest_default_lists_only_visually_light_icons(client):
+    # Prod posture pins ONE colourway -- the visually-light variant
+    # (icon-*-dark-* in our file naming) -- so the captured-at-install
+    # tile is consistent across OS themes. Listing both would leave
+    # install-time identity up to the browser and break the
+    # distinguishability invariant against the dev posture.
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     srcs = {icon["src"] for icon in data["icons"]}
-    light_named = {s for s in srcs if "-light-" in s}
-    dark_named = {s for s in srcs if "-dark-" in s}
-    assert light_named, "prod manifest must list visually-dark (icon-*-light-*) icons"
-    assert dark_named, "prod manifest must list visually-light (icon-*-dark-*) icons"
+    assert srcs, "prod manifest must list at least one icon"
+    assert all("-dark-" in s for s in srcs), (
+        f"prod manifest must list only visually-light (icon-*-dark-*) icons; "
+        f"found visually-dark entries: {sorted(s for s in srcs if '-light-' in s)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -185,10 +187,11 @@ def test_head_links_apple_touch_icon(client):
     )
 
 
-def test_head_default_apple_touch_icon_is_dark_variant(client):
-    # Prod posture: dark-bg/light-glyph apple-touch-icon (filename
-    # apple-touch-icon.png, no -light suffix). The -light variant is
-    # only wired when EPHEMERA_DEPLOYMENT_LABEL is set.
+def test_head_default_apple_touch_icon_is_visually_light(client):
+    # Prod posture: visually-light apple-touch-icon (light-bg/dark-glyph)
+    # at the bare-filename apple-touch-icon.png that iOS auto-discovers
+    # as a fallback. The -dev variant (visually dark) is only wired
+    # when EPHEMERA_DEPLOYMENT_LABEL is set.
     html = client.get("/send").text
     assert (
         '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">'
@@ -230,13 +233,13 @@ def test_apple_touch_icon_is_reachable(client):
     )
 
 
-def test_apple_touch_icon_light_variant_is_reachable(client):
+def test_apple_touch_icon_dev_variant_is_reachable(client):
     # Used when EPHEMERA_DEPLOYMENT_LABEL is set; must exist on disk
     # regardless of which posture the test instance is running in,
     # because the static mount is shared across all environments.
-    r = client.get("/static/icons/apple-touch-icon-light.png")
+    r = client.get("/static/icons/apple-touch-icon-dev.png")
     assert r.status_code == 200, (
-        "apple-touch-icon-light.png missing -- regenerate via "
+        "apple-touch-icon-dev.png missing -- regenerate via "
         "scripts/generate-pwa-icons.py"
     )
     assert r.headers.get("content-type", "").startswith("image/png")
@@ -265,10 +268,10 @@ def test_manifest_icon_targets_resolve(client):
 # both pivot:
 #   - name + short_name suffix with "-{label}" so a dev install on the
 #     same phone as prod doesn't collide on the home screen.
-#   - manifest icon list narrows to the visually-light variants
-#     (icon-*-dark-*), so the captured-at-install tile is the inverse
-#     of prod's dark-bg/light-glyph.
-#   - apple-touch-icon link points at apple-touch-icon-light.png (iOS
+#   - manifest icon list pins the visually-DARK variants (icon-*-light-*)
+#     so the captured-at-install tile is the inverse of prod's visually-
+#     light tile.
+#   - apple-touch-icon link points at apple-touch-icon-dev.png (iOS
 #     doesn't read the manifest, so this needs its own switch).
 #   - apple-mobile-web-app-title meta carries the suffixed name so the
 #     iOS home-screen label matches the manifest.
@@ -311,19 +314,19 @@ def test_dev_manifest_name_is_suffixed(dev_label_client):
     assert data["short_name"] == "ephemera-dev"
 
 
-def test_dev_manifest_lists_only_visually_light_icons(dev_label_client):
-    # In our naming, icon-*-dark-* is the light-bg/dark-glyph asset
-    # (used when the OS is in dark mode -- visually a light tile). The
-    # dev manifest must list ONLY these so a fresh install on a dev
-    # box captures the visually-light tile, regardless of which
-    # variant the browser would prefer at install time.
+def test_dev_manifest_lists_only_visually_dark_icons(dev_label_client):
+    # In our naming, icon-*-light-* is the dark-bg/light-glyph asset
+    # (intended for a light OS -- visually a dark tile). The dev
+    # manifest pins ONLY these so a fresh install on a dev box
+    # captures the visually-dark tile, contrasting with prod's
+    # visually-light pin.
     r = dev_label_client.get(MANIFEST_URL)
     data = json.loads(r.text)
     srcs = {icon["src"] for icon in data["icons"]}
     assert srcs, "dev manifest must still list at least one icon"
-    assert all("-dark-" in s for s in srcs), (
-        f"dev manifest must list only visually-light (icon-*-dark-*) icons; "
-        f"found visually-dark entries: {sorted(s for s in srcs if '-light-' in s)}"
+    assert all("-light-" in s for s in srcs), (
+        f"dev manifest must list only visually-dark (icon-*-light-*) icons; "
+        f"found visually-light entries: {sorted(s for s in srcs if '-dark-' in s)}"
     )
 
 
@@ -337,12 +340,12 @@ def test_dev_manifest_keeps_stable_id_and_start_url(dev_label_client):
     assert data["start_url"] == "/send?source=pwa"
 
 
-def test_dev_head_apple_touch_icon_uses_light_variant(dev_label_client):
+def test_dev_head_apple_touch_icon_uses_dev_variant(dev_label_client):
     html = dev_label_client.get("/send").text
     assert (
         '<link rel="apple-touch-icon" '
-        'href="/static/icons/apple-touch-icon-light.png">' in html
-    ), "dev head must point apple-touch-icon at the visually-light variant"
+        'href="/static/icons/apple-touch-icon-dev.png">' in html
+    ), "dev head must point apple-touch-icon at the visually-dark variant"
 
 
 def test_dev_head_apple_mobile_web_app_title_is_suffixed(dev_label_client):

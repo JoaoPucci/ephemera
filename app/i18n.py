@@ -381,8 +381,8 @@ def template_context(request: Request) -> dict:
     locale = getattr(request.state, "locale", DEFAULT)
     settings = get_settings()
     # PWA install surface, deployment-label aware. Empty label is the prod
-    # posture (name="ephemera", dark-bg/light-glyph apple-touch-icon); any
-    # non-empty value suffixes the name and switches to the visually-light
+    # posture (name="ephemera", visually-light apple-touch-icon); any
+    # non-empty value suffixes the name and switches to the visually-dark
     # apple-touch-icon so a dev / staging home-screen entry is at-a-glance
     # distinguishable from prod. The manifest itself (served at
     # /manifest.webmanifest) reads the same setting and rewrites its
@@ -393,7 +393,7 @@ def template_context(request: Request) -> dict:
         else "ephemera"
     )
     pwa_apple_touch_icon = (
-        "/static/icons/apple-touch-icon-light.png"
+        "/static/icons/apple-touch-icon-dev.png"
         if settings.deployment_label
         else "/static/icons/apple-touch-icon.png"
     )
