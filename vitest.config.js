@@ -74,11 +74,33 @@ export default defineConfig({
           functions: 78,
           lines: 87,
         },
+        'app/static/sender/dropzone.js': {
+          statements: 95,
+          branches: 95,
+          functions: 95,
+          lines: 95,
+        },
         'app/static/sender/form.js': {
+          // Bumped after the hints / dropzone / status-poll extraction
+          // shrank this file. The form.js that's left is the page-level
+          // orchestration; the lines that stayed are well-exercised by
+          // tests-js/sender.test.js.
+          statements: 86,
+          branches: 65,
+          functions: 85,
+          lines: 88,
+        },
+        'app/static/sender/hints.js': {
+          statements: 91,
+          branches: 78,
+          functions: 95,
+          lines: 92,
+        },
+        'app/static/sender/status-poll.js': {
           statements: 80,
-          branches: 64,
-          functions: 67,
-          lines: 81,
+          branches: 58,
+          functions: 95,
+          lines: 83,
         },
         'app/static/sender/tracked-list.js': {
           statements: 83,

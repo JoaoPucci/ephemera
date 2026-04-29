@@ -1,8 +1,20 @@
-// Compose form: submit handler (text + image paths), tab toggle, drag-and-
-// drop dropzone, create-another reset, and the status widget that polls
-// the just-created secret's status after a successful create.
+// Compose-form orchestration: submit, tab toggle, "create another" reset,
+// and the wire-up that hands the input fields off to per-concern modules.
+//
+// Concerns broken out into siblings under sender/:
+//   hints.js        -- counter / paste-warning / ceiling-reached hints
+//   dropzone.js     -- click + drag-and-drop wiring for the Image tab
+//   status-poll.js  -- live status pill for the just-created secret
+//
+// The remaining job of this file is the page-level orchestration that
+// ties all of those together: read /api/me to learn the analytics
+// opt-in state, gate near_cap telemetry on it, run the submit pipeline
+// (text vs image), and rebuild the form on "create another."
 
 import { bindMaskToggle } from '../mask-toggle.js';
+import { bindDropzone } from './dropzone.js';
+import { bindCounterHint, bindPassphraseHint } from './hints.js';
+import { startStatusPoll, stopStatusPoll } from './status-poll.js';
 import { renderTrackedList } from './tracked-list.js';
 import { cacheUrl } from './url-cache.js';
 
@@ -21,34 +33,26 @@ const preview = document.getElementById('preview');
 const fileName = document.getElementById('file-name');
 const clearFile = document.getElementById('clear-file');
 
-// ---------- char-limit hints (counter, paste-warning, ceiling-reached) ----------
+// ---------- char-limit hint constants ----------
 //
-// Three discrete states share a single hint slot per field. State precedence:
-//
-//   paste-trim  > ceiling-reached  > approaching  > idle
-//
-// `paste-trim` and (for the textarea) `paste-large` are set by the paste
-// handler and rendered on the paste-induced input event (e.inputType
-// === 'insertFromPaste'). Subsequent typing reverts to the regular
-// counter-vs-ceiling computation.
-//
-// Telemetry: we track the largest pre-truncation content size in the
-// compose session and submit it as `intended_content_size_bytes` when
-// it crosses 95% of the cap. Backend writes a `content.limit_hit`
-// analytics event with that size + `was_paste` flag.
+// MAX_CONTENT also drives the telemetry threshold below; the others
+// are passed straight through to bindCounterHint / bindPassphraseHint.
 
 const MAX_CONTENT = 100_000;
 const MAX_LABEL = 60;
 const MAX_PASSPHRASE = 200;
 const PASTE_LARGE_THRESHOLD = 10_000; // soft warning for >10KB chunk
 
-// Telemetry session state. We track only "did the user cross the 95%
-// threshold during this compose session" -- a single sticky bit, not a
-// size. The signal that's hard to recover server-side is the
-// threshold-crossing itself: an over-cap paste (200K -> truncated to
-// 100K) and an edit-down (typed 100K -> deleted to 50K) both leave the
-// final content much smaller than the user's intent. The flag closes
-// that gap; the backend gets nothing else.
+// ---------- cap-proximity telemetry state ----------
+//
+// We track only "did the user cross the 95% threshold during this
+// compose session" -- a single sticky bit, not a size. The signal that's
+// hard to recover server-side is the threshold-crossing itself: an
+// over-cap paste (200K -> truncated to 100K) and an edit-down (typed
+// 100K -> deleted to 50K) both leave the final content much smaller
+// than the user's intent. The flag closes that gap; the backend gets
+// nothing else.
+
 let intendedContentSize = 0; // chars, drives counter UX + threshold gate
 let nearCapHit = false; // sticky session bit reported as `near_cap` on submit
 const TELEMETRY_THRESHOLD = MAX_CONTENT * 0.95;
@@ -79,176 +83,12 @@ window.addEventListener('ephemera:me-updated', (e) => {
   analyticsOptIn = next;
 });
 
-function _formatNumber(n) {
-  return n.toLocaleString(window.i18n.currentLocale);
-}
-
-function _formatBytes(n) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${_formatNumber(Math.round(n / 1024))} KB`;
-  return `${_formatNumber(Math.round((n / 1024 / 1024) * 10) / 10)} MB`;
-}
-
-function _setHint(hintEl, content, modifier) {
-  // modifier: 'warning' | 'error' | null. content === null hides the hint.
-  if (content === null) {
-    hintEl.hidden = true;
-    hintEl.textContent = '';
-    hintEl.classList.remove('is-warning', 'is-error');
-    return;
-  }
-  hintEl.hidden = false;
-  hintEl.textContent = content;
-  hintEl.classList.toggle('is-warning', modifier === 'warning');
-  hintEl.classList.toggle('is-error', modifier === 'error');
-}
-
-// Wires a counter / paste-warning / ceiling-reached hint to a textarea or
-// input with maxlength. opts:
-//   counterAt       fraction of max to start showing the counter (default 0.75)
-//   warningAt       fraction at which to add .is-warning (default 0.95)
-//   pasteLargeThreshold     paste size that triggers the paste-large warning
-//                           (Infinity by default = never; the textarea opts in)
-//   useShortTrimMessage     true on the label field (omits the "(was X)"
-//                           parenthetical from the trim message; the field is
-//                           short enough that the original size is implicit)
-//   onIntendedSize(sizeChars)
-//                           telemetry callback, fired on every intended-size
-//                           observation (post-paste OR per keystroke). The
-//                           caller decides what to do with it (typically:
-//                           flip a sticky "near cap was crossed" bit).
-function _bindCounterHint(input, hintEl, max, opts = {}) {
-  const counterAt = (opts.counterAt ?? 0.75) * max;
-  const warningAt = (opts.warningAt ?? 0.95) * max;
-  const pasteLargeThreshold = opts.pasteLargeThreshold ?? Number.POSITIVE_INFINITY;
-  const useShortTrim = !!opts.useShortTrimMessage;
-  // Static text rendered into the slot from the template (e.g. label's
-  // "Up to 60 characters. Shown only to you."). Captured once on init so
-  // the idle state can restore it.
-  const idleText = hintEl.textContent.trim() || null;
-
-  let pasteOverrideMessage = null;
-  let pasteOverrideModifier = null;
-
-  function _showIdle() {
-    if (idleText !== null) _setHint(hintEl, idleText, null);
-    else _setHint(hintEl, null, null);
-  }
-
-  _showIdle();
-
-  input.addEventListener('paste', (e) => {
-    const pasted = e.clipboardData?.getData('text') ?? '';
-    const selStart = input.selectionStart ?? 0;
-    const selEnd = input.selectionEnd ?? 0;
-    const currentLen = input.value.length;
-    const intendedAfter = currentLen - (selEnd - selStart) + pasted.length;
-
-    if (intendedAfter > max) {
-      // Browser will silently truncate at maxlength. Show paste-trim error.
-      pasteOverrideMessage = useShortTrim
-        ? window.i18n.t('hint.label_trimmed', { max: _formatNumber(max) })
-        : window.i18n.t('hint.paste_trimmed', {
-            max: _formatNumber(max),
-            original: _formatNumber(intendedAfter),
-          });
-      pasteOverrideModifier = 'error';
-      if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
-    } else if (pasteLargeThreshold !== Number.POSITIVE_INFINITY) {
-      // Threshold is UTF-8 bytes ("10KB chunk"); JS .length is UTF-16
-      // code units, which diverges 2-4x from byte length for CJK/emoji.
-      // Encode for an accurate byte count -- a 4K-character BMP CJK
-      // paste is 4K code units but ~12K UTF-8 bytes and should trip
-      // this. Skipped for fields that opt out (Infinity sentinel) so
-      // we don't allocate a TextEncoder for label/passphrase pastes
-      // that never use this branch.
-      const pastedBytes = new TextEncoder().encode(pasted).length;
-      if (pastedBytes >= pasteLargeThreshold) {
-        pasteOverrideMessage = window.i18n.t('hint.content_paste_large', {
-          size: _formatBytes(pastedBytes),
-        });
-        pasteOverrideModifier = 'warning';
-        if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
-      } else {
-        pasteOverrideMessage = null;
-      }
-    } else {
-      pasteOverrideMessage = null;
-    }
-  });
-
-  input.addEventListener('input', (e) => {
-    if (pasteOverrideMessage !== null && e.inputType === 'insertFromPaste') {
-      _setHint(hintEl, pasteOverrideMessage, pasteOverrideModifier);
-      pasteOverrideMessage = null;
-      return;
-    }
-    pasteOverrideMessage = null;
-
-    const len = input.value.length;
-    if (opts.onIntendedSize && len > 0) opts.onIntendedSize(len);
-
-    if (len >= max) {
-      // Frozen counter at ceiling. The frozen-ness IS the signal.
-      _setHint(
-        hintEl,
-        window.i18n.t('hint.counter', {
-          used: _formatNumber(len),
-          max: _formatNumber(max),
-        }),
-        'error'
-      );
-    } else if (len >= warningAt) {
-      _setHint(
-        hintEl,
-        window.i18n.t('hint.counter', {
-          used: _formatNumber(len),
-          max: _formatNumber(max),
-        }),
-        'warning'
-      );
-    } else if (len >= counterAt) {
-      _setHint(
-        hintEl,
-        window.i18n.t('hint.counter', {
-          used: _formatNumber(len),
-          max: _formatNumber(max),
-        }),
-        null
-      );
-    } else {
-      _showIdle();
-    }
-  });
-}
-
-// Passphrase-style hint: a one-line "approaching maximum" warning at
-// ~90% of the cap, swapping to "maximum reached" once the input is at
-// the cap. No counter and no error escalation -- the 200-char cap is a
-// deliberate ceiling on a deliberate input; at-limit gets a factual
-// status (the prior "approaching" wording stayed on past the cap, which
-// was literally inaccurate once the textarea's maxlength blocked
-// further keystrokes), but it doesn't deserve a red error flip.
-function _bindPassphraseHint(input, hintEl, max, threshold = 0.9) {
-  const warnAt = threshold * max;
-  input.addEventListener('input', () => {
-    const len = input.value.length;
-    if (len >= max) {
-      _setHint(hintEl, window.i18n.t('hint.max_reached'), 'warning');
-    } else if (len >= warnAt) {
-      _setHint(hintEl, window.i18n.t('hint.passphrase_approaching'), 'warning');
-    } else {
-      _setHint(hintEl, null, null);
-    }
-  });
-}
-
 // ---------- wire up the hints ----------
 
 const contentInput = document.getElementById('content');
 const contentHint = document.getElementById('content-hint');
 if (contentInput && contentHint) {
-  _bindCounterHint(contentInput, contentHint, MAX_CONTENT, {
+  bindCounterHint(contentInput, contentHint, MAX_CONTENT, {
     counterAt: 0.75,
     warningAt: 0.95,
     pasteLargeThreshold: PASTE_LARGE_THRESHOLD,
@@ -266,7 +106,7 @@ if (contentInput && contentHint) {
 const labelInput = document.getElementById('label');
 const labelHint = document.getElementById('label-hint');
 if (labelInput && labelHint) {
-  _bindCounterHint(labelInput, labelHint, MAX_LABEL, {
+  bindCounterHint(labelInput, labelHint, MAX_LABEL, {
     counterAt: 0.75,
     warningAt: 1.0, // label has no warning band; counter -> error at ceiling
     useShortTrimMessage: true,
@@ -274,22 +114,25 @@ if (labelInput && labelHint) {
 }
 
 // ---------- passphrase (visibility toggle + approaching-max hint) ----------
+//
+// Passphrase visibility toggle (same pattern as login.js). The passphrase
+// is sender-entered and communicated out-of-band, so masking protects
+// against shoulder-surfing during composition; a show button is available
+// for when the sender genuinely needs to read back what they typed.
 
-// Passphrase visibility toggle (same pattern as login.js). The passphrase is
-// sender-entered and communicated out-of-band, so masking protects against
-// shoulder-surfing during composition; a show button is available for when
-// the sender genuinely needs to read back what they typed.
 const ppInput = document.getElementById('passphrase');
 const ppToggle = document.getElementById('toggle-passphrase');
 const passphraseHintEl = document.getElementById('passphrase-hint');
 if (ppInput && passphraseHintEl) {
-  _bindPassphraseHint(ppInput, passphraseHintEl, MAX_PASSPHRASE, 0.9);
+  bindPassphraseHint(ppInput, passphraseHintEl, MAX_PASSPHRASE, 0.9);
 }
 // aria-label stays at its template-rendered (gettext) value; aria-pressed
 // carries the state per the ARIA Authoring Practices toggle pattern, so
 // screen readers don't need a label swap. We omit the aria{Show,Hide}Key
 // options to bindMaskToggle to opt out of the aria-label flip.
 bindMaskToggle(ppInput, ppToggle);
+
+// ---------- tab toggle ----------
 
 let activeTab = 'text';
 
@@ -309,42 +152,7 @@ for (const t of tabs) {
 
 // ---------- dropzone ----------
 
-dropzone.addEventListener('click', () => fileInput.click());
-dropzone.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    fileInput.click();
-  }
-});
-dropzone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropzone.classList.add('drag');
-});
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
-dropzone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropzone.classList.remove('drag');
-  if (e.dataTransfer.files.length) {
-    fileInput.files = e.dataTransfer.files;
-    showPreview();
-  }
-});
-fileInput.addEventListener('change', showPreview);
-clearFile.addEventListener('click', (e) => {
-  e.stopPropagation();
-  fileInput.value = '';
-  preview.hidden = true;
-});
-
-function showPreview() {
-  if (fileInput.files.length) {
-    const f = fileInput.files[0];
-    fileName.textContent = `${f.name} (${Math.round(f.size / 1024)} KB)`;
-    preview.hidden = false;
-  } else {
-    preview.hidden = true;
-  }
-}
+bindDropzone({ dropzone, fileInput, preview, fileName, clearFile });
 
 // ---------- submit ----------
 
@@ -447,9 +255,7 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- status widget (polls /api/secrets/{id}/status after create) ----------
-
-let statusPoll = null;
+// ---------- result screen + status widget ----------
 
 function showResult({ url, id, expires_at }, passphrase) {
   compose.hidden = true;
@@ -486,7 +292,7 @@ function showResult({ url, id, expires_at }, passphrase) {
   if (track) {
     // The server is already authoritative — creation wrote track=1 + label.
     widget.hidden = false;
-    startPolling(id);
+    startStatusPoll(id);
     renderTrackedList();
   } else {
     widget.hidden = true;
@@ -494,61 +300,10 @@ function showResult({ url, id, expires_at }, passphrase) {
   result.hidden = false;
 }
 
-function stopPolling() {
-  if (statusPoll) {
-    clearInterval(statusPoll);
-    statusPoll = null;
-  }
-}
-
-async function fetchStatus(id) {
-  try {
-    const res = await fetch(`/api/secrets/${encodeURIComponent(id)}/status`);
-    if (res.status === 404) return { status: 'gone' };
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-function paintStatus(valueEl, detailEl, data) {
-  const statuses = ['pending', 'viewed', 'burned', 'expired', 'gone'];
-  for (const s of statuses) {
-    valueEl.classList.remove(s);
-  }
-  const s = data?.status || 'pending';
-  valueEl.classList.add(s);
-  valueEl.textContent = window.i18n.t(`status.${s}`);
-  if (data?.viewed_at) {
-    detailEl.textContent =
-      window.i18n.t('sender.viewed_at_prefix') +
-      new Date(data.viewed_at).toLocaleString(window.i18n.currentLocale);
-  } else {
-    detailEl.textContent = '';
-  }
-}
-
-async function startPolling(id) {
-  stopPolling();
-  const valueEl = document.getElementById('status-value');
-  const detailEl = document.getElementById('status-detail');
-  const tick = async () => {
-    const data = await fetchStatus(id);
-    paintStatus(valueEl, detailEl, data);
-    if (data && (data.status === 'viewed' || data.status === 'burned' || data.status === 'gone')) {
-      stopPolling();
-      renderTrackedList();
-    }
-  };
-  await tick();
-  statusPoll = setInterval(tick, 5000);
-}
-
 // ---------- "create another" + track toggle sync ----------
 
 document.getElementById('create-another').addEventListener('click', () => {
-  stopPolling();
+  stopStatusPoll();
   form.reset();
   fileInput.value = '';
   preview.hidden = true;
