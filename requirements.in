@@ -2,10 +2,31 @@
 # Edit this file, NOT requirements.txt.
 #
 # Regenerate the hashed requirements.txt after editing:
-#     ./venv/bin/pip-compile --generate-hashes --resolver=backtracking requirements.in
+#     ./venv/bin/pip-compile --allow-unsafe --generate-hashes --resolver=backtracking requirements.in
+#
+# `--allow-unsafe` is the opt-in to pin pip + setuptools alongside the
+# rest. The flag's name is legacy and misleading -- it has nothing to do
+# with security; pip-tools historically considered the bootstrap layer
+# "unsafe to pin" because doing so could deadlock pip's own source-build
+# machinery against itself. With wheel-only installs and modern pip,
+# pinning these is fine and is the only way deploy.sh (which runs
+# `pip install --require-hashes -r requirements.txt`) keeps the venv's
+# pip current and CVE-free over successive deploys. Without this flag,
+# every fresh CVE in pip itself stays unpatched on the VPS until someone
+# remembers to ssh in and run `pip install --upgrade pip` by hand.
 #
 # Dependabot also regenerates requirements.txt automatically on version-bump
-# PRs (it detects the .in -> .txt pip-tools pattern).
+# PRs (it detects the .in -> .txt pip-tools pattern; it preserves the
+# --allow-unsafe flag from the existing requirements.txt header).
+
+# pip is the install tool, not an import. It's listed here so deploy.sh's
+# `pip install --require-hashes -r requirements.txt` keeps the venv's pip
+# at the lockfile-pinned version, hash-verified, on every tag deploy.
+# Without this line, pip-compile skips it (no runtime dep references it),
+# the lockfile carries no pip pin, and pip on the VPS drifts behind
+# whatever was installed at server-setup time -- which is how the
+# CVE-2026-3219 era of pip persisted on the droplet.
+pip>=26.1
 
 fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
