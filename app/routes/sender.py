@@ -26,7 +26,6 @@ from ..i18n import template_context
 from ..limiter import create_rate_limit, login_rate_limit, read_rate_limit
 from ..schemas import (
     EXPIRY_PRESETS,
-    ApiMeResponse,
     ClearTrackedResponse,
     CreateSecretResponse,
     CreateTextSecret,
@@ -34,7 +33,6 @@ from ..schemas import (
     LogoutResponse,
     SecretStatusResponse,
     TrackedListResponse,
-    UpdatePreferencesBody,
 )
 
 router = APIRouter()
@@ -264,78 +262,6 @@ async def create_secret(
         url=_build_url(row["token"], client_half),
         id=row["id"],
         expires_at=row["expires_at"],
-    )
-
-
-@router.get(
-    "/api/me",
-    response_model=ApiMeResponse,
-    dependencies=[Depends(read_rate_limit)],
-)
-def api_me(user: dict = Depends(verify_api_token_or_session)):
-    """Return a minimal view of the authenticated user (for header UI etc.)."""
-    return ApiMeResponse(
-        id=user["id"],
-        username=user["username"],
-        email=user.get("email"),
-        analytics_opt_in=bool(user.get("analytics_opt_in")),
-    )
-
-
-@router.patch(
-    "/api/me/preferences",
-    response_model=ApiMeResponse,
-    dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
-)
-def update_preferences(
-    body: UpdatePreferencesBody,
-    request: Request,
-    user: dict = Depends(verify_api_token_or_session),
-):
-    """Flip user-scoped preferences. Today's only knob is `analytics_opt_in`
-    (per-user telemetry consent); the route is shaped as a generic
-    preferences mutation so future user-scoped settings can join without
-    a new endpoint.
-
-    Each actual flip emits a `preferences.analytics_changed` security_log
-    entry so an operator can answer "who consented when" without joining
-    the aggregate-only analytics_events table (which deliberately carries
-    no user_id). No-op PATCH (sending the current value) does not log.
-
-    Concurrency: the change-detection happens in SQL via a conditional
-    `UPDATE ... WHERE analytics_opt_in != ?`. A naive read-modify-write
-    in Python would no-op a real change if two requests both observed
-    the same pre-flip value (rapid on->off->on clicks, or multi-tab).
-    The atomic UPDATE returns the new value when it actually fired, or
-    None when no row changed; we drive both the security_log and the
-    response off that return so audit and reply always reflect ground
-    truth.
-    """
-    if body.analytics_opt_in is not None:
-        desired = 1 if body.analytics_opt_in else 0
-        persisted = models.set_analytics_opt_in(user["id"], desired)
-        if persisted is not None:
-            security_log.emit(
-                "preferences.analytics_changed",
-                user_id=user["id"],
-                username=user["username"],
-                enabled=bool(persisted),
-                client_ip=security_log.client_ip(request),
-            )
-            user = {**user, "analytics_opt_in": persisted}
-        else:
-            # No-op (value already matched). The request-scoped `user`
-            # snapshot may itself be stale relative to a concurrent
-            # PATCH that just landed; re-read so the response carries
-            # the actual persisted value, not the read-time copy.
-            fresh = models.get_user_by_id(user["id"])
-            if fresh is not None:
-                user = {**user, "analytics_opt_in": fresh.get("analytics_opt_in", 0)}
-    return ApiMeResponse(
-        id=user["id"],
-        username=user["username"],
-        email=user.get("email"),
-        analytics_opt_in=bool(user.get("analytics_opt_in")),
     )
 
 

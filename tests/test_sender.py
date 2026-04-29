@@ -354,6 +354,70 @@ def test_patch_preferences_no_op_does_not_log(authed_client, provisioned_user, c
     assert flips == []
 
 
+def test_patch_preferences_empty_body_returns_current_state(
+    authed_client, provisioned_user
+):
+    """PATCH with no fields set (body is just `{}`) is a valid no-op --
+    the route is shaped as a generic preferences mutation, so an empty
+    body should return the current state rather than 400'ing. Today's
+    only field is analytics_opt_in; future fields land here too and
+    should follow the same convention."""
+    r = authed_client.patch(
+        "/api/me/preferences",
+        json={},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["username"] == provisioned_user["username"]
+    # Default for a freshly-provisioned user.
+    assert body["analytics_opt_in"] is False
+
+
+def test_patch_preferences_no_op_handles_user_disappeared_mid_request(
+    authed_client, provisioned_user, monkeypatch
+):
+    """Defensive race-handling: if the user is deleted between auth and the
+    no-op re-read inside update_preferences, the endpoint should still
+    return 200 with the request-scoped user snapshot rather than 500'ing.
+
+    Real-world the race is effectively unhittable (auth and the re-read
+    are microseconds apart), but the defensive `if fresh is not None`
+    branch exists for the case and deserves a test to keep the path
+    exercised. We patch only the prefs module's `models` reference so
+    auth (which imports models elsewhere) still resolves the user
+    correctly."""
+    from app.routes import prefs
+
+    real_models = prefs.models
+
+    class _RaceyModels:
+        """Returns None from get_user_by_id, falls through to the real
+        models module for everything else (so set_analytics_opt_in still
+        runs against the real DB and reports no-op)."""
+
+        def __getattr__(self, name):
+            return getattr(real_models, name)
+
+    racey = _RaceyModels()
+    racey.get_user_by_id = lambda _uid: None
+    monkeypatch.setattr(prefs, "models", racey)
+
+    # Send a no-op (default analytics_opt_in is False, so PATCHing False
+    # matches the stored value -- set_analytics_opt_in returns None,
+    # which routes into the defensive fresh re-read branch).
+    r = authed_client.patch(
+        "/api/me/preferences",
+        json={"analytics_opt_in": False},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
+    # Response uses the request-scoped user snapshot (analytics_opt_in
+    # field reflects the cached value, not whatever an empty get_user_by_id
+    # would have returned).
+    assert r.json()["analytics_opt_in"] is False
+
+
 def test_patch_preferences_requires_auth(client):
     r = client.patch(
         "/api/me/preferences",
