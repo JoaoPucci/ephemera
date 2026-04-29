@@ -1,6 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountAnalyticsSurfaces as mountBothSurfaces } from './fixtures/analytics.js';
 import { flushAsync, jsonResponse, loadModule } from './helpers.js';
+
+// Belt-and-suspenders: tests below mix real and fake timers. A test that
+// switches to fake timers and then fails before its `vi.useRealTimers()`
+// would leak the fake-timer environment into the next test, causing a
+// cascade of timeouts (any `await` that hits a real setTimeout via
+// flushAsync hangs forever). Reset on every test exit so a single failure
+// stays local.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // URL-aware fetch stub. analytics-toggle.js bootstraps from /api/me on
 // init (so it works on every authed page, not just the sender), AND
@@ -279,6 +289,116 @@ describe('analytics-toggle.js — opt-OUT is instant + acknowledged (asymmetric)
     expect(ack.textContent).toBe('');
     const tip = document.getElementById('analytics-toggle-ack-tip');
     expect(tip.classList.contains('is-visible')).toBe(false);
+  });
+});
+
+describe('analytics-toggle.js — opt-OUT ack timer cleanup', () => {
+  // The ack hides after 1500ms and the desktop tip then clears its inline
+  // styles after a further 250ms fade. Both timer-driven branches are
+  // load-bearing: the first prevents the ack from sticking on screen,
+  // the second prevents stale inline positioning leaking into the next
+  // opt-OUT cycle. Real-time waits would slow the suite; fake timers
+  // exercise both branches deterministically.
+
+  beforeEach(() => mountBothSurfaces({ analyticsOptIn: true }));
+
+  it('desktop ack tip hides after 1500ms and clears its inline positioning after the fade', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: true, patchOptIn: false });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('analytics-toggle');
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    document.getElementById('analytics-toggle').click();
+    // Drain microtasks ONLY -- not timers. runOnlyPendingTimersAsync
+    // would fire the 1500ms ack timer immediately, dropping is-visible
+    // before we ever see it set.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    const tip = document.getElementById('analytics-toggle-ack-tip');
+    const ack = document.getElementById('analytics-toggle-ack');
+    expect(tip.classList.contains('is-visible')).toBe(true);
+    expect(tip.textContent.length).toBeGreaterThan(0);
+    expect(ack.textContent.length).toBeGreaterThan(0);
+
+    // 1500ms: visibility class dropped and SR ack cleared. Inline styles
+    // still set -- they clear in the inner 250ms fade callback.
+    vi.advanceTimersByTime(1500);
+    expect(tip.classList.contains('is-visible')).toBe(false);
+    expect(ack.textContent).toBe('');
+
+    // 250ms after the fade: text and inline positioning cleared so the
+    // next show recomputes against fresh layout.
+    vi.advanceTimersByTime(250);
+    expect(tip.textContent).toBe('');
+    expect(tip.style.top).toBe('');
+    expect(tip.style.left).toBe('');
+    expect(tip.style.right).toBe('');
+
+    vi.useRealTimers();
+  });
+
+  it('drawer ack reverts the row label after 1500ms', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubAnalyticsFetch({ initialOptIn: true, patchOptIn: false });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('analytics-toggle');
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    const drawerBtn = document.getElementById('chrome-menu-analytics');
+    const labelEl = drawerBtn.querySelector('.chrome-menu-row-label');
+    const original = labelEl.textContent;
+
+    drawerBtn.click();
+    // Drain enough microtask cycles for: bootstrap /api/me -> click handler
+    // -> commit() -> fetch -> json -> setState -> dispatchEvent ->
+    // announceDisabledAck. Each await is one cycle; ten is comfortably
+    // more than the longest chain, and excess no-op cycles are harmless.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    // Mid-window: label is the ack copy, not the original.
+    expect(labelEl.textContent).not.toBe(original);
+    expect(labelEl.textContent.length).toBeGreaterThan(0);
+
+    vi.advanceTimersByTime(1500);
+    expect(labelEl.textContent).toBe(original);
+    const srAck = drawerBtn.querySelector('.chrome-menu-row-ack');
+    expect(srAck.textContent).toBe('');
+
+    vi.useRealTimers();
+  });
+});
+
+describe('analytics-toggle.js — bootstrap fault tolerance', () => {
+  it('bootstraps silently when /api/me returns a non-2xx (no aria flip, no throw)', async () => {
+    // The defensive `if (!res.ok) return` guards against /api/me failures
+    // -- the toggle stays at the template-rendered default. Without this
+    // branch a 500 would still attempt res.json() and surface as a console
+    // error.
+    mountBothSurfaces({ analyticsOptIn: false });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(null, { status: 500 })))
+    );
+    await loadModule('analytics-toggle');
+    await flushAsync();
+    await flushAsync();
+
+    // aria-checked stayed at the fixture default ("false").
+    expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('bootstraps silently when /api/me throws (network error)', async () => {
+    mountBothSurfaces({ analyticsOptIn: false });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('offline')))
+    );
+    // Should not throw on import / bootstrap promise rejection.
+    await expect(loadModule('analytics-toggle')).resolves.toBeDefined();
+    await flushAsync();
+
+    expect(document.getElementById('analytics-toggle').getAttribute('aria-checked')).toBe('false');
   });
 });
 

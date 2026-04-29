@@ -61,14 +61,6 @@
     return interpolate(hit, vars);
   }
 
-  function _readCookie(name) {
-    const prefix = `${name}=`;
-    for (const p of document.cookie.split('; ')) {
-      if (p.startsWith(prefix)) return decodeURIComponent(p.slice(prefix.length));
-    }
-    return null;
-  }
-
   function writeCookie(name, value) {
     // Locale persistence is a simple name=value cookie the server reads on the
     // next request. Cookie Store API is async and has incomplete Safari

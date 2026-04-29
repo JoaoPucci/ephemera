@@ -303,6 +303,93 @@ describe('sender.js — user button sign-out two-click confirm', () => {
   });
 });
 
+describe('sender.js — copy URL button on the result screen', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  it('copy-url click reads from #result-url and writes to the clipboard', async () => {
+    // The success path renders the URL into #result-url.textContent, so the
+    // copy button is just a thin wrapper around copyWithFeedback. Asserting
+    // on the clipboard write is enough to cover the handler body -- the
+    // copyWithFeedback feedback animation is exercised in copy.test.js.
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...globalThis.navigator, clipboard: { writeText } });
+    vi.stubGlobal(
+      'fetch',
+      stubSenderFetch(() => new Promise(() => {}))
+    );
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('result-url').textContent = 'https://example/s/tok#key';
+    document.getElementById('copy-url').click();
+    await flushAsync();
+
+    expect(writeText).toHaveBeenCalledWith('https://example/s/tok#key');
+  });
+});
+
+describe('sender.js — loadMe /api/me bootstrap', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  it('reloads the page when /api/me returns 401 (session expired)', async () => {
+    // The reload is the recovery path: the cookie's been cleared server-side
+    // so the next render will show the login screen instead of the sender
+    // shell with broken auth state. jsdom's window.location.reload is
+    // non-configurable; swap the whole location object as elsewhere.
+    const savedLocation = window.location;
+    const reloadMock = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        reload: reloadMock,
+        href: 'http://localhost/send',
+        search: '',
+        pathname: '/send',
+        origin: 'http://localhost',
+      },
+    });
+
+    const fetchMock = vi.fn((url) => {
+      if (url === '/api/me') return Promise.resolve(new Response(null, { status: 401 }));
+      if (url === '/api/secrets/tracked') return Promise.resolve(jsonResponse({ items: [] }));
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+    await flushAsync();
+
+    expect(reloadMock).toHaveBeenCalledOnce();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: savedLocation,
+    });
+  });
+
+  it('skips the username paint when /api/me returns a non-2xx that is not 401', async () => {
+    // 5xx during /api/me should fail soft -- the page is usable, the
+    // username pill just stays at its placeholder. No reload, no throw.
+    const fetchMock = vi.fn((url) => {
+      if (url === '/api/me') return Promise.resolve(new Response(null, { status: 500 }));
+      if (url === '/api/secrets/tracked') return Promise.resolve(jsonResponse({ items: [] }));
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+    await flushAsync();
+
+    // Placeholder text from the fixture survives; no me-loaded broadcast
+    // dispatched (the early return happens before dispatchEvent).
+    expect(document.getElementById('user-name').textContent).toBe('…');
+  });
+});
+
 describe('sender.js — copy passphrase + show/hide on the result screen', () => {
   beforeEach(() => {
     mountSender();
