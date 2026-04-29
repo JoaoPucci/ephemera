@@ -17,7 +17,7 @@ from fastapi import Request
 # CSP: deny-by-default then explicitly enumerate what ephemera actually uses.
 # Nothing is fetched cross-origin (no CDN, no web fonts, no analytics). The
 # two non-'self' sources are (1) `data:` images for the reveal payload and
-# the inline SVG chevrons in style.css, and (2) base-uri/form-action pinned
+# the inline SVG chevrons in forms.css/chrome.css, and (2) base-uri/form-action pinned
 # to 'self' to blunt <base href> and form-repoint attacks.
 CSP = "; ".join(
     [
