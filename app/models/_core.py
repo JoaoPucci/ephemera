@@ -205,11 +205,20 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 CURRENT_SCHEMA_VERSION = 6
 
-# Imported AFTER SchemaVersionError + _cols above so the migration files
-# (which reach back into this module for those helpers) don't trip a
-# half-loaded import. See app/models/migrations/__init__.py for the
-# convention.
-from .migrations import MIGRATIONS as _MIGRATIONS  # noqa: E402
+
+# The migration registry is imported lazily inside init_db() rather than
+# at module load. The migration files (app/models/migrations/v<N>.py)
+# import SchemaVersionError + _cols from this module, so a module-level
+# `from .migrations import MIGRATIONS` here would create a cycle when
+# anything imports `app.models.migrations` directly:
+#
+#   migrations/__init__ -> imports v2 -> imports _core -> imports
+#   migrations/__init__ (partial; MIGRATIONS not yet bound) -> ImportError
+#
+# Doing the import inside init_db() keeps the dependency one-directional:
+# migrations always import _core, never the reverse. By the time init_db
+# runs, _core is fully loaded; loading the migrations package then
+# resolves cleanly.
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -237,11 +246,17 @@ def init_db() -> None:
          pre-registry DBs up to what is now "v1".
       3. Guard against downgrade: if DB is at a higher version than this code
          knows about, refuse to continue.
-      4. Run any registered migrations (_MIGRATIONS) whose target version is
-         greater than the current DB version, in ascending order.
+      4. Run any registered migrations from app.models.migrations.MIGRATIONS
+         whose target version is greater than the current DB version, in
+         ascending order.
       5. Stamp the DB to CURRENT_SCHEMA_VERSION.
       6. Build indices + run in-place data migrations that aren't schema changes.
     """
+    # Lazy import: keeps the dependency one-directional (migrations import
+    # this module; this module never imports migrations at module level).
+    # See the long comment near CURRENT_SCHEMA_VERSION above.
+    from .migrations import MIGRATIONS
+
     with _connect() as conn:
         tables_before = _tables(conn)
         conn.executescript(TABLES_SCRIPT)
@@ -287,9 +302,9 @@ def init_db() -> None:
                 "or restore a pre-migration backup -- refusing to run against "
                 "a newer schema to avoid silent data corruption."
             )
-        for target in sorted(_MIGRATIONS):
+        for target in sorted(MIGRATIONS):
             if target > db_version:
-                _MIGRATIONS[target](conn)
+                MIGRATIONS[target](conn)
         _set_schema_version(conn, CURRENT_SCHEMA_VERSION)
 
         # Indices last, after the columns they reference definitely exist.
