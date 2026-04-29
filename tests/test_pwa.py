@@ -131,16 +131,15 @@ def test_manifest_icons_include_192_and_512(client):
 
 def test_head_links_manifest(client):
     html = client.get("/send").text
-    assert (
-        '<link rel="manifest" href="/static/manifest.webmanifest">' in html
-    ), "head must link the manifest so install affordances pick it up"
+    assert '<link rel="manifest" href="/static/manifest.webmanifest">' in html, (
+        "head must link the manifest so install affordances pick it up"
+    )
 
 
 def test_head_has_theme_color_for_light_and_dark(client):
     html = client.get("/send").text
     assert (
-        'name="theme-color"' in html
-        and 'media="(prefers-color-scheme: light)"' in html
+        'name="theme-color"' in html and 'media="(prefers-color-scheme: light)"' in html
     ), "head must carry a light-mode theme-color meta"
     assert (
         'name="theme-color"' in html and 'media="(prefers-color-scheme: dark)"' in html
@@ -156,9 +155,9 @@ def test_head_links_apple_touch_icon(client):
 
 def test_head_declares_apple_mobile_web_app_capable(client):
     html = client.get("/send").text
-    assert (
-        '<meta name="apple-mobile-web-app-capable" content="yes">' in html
-    ), "iOS only enters standalone mode when this meta is present"
+    assert '<meta name="apple-mobile-web-app-capable" content="yes">' in html, (
+        "iOS only enters standalone mode when this meta is present"
+    )
 
 
 def test_head_sets_apple_status_bar_style(client):
@@ -170,9 +169,9 @@ def test_head_sets_apple_status_bar_style(client):
 
 def test_head_sets_apple_mobile_web_app_title(client):
     html = client.get("/send").text
-    assert (
-        '<meta name="apple-mobile-web-app-title" content="ephemera">' in html
-    ), "iOS uses this for the home-screen label; without it the <title> is used and truncates ugly"
+    assert '<meta name="apple-mobile-web-app-title" content="ephemera">' in html, (
+        "iOS uses this for the home-screen label; without it the <title> is used and truncates ugly"
+    )
 
 
 # ---------------------------------------------------------------------------
