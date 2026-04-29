@@ -47,7 +47,10 @@
      overridden per-direction below (no logical background-position).
      Off the --space-* scale by design: padding-block tunes the pill's
      vertical rhythm to match `.theme-toggle` and `.user-btn` exactly so
-     all three pills sit at identical height in the chrome row. */
+     all three pills sit at identical height in the chrome row. The
+     inline asymmetry pairs with the `background-position: right
+     0.75rem center` chevron offset below; if you change inline-end
+     padding here, retune the chevron position to match. */
   padding-block: 0.4rem;
   padding-inline: 0.85rem 1.8rem;
   /* min-width keeps the picker's width steady across locales. Without it,
@@ -120,10 +123,12 @@
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
-  /* Glyph-only pill. The ::before half-circle is the entire visible
-     affordance; no text to pad around. Padding tuned to match the
-     lang-picker's vertical rhythm so both pills sit at the same height
-     when displayed side-by-side. */
+  /* Off-scale: anchor pill geometry for the chrome row. Glyph-only
+     pill -- the ::before half-circle is the entire visible affordance;
+     no text to pad around. .lang-picker (padding-block: 0.4rem) and
+     .user-btn (padding: 0.35rem 0.9rem) derive their vertical rhythm
+     from this value so all three pills sit at the same height
+     side-by-side. .analytics-toggle copies it verbatim below. */
   padding: 0.4rem 0.7rem;
   font-size: 0.8rem;
   min-height: auto;
@@ -174,6 +179,7 @@
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
+  /* Off-scale: matches .theme-toggle for chrome-row pill-height parity. */
   padding: 0.4rem 0.7rem;
   font-size: 0.8rem;
   min-height: auto;
@@ -206,7 +212,7 @@
    analytics.label so the chrome-pill ships without a server-rendered
    English fallback that would leak past localized users. */
 .analytics-toggle {
-  gap: 0.4rem;
+  gap: var(--space-2);
 }
 .analytics-toggle-label {
   font-size: 0.78rem;
@@ -251,10 +257,16 @@
    see this; screen-reader users hear the same text). */
 .analytics-toggle-ack-tip {
   position: fixed;
+  /* Off-scale: anchored just below the chrome pill row
+     (top: 1rem + ~2rem pill height + ~0.25rem gap). Update in lockstep
+     if .top-chrome.top changes. */
   top: 3.25rem;
   inset-inline-end: 1rem;
   z-index: 60;
-  padding: 0.4rem 0.75rem;
+  /* Off-scale block: matches the chrome-pill block padding (0.4rem) so
+     the tip reads as kin to the pill it's anchored to. Inline is
+     on-scale (--space-3). */
+  padding: 0.4rem var(--space-3);
   background: var(--surface);
   color: var(--muted);
   border: 1px solid var(--border);
@@ -281,12 +293,18 @@
    to wrap naturally without orphan single words. */
 .analytics-popover {
   position: fixed;
+  /* Off-scale: anchored under the chrome pill row, slightly lower than
+     the ack-tip (3.25rem) so the heavier popover surface clears the
+     pill bottom edge. Update in lockstep if .top-chrome.top changes. */
   top: 3.5rem;
   inset-inline-end: 1rem;
   z-index: 60;
   max-width: 320px;
   min-width: 260px;
-  padding: 1rem 1.1rem;
+  /* Off-scale inline: optical inset; 1px more inline than block
+     compensates for the popover's vertical-axis shadow. Block is
+     on-scale (--space-4). */
+  padding: var(--space-4) 1.1rem;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
@@ -296,27 +314,30 @@
   line-height: 1.5;
 }
 .analytics-popover-title {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--space-2);
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: -0.005em;
 }
 .analytics-popover-body {
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--space-3);
   color: var(--text);
 }
 .analytics-popover-note {
-  margin: 0 0 1rem;
+  margin: 0 0 var(--space-4);
   font-size: 0.78rem;
   color: var(--muted);
 }
 .analytics-popover-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 .analytics-popover-cancel,
 .analytics-popover-confirm {
+  /* Off-scale: dialog pill geometry; matches .user-btn inline padding
+     (0.9rem) and chrome-pill block padding (0.4rem) so the action
+     shapes read as one family across chrome and dialog surfaces. */
   padding: 0.4rem 0.9rem;
   font-size: 0.8rem;
   font-weight: 500;
@@ -372,8 +393,12 @@
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
-  /* Off-scale by design: tuned for pill-height parity with .lang-picker
-     and .theme-toggle so the three pills line up across the chrome row. */
+  /* Off-scale: chrome-row pill geometry. Block padding is 0.05rem
+     tighter than .theme-toggle's 0.4rem to optically match its taller
+     text content (the user-btn carries text + dot + sep + action,
+     which reads visually heavier than the theme-toggle's glyph-only
+     pill). All four chrome pills (.lang-picker, .theme-toggle,
+     .analytics-toggle, .user-btn) target the same visual height. */
   padding: 0.35rem 0.9rem;
   font-size: 0.8rem;
   font-weight: 500;
@@ -668,7 +693,10 @@
     right: 0;
     max-height: calc(100vh - 3.25rem - max(0.5rem, env(safe-area-inset-top)));
     overflow-y: auto;
-    padding: 0.5rem 0.6rem 1rem;
+    /* Off-scale inline: deliberately less than the row inline padding
+       (--space-3 / 0.75rem) so rows hug the drawer edge without
+       double-padding. Block top/bottom are on-scale. */
+    padding: var(--space-2) 0.6rem var(--space-4);
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow-md);
@@ -689,7 +717,7 @@
 
   /* ----- Sections ----- */
   .chrome-menu-section {
-    padding: 0.25rem 0;
+    padding: var(--space-1) 0;
     /* Staggered entrance: each section (in source order via --stagger-i)
        fades + rises in a beat later than the previous. Keeps the drawer
        opening from reading as one flat slide. */
@@ -702,8 +730,8 @@
   }
   .chrome-menu-section + .chrome-menu-section {
     border-top: 1px solid var(--border);
-    margin-top: 0.25rem;
-    padding-top: 0.5rem;
+    margin-top: var(--space-1);
+    padding-top: var(--space-2);
   }
   html[data-chrome-menu-open] .chrome-menu-section {
     opacity: 1;
@@ -712,8 +740,11 @@
   }
 
   .chrome-menu-section-label {
+    /* Off-scale: sub-token gap; section-label is a visual eyebrow
+       attached to its first row, --space-1 (4px) would read as a
+       separator gap rather than a paired label. */
     margin: 0 0 0.2rem;
-    padding: 0 0.75rem;
+    padding: 0 var(--space-3);
     font-size: 0.66rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -725,7 +756,14 @@
   .chrome-menu-user {
     display: flex;
     flex-direction: column;
-    padding: 0.2rem 0.75rem 0.4rem;
+    /* Off-scale block: tightened user-header vertical padding so name +
+       sub-label read as a single label block before the section
+       divider. Inline matches the row padding (--space-3) for left-edge
+       alignment with the rows below. */
+    padding: 0.2rem var(--space-3) 0.4rem;
+    /* Off-scale: super-tight intra-stack gap; name + sub-label are one
+       visual unit, --space-1 would read as two siblings. Matches the
+       0.15rem .tracked-meta family. */
     gap: 0.1rem;
     min-width: 0;
   }
@@ -748,10 +786,10 @@
     position: relative;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--space-3);
     width: 100%;
     min-height: 2.75rem;
-    padding: 0.5rem 0.75rem;
+    padding: var(--space-2) var(--space-3);
     border: 0;
     border-radius: 0.75rem;
     background: transparent;
@@ -787,15 +825,21 @@
      button shapes mirror the desktop popover so both surfaces feel
      like the same dialog at different breakpoints. */
   .chrome-menu-row-disclosure {
-    padding: 0.5rem 0.75rem 0.85rem;
+    /* Off-scale block-end: bottom-padding tuned so the disclosure-action
+       buttons sit clear of the section divider that follows;
+       --space-4 cramps, --space-5 floats. Top + inline are on-scale. */
+    padding: var(--space-2) var(--space-3) 0.85rem;
     font-size: 0.85rem;
     line-height: 1.5;
     color: var(--text);
   }
   .chrome-menu-row-disclosure-body {
-    margin: 0 0 0.6rem;
+    margin: 0 0 var(--space-2);
   }
   .chrome-menu-row-disclosure-note {
+    /* Off-scale: deliberately greater than the body→note gap above
+       (--space-2 / 0.5rem) so the action row reads as its own cluster
+       after the explanatory text. */
     margin: 0 0 0.85rem;
     font-size: 0.78rem;
     color: var(--muted);
@@ -803,10 +847,13 @@
   .chrome-menu-row-disclosure-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
+    gap: var(--space-2);
   }
   .chrome-menu-row-disclosure-cancel,
   .chrome-menu-row-disclosure-confirm {
+    /* Off-scale: mobile dialog-button geometry; +0.05rem on each axis
+       vs. the desktop popover button (0.4rem 0.9rem) for thumb-sized
+       hit zone. */
     padding: 0.45rem 0.95rem;
     font-size: 0.85rem;
     font-weight: 500;

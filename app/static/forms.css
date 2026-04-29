@@ -141,6 +141,11 @@ select {
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
+  /* Off-scale: text inline-end clearance for the custom chevron. The
+     2.2rem ≈ chevron right offset (0.95rem from edge) + chevron width
+     (~12px ≈ 0.75rem) + gap (~8px ≈ 0.5rem). Tied to the
+     background-position 0.95rem below; if you change either, retune
+     the other. */
   padding-inline-end: 2.2rem;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1l5 5 5-5'/></svg>");
   background-repeat: no-repeat;
@@ -200,6 +205,10 @@ select {
 button {
   display: inline-block;
   min-height: 44px;
+  /* Off-scale: primary-button pill geometry. The asymmetric vertical-
+     to-horizontal ratio (~2.5×) is the visual signature of the CTA;
+     --space-3 / --space-5 (0.75rem / 1.5rem) reads visibly narrower,
+     --space-4 / --space-6 (1rem / 2rem) reads visibly taller. */
   padding: 0.7rem 1.75rem;
   font: inherit;
   font-weight: 500;
@@ -256,6 +265,9 @@ button.link {
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
+  /* Off-scale: inline link-button hit padding sized to the underlined
+     glyph footprint. --space-* would visibly shift the link's optical
+     position relative to surrounding body text. */
   padding: 0.3rem 0.5rem;
   min-height: auto;
   box-shadow: none;
