@@ -22,8 +22,21 @@
    =================================================================== */
 
 @media (max-width: 480px) {
+  /* Body padding: longhand inline + bottom only. We deliberately do
+     NOT set padding-top here -- chrome.css's `@media (max-width: 720px)`
+     block already sets a safe-area-aware top:
+       padding-top: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)))
+     and we always want that value at <=480px (every <=480px viewport also
+     matches <=720px). Pre-split, the original style.css used a `padding`
+     shorthand here AND was source-ordered before the 720px block, so the
+     720px block won for padding-top regardless. After the split,
+     responsive.css loads AFTER chrome.css, so a shorthand here would
+     clobber the safe-area calc and slide content under the notch /
+     dynamic island on phones with viewport-fit=cover. Longhand keeps
+     the chrome.css top intact. */
   body {
-    padding: 3.5rem 0 1.5rem;
+    padding-inline: 0;
+    padding-bottom: 1.5rem;
   }
 
   .card {
