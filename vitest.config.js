@@ -74,11 +74,34 @@ export default defineConfig({
           functions: 78,
           lines: 87,
         },
+        'app/static/sender/dropzone.js': {
+          statements: 95,
+          branches: 95,
+          functions: 95,
+          lines: 95,
+        },
         'app/static/sender/form.js': {
-          statements: 80,
-          branches: 64,
-          functions: 67,
-          lines: 81,
+          // Locked in at the post-split actuals (90.4 stmt / 68 branch /
+          // 89 func / 91.7 lines). Refactors that drop coverage below
+          // these floors must add tests, not lower the bar -- the
+          // direction the project is moving is uniform thresholds, not
+          // per-file calibration to "the current actual".
+          statements: 88,
+          branches: 67,
+          functions: 87,
+          lines: 90,
+        },
+        'app/static/sender/hints.js': {
+          statements: 95,
+          branches: 90,
+          functions: 95,
+          lines: 95,
+        },
+        'app/static/sender/status-poll.js': {
+          statements: 95,
+          branches: 95,
+          functions: 95,
+          lines: 95,
         },
         'app/static/sender/tracked-list.js': {
           statements: 83,
