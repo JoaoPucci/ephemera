@@ -53,16 +53,25 @@ export async function startStatusPoll(id) {
   stopStatusPoll();
   const valueEl = document.getElementById('status-value');
   const detailEl = document.getElementById('status-detail');
+  let terminated = false;
   const tick = async () => {
     const data = await fetchStatus(id);
     paintStatus(valueEl, detailEl, data);
     if (data && (data.status === 'viewed' || data.status === 'burned' || data.status === 'gone')) {
+      terminated = true;
       stopStatusPoll();
       renderTrackedList();
     }
   };
   await tick();
-  pollHandle = setInterval(tick, 5000);
+  // Only set up the periodic interval if the initial tick hasn't already
+  // reached a terminal status. Without this guard, a fast-revealed secret
+  // (sender clicks Create -> receiver clicks Reveal -> sender's first
+  // tick lands on 'viewed') would still schedule a redundant 5-second-
+  // later fetch of /status that returns 404 (row destroyed).
+  if (!terminated) {
+    pollHandle = setInterval(tick, 5000);
+  }
 }
 
 export function stopStatusPoll() {

@@ -81,14 +81,15 @@ export default defineConfig({
           lines: 95,
         },
         'app/static/sender/form.js': {
-          // Bumped after the hints / dropzone / status-poll extraction
-          // shrank this file. The form.js that's left is the page-level
-          // orchestration; the lines that stayed are well-exercised by
-          // tests-js/sender.test.js.
-          statements: 86,
-          branches: 65,
-          functions: 85,
-          lines: 88,
+          // Locked in at the post-split actuals (90.4 stmt / 68 branch /
+          // 89 func / 91.7 lines). Refactors that drop coverage below
+          // these floors must add tests, not lower the bar -- the
+          // direction the project is moving is uniform thresholds, not
+          // per-file calibration to "the current actual".
+          statements: 88,
+          branches: 67,
+          functions: 87,
+          lines: 90,
         },
         'app/static/sender/hints.js': {
           statements: 91,
@@ -97,10 +98,10 @@ export default defineConfig({
           lines: 92,
         },
         'app/static/sender/status-poll.js': {
-          statements: 80,
-          branches: 58,
+          statements: 95,
+          branches: 95,
           functions: 95,
-          lines: 83,
+          lines: 95,
         },
         'app/static/sender/tracked-list.js': {
           statements: 83,
