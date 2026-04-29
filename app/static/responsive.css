@@ -36,63 +36,42 @@
      the chrome.css top intact. */
   body {
     padding-inline: 0;
-    padding-bottom: 1.5rem;
+    padding-bottom: var(--space-5);
   }
 
   .card {
     border-radius: 0;
     border-inline: none;
-    padding: 1.5rem 1rem;
+    padding: var(--space-5) var(--space-4);
   }
 
   .wordmark {
     font-size: 0.85rem;
+    /* Off-scale: super-tight gap; wordmark + version pair as one brand
+       block on narrow screens. */
     margin-bottom: 0.2rem;
   }
   .app-version {
     font-size: 0.6rem;
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
-  .top-chrome {
-    top: 0.5rem;
-    gap: 0.35rem;
-  }
-  .top-chrome-right {
-    inset-inline-end: 0.5rem;
-  }
-
-  .theme-toggle {
-    padding: 0.3rem 0.55rem;
-    font-size: 0.75rem;
-  }
-
-  .lang-picker {
-    padding-block: 0.3rem;
-    padding-inline: 0.7rem 1.6rem;
-    font-size: 0.75rem;
-    background-position: right 0.55rem center;
-  }
-  [dir="rtl"] .lang-picker {
-    background-position: left 0.55rem center;
-  }
-
-  .user-btn {
-    top: 0.5rem;
-    inset-inline-start: 0.5rem;
-    padding: 0.28rem 0.7rem;
-    font-size: 0.75rem;
-  }
-  #user-name {
-    max-width: 6rem;
-  }
+  /* NOTE: pre-split, this block also held overrides for .top-chrome,
+     .top-chrome-right, .theme-toggle, .lang-picker, .user-btn, and
+     #user-name. They were dead code: every <=480px viewport also
+     matches <=720px, where chrome.css sets `.top-chrome { display:
+     none }` and `.user-btn { display: none }` -- which means none of
+     those elements (or their children, like #user-name) are rendered
+     at this breakpoint. Removed in the tokenization sweep. The mobile
+     hamburger drawer lives at <=720px in chrome.css and owns its own
+     responsive geometry. */
 
   /* Stack the tracked row: label + time take the full width, then the
      status pill + cancel + remove buttons sit on their own line. */
   .tracked-item {
     flex-direction: column;
     align-items: stretch;
-    gap: 0.5rem;
+    gap: var(--space-2);
   }
   .tracked-right {
     justify-content: flex-end;
@@ -109,17 +88,16 @@
   /* The fullscreen zoom overlay's close pill needs to clear the notch /
      dynamic island on phones with viewport-fit=cover. */
   .zoom-close {
-    top: max(1rem, env(safe-area-inset-top));
+    top: max(var(--space-4), env(safe-area-inset-top));
   }
 }
 
 @media (max-width: 360px) {
-  /* Three items share the top strip -- user pill, wordmark, theme
-     toggle. Tighten the username cap further so the wordmark still
-     has clearance. */
-  #user-name {
-    max-width: 4rem;
-  }
+  /* Tighten the wordmark a hair below 360px so it stays clear of the
+     hamburger button on phones (chrome.css's <=720px block hides
+     .top-chrome / .user-btn entirely below that breakpoint, so
+     #user-name is not rendered here -- pre-split rules for it have
+     been removed alongside the .user-btn ones above). */
   .wordmark {
     font-size: 0.8rem;
   }

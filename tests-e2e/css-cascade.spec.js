@@ -162,20 +162,16 @@ test.describe('CSS cascade @ phone (400x800, <=480)', () => {
 test.describe('CSS cascade @ tiny (350x800, <=360)', () => {
   test.use({ viewport: { width: 350, height: 800 } });
 
-  test('responsive.css 360px block tightens user-name max-width to 4rem', async ({ page }) => {
-    // The /send login form does not render the user pill (it's unauthenticated),
-    // so this assertion uses a fixture: inject a #user-name element and read
-    // the computed style. The selector targets the same #user-name id as the
-    // real authenticated user pill.
+  test('responsive.css 360px block tightens the wordmark font-size', async ({ page }) => {
+    // At <=360 the wordmark drops to 0.8rem so it stays clear of the
+    // fixed hamburger button on phones. (Pre-tokenization-sweep this
+    // describe block also asserted on a #user-name max-width, but
+    // .user-btn is display:none below 720px from chrome.css, so its
+    // children's responsive rules were dead code and were removed.)
     await page.goto(ROUTE);
-    await page.evaluate(() => {
-      const el = document.createElement('span');
-      el.id = 'user-name';
-      document.body.appendChild(el);
-    });
-    // 4rem at 17px = 68px (responsive.css 360px override).
-    const max = await pixelStyle(page, '#user-name', 'maxWidth');
-    expect(max).toBeCloseTo(68, 0);
+    // 0.8rem at 17px root font = 13.6px.
+    const fontSize = await pixelStyle(page, '.wordmark', 'fontSize');
+    expect(fontSize).toBeCloseTo(13.6, 0);
   });
 
   test('480px overrides still apply at <=360 (responsive cascade compounds)', async ({ page }) => {

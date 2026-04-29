@@ -17,7 +17,7 @@
   box-shadow: var(--shadow-sm);
   max-width: 520px;
   width: 100%;
-  padding: 2rem;
+  padding: var(--space-6);
   transition:
     background 200ms ease,
     border-color 200ms ease;
@@ -152,7 +152,7 @@
 
 .revealed-text {
   background: var(--bg);
-  padding: 1rem;
+  padding: var(--space-4);
   border-radius: 6px;
   border: 1px solid var(--border);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -207,7 +207,7 @@
   z-index: 100;
   cursor: zoom-out;
   animation: fadein 180ms ease;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 #zoom-image {
   max-width: 95vw;
@@ -219,8 +219,8 @@
 }
 .zoom-close {
   position: fixed;
-  top: 1rem;
-  inset-inline-end: 1rem;
+  top: var(--space-4);
+  inset-inline-end: var(--space-4);
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -331,9 +331,10 @@
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--muted);
-  /* Off-scale by design: badge padding is tuned to the digit width at
-     0.72rem; --space-* horizontals would make the pill ovular. */
-  padding: 0.1rem 0.5rem;
+  /* Off-scale block: badge block-padding tuned to the digit height at
+     0.72rem so the pill stays circular for 1-digit counts. Inline is
+     on-scale (--space-2). */
+  padding: 0.1rem var(--space-2);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;

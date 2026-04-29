@@ -46,6 +46,10 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* Off-scale: page-frame outer padding tuned to the wordmark + card +
+     footer optical balance. 2.5rem sits between --space-6 (2rem) and
+     --space-7 (3rem); 1.25rem sits between --space-4 (1rem) and
+     --space-5 (1.5rem). Rounding either way breaks the centring. */
   padding: 2.5rem 1.25rem;
 }
 
@@ -56,7 +60,7 @@ body {
   /* Tight against the version tag below; the wordmark + version form
      one brand block, so most of the breathing room to the card sits on
      the version's own margin-bottom. */
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--space-1);
   font-weight: 500;
 }
 
@@ -67,7 +71,7 @@ body {
 .app-version {
   display: block;
   text-align: center;
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 var(--space-5) 0;
   color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.65rem;
@@ -86,7 +90,7 @@ h1,
 h2 {
   font-weight: 600;
   line-height: 1.3;
-  margin: 0 0 1rem;
+  margin: 0 0 var(--space-4);
   letter-spacing: -0.01em;
 }
 
@@ -98,7 +102,7 @@ h2 {
 }
 
 p {
-  margin: 0 0 1rem;
+  margin: 0 0 var(--space-4);
 }
 
 .muted {
@@ -108,7 +112,7 @@ p {
 .error {
   color: var(--danger);
   font-size: 0.9rem;
-  margin-top: 0.75rem;
+  margin-top: var(--space-3);
 }
 .success {
   color: var(--success);
