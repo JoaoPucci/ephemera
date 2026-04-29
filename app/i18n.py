@@ -374,10 +374,29 @@ def template_context(request: Request) -> dict:
     untranslated strings that an async JSON fetch would create)."""
     # Lazy import mirrors resolve_locale() -- keeps app.i18n importable from
     # low layers without pulling the dependencies graph at import time.
+    from .config import get_settings
     from .dependencies import current_user_id
     from .version import VERSION
 
     locale = getattr(request.state, "locale", DEFAULT)
+    settings = get_settings()
+    # PWA install surface, deployment-label aware. Empty label is the prod
+    # posture (name="ephemera", dark-bg/light-glyph apple-touch-icon); any
+    # non-empty value suffixes the name and switches to the visually-light
+    # apple-touch-icon so a dev / staging home-screen entry is at-a-glance
+    # distinguishable from prod. The manifest itself (served at
+    # /manifest.webmanifest) reads the same setting and rewrites its
+    # icon list to match.
+    pwa_name = (
+        f"ephemera-{settings.deployment_label}"
+        if settings.deployment_label
+        else "ephemera"
+    )
+    pwa_apple_touch_icon = (
+        "/static/icons/apple-touch-icon-light.png"
+        if settings.deployment_label
+        else "/static/icons/apple-touch-icon.png"
+    )
     return {
         "request": request,
         "locale": locale,
@@ -404,6 +423,8 @@ def template_context(request: Request) -> dict:
         # SSH'ing in. Tag name on a clean production deploy; tag-N-gsha
         # shape when drift is present.
         "version": VERSION,
+        "pwa_name": pwa_name,
+        "pwa_apple_touch_icon": pwa_apple_touch_icon,
     }
 
 
