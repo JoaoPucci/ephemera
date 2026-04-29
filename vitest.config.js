@@ -92,10 +92,10 @@ export default defineConfig({
           lines: 90,
         },
         'app/static/sender/hints.js': {
-          statements: 91,
-          branches: 78,
+          statements: 95,
+          branches: 90,
           functions: 95,
-          lines: 92,
+          lines: 95,
         },
         'app/static/sender/status-poll.js': {
           statements: 95,
