@@ -269,6 +269,30 @@ def resolve_locale(request: Request) -> str:
     return negotiate(request.headers.get("accept-language"))
 
 
+async def locale_middleware(request: Request, call_next):
+    """ASGI middleware that resolves the request's locale once and stashes
+    it on `request.state.locale` + a per-request ContextVar. Registered
+    via `app.middleware("http")(locale_middleware)` in create_app.
+
+    Static-asset paths short-circuit: they never render localized content,
+    so skipping the resolver (which does a cookie parse + DB lookup)
+    saves real work on every image / css / js fetch.
+
+    The ContextVar reset() in `finally` is mandatory -- a leaked token
+    silently bleeds one request's locale into the next handler on the
+    same worker.
+    """
+    if request.url.path.startswith("/static"):
+        return await call_next(request)
+    locale = resolve_locale(request)
+    request.state.locale = locale
+    token = current_locale.set(locale)
+    try:
+        return await call_next(request)
+    finally:
+        current_locale.reset(token)
+
+
 def get_locale(request: Request) -> str:
     """FastAPI dependency. Returns the locale the middleware stashed on
     request.state, or resolves from scratch when the middleware hasn't run
@@ -396,5 +420,6 @@ __all__ = [
     "get_locale",
     "gettext_for",
     "lazy_gettext",
+    "locale_middleware",
     "template_context",
 ]
