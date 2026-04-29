@@ -74,6 +74,134 @@ describe('login.js — submit in-flight guard', () => {
   });
 });
 
+describe('login.js — submit error responses', () => {
+  beforeEach(() => {
+    mountLoginForm();
+  });
+
+  it('reloads the page when the login request returns 200 OK', async () => {
+    // The reload is the post-success path: server set the session cookie,
+    // the same URL re-renders as the sender screen. jsdom's reload is
+    // non-configurable; swap the whole location object as elsewhere.
+    const savedLocation = window.location;
+    const reloadMock = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        reload: reloadMock,
+        href: 'http://localhost/send/login',
+        search: '',
+        pathname: '/send/login',
+        origin: 'http://localhost',
+      },
+    });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+    await loadModule('login');
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(reloadMock).toHaveBeenCalledOnce();
+    // Button stays disabled — page is reloading.
+    expect(submitBtn().disabled).toBe(true);
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: savedLocation,
+    });
+  });
+
+  it('renders an "until <time>" message on a 423 lockout that includes detail.until', async () => {
+    // The until value lands in the body as detail.until. Format goes through
+    // toLocaleString with the active locale -- assert on the i18n key shape
+    // (the rendered string contains "locked" plus the year of the until value
+    // so the parsing path is exercised).
+    const until = '2099-01-01T12:00:00Z';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ detail: { until } }, 423)));
+    await loadModule('login');
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const err = document.getElementById('login-error');
+    expect(err.hidden).toBe(false);
+    // The English string from en.json reads "Account locked. Try again at
+    // {{until}}." -- the until value, after toLocaleString, contains 2099.
+    expect(err.textContent.toLowerCase()).toContain('locked');
+    expect(err.textContent).toContain('2099');
+    expect(submitBtn().disabled).toBe(false);
+    expect(submitBtn().textContent).toBe('Sign in');
+  });
+
+  it('renders the no-until lockout message on a 423 with no detail.until', async () => {
+    // 423 can also arrive with an empty body (e.g. JSON parse fails) or with
+    // detail shaped without `until`. Both fall through to error.locked.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('not-json-at-all', { status: 423 }))
+    );
+    await loadModule('login');
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const err = document.getElementById('login-error');
+    expect(err.hidden).toBe(false);
+    // Plain "Account locked." -- no time portion.
+    expect(err.textContent.toLowerCase()).toContain('locked');
+    expect(err.textContent).not.toContain('2099');
+  });
+
+  it('surfaces a "too many attempts" message on 429', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 429 })));
+    await loadModule('login');
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const err = document.getElementById('login-error');
+    expect(err.hidden).toBe(false);
+    expect(err.textContent.toLowerCase()).toContain('too many');
+  });
+
+  it('surfaces a "form stale" message on 422 (CSRF / form expiry)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 422 })));
+    await loadModule('login');
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const err = document.getElementById('login-error');
+    expect(err.hidden).toBe(false);
+    // hint copy says "session expired" / "refresh" -- match on key fragment.
+    expect(err.textContent.length).toBeGreaterThan(0);
+  });
+
+  it('surfaces an "unexpected" message on a generic 500', async () => {
+    // Catch-all branch: any non-200/401/422/423/429 falls through to
+    // error.unexpected_http with the status interpolated in. Verifies the
+    // visible-status diagnostic is rendered (helps users report bugs).
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 500 })));
+    await loadModule('login');
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const err = document.getElementById('login-error');
+    expect(err.hidden).toBe(false);
+    expect(err.textContent).toContain('500');
+    expect(submitBtn().disabled).toBe(false);
+    expect(submitBtn().textContent).toBe('Sign in');
+  });
+});
+
 describe('login.js — recovery-code input masking', () => {
   beforeEach(() => {
     mountLoginForm();

@@ -240,6 +240,70 @@ describe('tracked-list.js — copyable vs orphan rows', () => {
   });
 });
 
+describe('tracked-list.js — time text by status', () => {
+  beforeEach(mountTrackedFixture);
+
+  // The status branch in renderTrackedList renders a different second-half
+  // for each terminal status: "burned <when>" for burned, "canceled <when>"
+  // for canceled, "expired <when>" for expired. Each branch lives next to
+  // the others; covering one wasn't enough to exercise the branch arm
+  // for the others.
+
+  it('appends "burned <relative>" to the time text for a burned row', async () => {
+    const { fn } = makeFetchStub({
+      trackedItems: [item({ id: 'a', status: 'burned', viewed_at: '2026-04-28T11:30:00Z' })],
+    });
+    vi.stubGlobal('fetch', fn);
+    const mod = await loadModule('sender/tracked-list');
+    await mod.renderTrackedList();
+    await flushAsync();
+
+    const timeEl = document.querySelector('li[data-id="a"] .time');
+    expect(timeEl.textContent).toContain('burned');
+    // Hover tooltip carries absolute timestamps for both events.
+    expect(timeEl.title).toContain('burned');
+  });
+
+  it('appends "canceled <relative>" to the time text for a canceled row', async () => {
+    const { fn } = makeFetchStub({
+      trackedItems: [item({ id: 'a', status: 'canceled', viewed_at: '2026-04-28T11:30:00Z' })],
+    });
+    vi.stubGlobal('fetch', fn);
+    const mod = await loadModule('sender/tracked-list');
+    await mod.renderTrackedList();
+    await flushAsync();
+
+    const timeEl = document.querySelector('li[data-id="a"] .time');
+    expect(timeEl.textContent).toContain('canceled');
+    expect(timeEl.title).toContain('canceled');
+  });
+
+  it('appends "expired <relative>" using expires_at (no viewed_at on expired rows)', async () => {
+    // Expired rows differ from viewed/burned/canceled: there's no
+    // viewed_at because the secret was never delivered. The branch reads
+    // expires_at instead. Hover tooltip's else-branch also reads expires_at
+    // (the "viewed_at-not-set, status==expired" arm at line ~215).
+    const { fn } = makeFetchStub({
+      trackedItems: [
+        item({
+          id: 'a',
+          status: 'expired',
+          viewed_at: null,
+          expires_at: '2026-04-28T10:00:00Z',
+        }),
+      ],
+    });
+    vi.stubGlobal('fetch', fn);
+    const mod = await loadModule('sender/tracked-list');
+    await mod.renderTrackedList();
+    await flushAsync();
+
+    const timeEl = document.querySelector('li[data-id="a"] .time');
+    expect(timeEl.textContent).toContain('expired');
+    expect(timeEl.title).toContain('expired');
+  });
+});
+
 describe('tracked-list.js — copy-row UX', () => {
   beforeEach(mountTrackedFixture);
 
@@ -261,6 +325,81 @@ describe('tracked-list.js — copy-row UX', () => {
     expect(writeText).toHaveBeenCalledWith('https://host/s/abc#KEY');
     expect(li.classList.contains('flash-copy')).toBe(true);
     expect(li.dataset.busy).toBe('1');
+  });
+
+  it('Enter on a focused copyable row triggers the copy', async () => {
+    // Keyboard activation mirrors the click path so a screen-reader user
+    // can copy the URL without a mouse. Without the keydown branch the
+    // row's role=button + tabindex=0 would be a lie.
+    seedUrl('a', 'https://host/s/abc#KEY');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    const { fn } = makeFetchStub({ trackedItems: [item({ id: 'a' })] });
+    vi.stubGlobal('fetch', fn);
+    const mod = await loadModule('sender/tracked-list');
+    await mod.renderTrackedList();
+    await flushAsync();
+
+    const li = document.querySelector('li[data-id="a"]');
+    const ev = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    });
+    li.dispatchEvent(ev);
+    await flushAsync();
+
+    expect(ev.defaultPrevented).toBe(true);
+    expect(writeText).toHaveBeenCalledWith('https://host/s/abc#KEY');
+  });
+
+  it('Space on a focused copyable row triggers the copy', async () => {
+    seedUrl('a', 'https://host/s/abc#KEY');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    const { fn } = makeFetchStub({ trackedItems: [item({ id: 'a' })] });
+    vi.stubGlobal('fetch', fn);
+    const mod = await loadModule('sender/tracked-list');
+    await mod.renderTrackedList();
+    await flushAsync();
+
+    const li = document.querySelector('li[data-id="a"]');
+    const ev = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    li.dispatchEvent(ev);
+    await flushAsync();
+
+    expect(ev.defaultPrevented).toBe(true);
+    expect(writeText).toHaveBeenCalledWith('https://host/s/abc#KEY');
+  });
+
+  it('other keys (e.g. Tab) do not trigger the copy', async () => {
+    seedUrl('a', 'https://host/s/abc#KEY');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    const { fn } = makeFetchStub({ trackedItems: [item({ id: 'a' })] });
+    vi.stubGlobal('fetch', fn);
+    const mod = await loadModule('sender/tracked-list');
+    await mod.renderTrackedList();
+    await flushAsync();
+
+    const li = document.querySelector('li[data-id="a"]');
+    const ev = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    });
+    li.dispatchEvent(ev);
+    await flushAsync();
+
+    expect(ev.defaultPrevented).toBe(false);
+    expect(writeText).not.toHaveBeenCalled();
   });
 
   it('ignores clicks that originated on action buttons inside the row', async () => {
