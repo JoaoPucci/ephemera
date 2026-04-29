@@ -27,8 +27,8 @@
     localStorage.setItem(KEY, theme);
     apply(theme);
     // Button text stays empty; the ::before glyph flips via [data-theme]
-    // selectors in style.css. Visible affordance stays language-neutral so a
-    // Japanese or Portuguese visitor doesn't see a stray English word.
+    // selectors in chrome.css. Visible affordance stays language-neutral so
+    // a Japanese or Portuguese visitor doesn't see a stray English word.
   }
 
   // Run immediately so the page never flashes in the wrong theme.

@@ -14,8 +14,20 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon-light.svg" media="(prefers-color-scheme: light)">
   <link rel="icon" type="image/svg+xml" href="/static/favicon-dark.svg" media="(prefers-color-scheme: dark)">
   <link rel="mask-icon" href="/static/favicon-dark.svg" color="#18181b">
+  {# Stylesheets load in cascade order: tokens (CSS-var definitions) ->
+     base (resets, typography, utilities) -> forms (inputs + buttons) ->
+     components (card, tabs, dropzone, url-box, tracked panel, status
+     pills) -> chrome (top-right desktop pills + mobile hamburger
+     drawer) -> responsive (cross-cutting overrides for <=480px and
+     <=360px). responsive.css MUST stay last; its rules override the
+     same selectors in earlier files, and reordering the link tags
+     would silently break narrow-viewport layouts. #}
   <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/forms.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="/static/chrome.css">
+  <link rel="stylesheet" href="/static/responsive.css">
   <script src="/static/theme.js"></script>
   {# CSP is script-src 'self' -- inline <script> with code is blocked, but
      <script type="application/json"> embeds as data (no execution) and is

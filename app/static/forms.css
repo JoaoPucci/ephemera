@@ -1,0 +1,309 @@
+/* ===================================================================
+   ephemera -- form layer: labels, inputs, custom toggle switch, native
+   <select> styling, the .input-with-action wrapper, and the base
+   `button` rule plus its variants (link, copy-btn, danger flashes,
+   `#create-another`). Loaded after base.css; consumed by every page
+   that renders a form or a button. Companion files: base.css,
+   components.css, chrome.css, responsive.css.
+   =================================================================== */
+
+/* ===================================================================
+   Form controls
+   =================================================================== */
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: var(--space-4) 0 var(--space-2);
+  letter-spacing: 0.01em;
+}
+
+/* Toggle switch. The native <input type="checkbox"> is kept as the
+   source of truth (form value, focus target, keyboard handling,
+   existing JS listener for the label-visibility sync) but visually
+   hidden. The pill + thumb are drawn from the theme tokens, so dark
+   mode rides along automatically via --border / --surface / --accent. */
+.toggle {
+  /* Block-level flex so the toggle always consumes its own line.
+     inline-flex lets the next inline-level element (the submit button)
+     float up next to it when #label-wrap is hidden. */
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.toggle input[type="checkbox"] {
+  /* Stay in layout so focus lands on it, but collapse out of sight. */
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.toggle-slider {
+  position: relative;
+  display: inline-block;
+  width: 2.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+  background: var(--border);
+  border-radius: 999px;
+  transition:
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  inset-inline-start: 2px;
+  width: calc(1.2rem - 4px);
+  height: calc(1.2rem - 4px);
+  background: var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 150ms ease;
+}
+
+.toggle input[type="checkbox"]:checked + .toggle-slider {
+  background: var(--accent);
+}
+
+.toggle input[type="checkbox"]:checked + .toggle-slider::before {
+  transform: translateX(1rem);
+}
+
+/* RTL: the thumb's "off" position sits at inline-start (visual right in
+   RTL); "on" animates toward inline-end. translateX has no logical
+   equivalent, so flip the sign explicitly for RTL instead. */
+[dir="rtl"] .toggle input[type="checkbox"]:checked + .toggle-slider::before {
+  transform: translateX(-1rem);
+}
+
+.toggle input[type="checkbox"]:focus-visible + .toggle-slider {
+  box-shadow: var(--focus-ring);
+}
+
+/* When the toggle is on, the label field appears beneath it. Nest it
+   visually so it reads as "child of the toggle" rather than a separate
+   form row. Indent + a thin left rail does the work. */
+#label-wrap {
+  margin-inline-start: var(--space-4);
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--border);
+  margin-top: var(--space-2);
+}
+#label-wrap label {
+  margin-top: var(--space-1); /* tighter than the default so it sits close to the toggle */
+}
+
+input[type="text"],
+input[type="password"],
+select,
+textarea {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+/* Native <select> puts the dropdown arrow right against the edge and
+   styles it with OS chrome, which clashes with the card. Hide the
+   native arrow and paint our own chevron with a little breathing room.
+   The SVG stroke color matches the muted text token per theme. */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-inline-end: 2.2rem;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1l5 5 5-5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.95rem center;
+}
+/* background-position has no logical variant; flip the chevron to the
+   inline-start edge under RTL so it doesn't overlap the selected text. */
+[dir="rtl"] select {
+  background-position: left 0.95rem center;
+}
+[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%23a1a1aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1l5 5 5-5'/></svg>");
+}
+
+/* Input with an inline action button (e.g., password show/hide toggle) */
+.input-with-action {
+  position: relative;
+  display: block;
+}
+.input-with-action > input {
+  padding-inline-end: 4rem; /* leave room for the action button */
+}
+.input-action {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 6px;
+  transform: translateY(-50%);
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  padding: var(--space-1) var(--space-2);
+  min-height: auto;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  cursor: pointer;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.input-action:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  transform: translateY(-50%);
+  box-shadow: none;
+}
+.input-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ===================================================================
+   Buttons
+   =================================================================== */
+
+button {
+  display: inline-block;
+  min-height: 44px;
+  padding: 0.7rem 1.75rem;
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  touch-action: manipulation; /* kill the 300ms tap delay on mobile browsers */
+  transition:
+    background 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+
+/* Primary-CTA spacing: opt-in. The base `button` rule used to ship with
+   `margin-top: 1.25rem`, but only ~3 of ~24 buttons across the project
+   actually wanted it; every variant (icon button, link, copy-btn,
+   chrome-menu-btn, tab) had to fight it back to 0. Now the gap is
+   explicit on the CTAs that want it.
+   - `form > button[type="submit"]` covers every form's primary submit
+     by structure (no template churn) -- login, sender, anything future.
+   - `.cta` is the escape hatch for a primary CTA that isn't a form
+     submit (e.g. landing's #reveal-btn, which is a click-handler-driven
+     button, not a form).
+   Note: a submit button wrapped in a <div> won't match the structural
+   selector -- that's by design; button rows want their own spacing rule. */
+form > button[type="submit"],
+button.cta {
+  margin-top: var(--space-5);
+}
+
+button:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
+button.link {
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0.3rem 0.5rem;
+  min-height: auto;
+  box-shadow: none;
+  font-weight: 400;
+}
+
+/* Variant: same link affordance, flush against the inline edge of its
+   container -- for cases where a link-styled button sits alongside body
+   text and its default 0.5rem inline padding would visually disconnect
+   it from the line. */
+button.link.flush {
+  padding-inline: 0;
+}
+
+button.link:hover {
+  color: var(--accent-hover);
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+button.copy-btn {
+  min-width: 9rem;
+  /* The copy button always sits below the value it copies (URL box,
+     passphrase row, revealed text). Make the gap-from-content explicit
+     rather than accidentally inherited. */
+  margin-top: var(--space-3);
+}
+
+/* "Create another" lives at the foot of the result section as a low-key
+   restart affordance. .link kills its visual weight; the explicit gap
+   here separates it from the final result row. */
+#create-another {
+  margin-top: var(--space-4);
+}
+
+button.copied,
+button.copied:hover {
+  background: var(--success);
+  color: var(--accent-fg);
+  transform: none;
+  box-shadow: none;
+}
+
+button.copy-error,
+button.copy-error:hover {
+  background: var(--danger);
+  color: var(--accent-fg);
+  transform: none;
+  box-shadow: none;
+}

@@ -1,0 +1,959 @@
+/* ===================================================================
+   ephemera -- chrome layer: top-right desktop pills (lang-picker,
+   theme-toggle, analytics-toggle + popover, user-btn) above the
+   720px breakpoint, and the full mobile hamburger drawer (bar, scrim,
+   panel, rows, switches, disclosure, danger row) below it. The 720px
+   media query that flips between them lives at the bottom of this
+   file -- both surfaces are the same product feature at two
+   breakpoints, so they share visual vocabulary. Loaded after
+   components.css. Companion files: base.css, forms.css,
+   components.css, responsive.css.
+   =================================================================== */
+
+/* ===================================================================
+   Top-right chrome: language picker + theme toggle, fixed pair
+   =================================================================== */
+
+.top-chrome {
+  position: fixed;
+  top: 1rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Class name retains "right" for stability against templates, but the
+   rule uses inset-inline-end so the chrome follows direction: visual
+   right in LTR, visual left in RTL. */
+.top-chrome-right {
+  inset-inline-end: 1rem;
+}
+
+/* Language picker pill. Native <select> with appearance stripped so we can
+   match the theme-toggle pill aesthetic; a custom SVG chevron replaces the
+   browser's dropdown arrow. The popup itself (the option menu) stays OS-
+   native -- that's not reliably styleable across browsers and the rest of
+   the app has the same "don't fight the platform" posture (file picker,
+   date picker, etc.). */
+.lang-picker {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  /* Logical padding so the asymmetric chevron room flips automatically in
+     RTL: inline-end gets the 1.8rem for the chevron, inline-start gets the
+     0.85rem the text hugs. Background-position for the chevron itself is
+     overridden per-direction below (no logical background-position).
+     Off the --space-* scale by design: padding-block tunes the pill's
+     vertical rhythm to match `.theme-toggle` and `.user-btn` exactly so
+     all three pills sit at identical height in the chrome row. */
+  padding-block: 0.4rem;
+  padding-inline: 0.85rem 1.8rem;
+  /* min-width keeps the picker's width steady across locales. Without it,
+     the pill visibly jitters as the selected-option text varies between
+     "English" (7 chars) and "日本語" (3 CJK-wide chars) or "Português
+     (Brasil)" (18 chars). 7.5rem fits the longest endonym at 0.8rem font. */
+  min-width: 7.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  /* Explicit CJK fallbacks so "日本語" / "简体中文" / "繁體中文" render
+     with proper glyphs on Linux where the base sans-serif stack lacks CJK
+     coverage. macOS + Windows already resolve via system fallback. */
+  font-family:
+    inherit, "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans CJK SC", "Noto Sans CJK TC",
+    "Microsoft YaHei", sans-serif;
+  min-height: auto;
+  margin: 0;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  /* Chevron. Zinc-500 (muted in light theme); dark-theme rule below swaps
+     to zinc-400 so it stays visible against the dark surface. Inline SVG
+     keeps the CSS self-contained and avoids a round-trip for a 200-byte
+     asset. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1 L5 5 L9 1' stroke='%2371717a' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+[data-theme="dark"] .lang-picker {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1 L5 5 L9 1' stroke='%23a1a1aa' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+/* Chevron flips to the inline-start edge under RTL. The SVG itself is a
+   downward V (no directional meaning), so no transform needed -- just
+   reposition. Matches the padding-inline asymmetry so selected-option
+   text still hugs inline-start with chevron room at inline-end. */
+[dir="rtl"] .lang-picker {
+  background-position: left 0.75rem center;
+}
+
+.lang-picker:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.lang-picker:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Options: light styling for the OS-native popup. Browsers vary on how
+   much they honour this, but the base color + background pair is widely
+   respected and keeps the menu readable in dark theme. */
+.lang-picker option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.theme-toggle {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  /* Glyph-only pill. The ::before half-circle is the entire visible
+     affordance; no text to pad around. Padding tuned to match the
+     lang-picker's vertical rhythm so both pills sit at the same height
+     when displayed side-by-side. */
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+  min-height: auto;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--surface);
+  transform: none;
+  box-shadow: var(--shadow-md);
+}
+
+/* Half-filled circle glyph -- the universal "theme" signifier. The filled
+   half flips based on the current theme, hinting at the dual state. No
+   margin-right: the button carries no trailing text now that theme.js
+   stopped writing "dark"/"light" into the DOM (that label wasn't
+   localized and read as an English wart next to the lang-picker). */
+.theme-toggle::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1.25px solid currentColor;
+  border-radius: 50%;
+  background: linear-gradient(to right, currentColor 0 50%, transparent 50% 100%);
+  transition: background 150ms ease;
+}
+[data-theme="dark"] .theme-toggle::before {
+  background: linear-gradient(to right, transparent 0 50%, currentColor 50% 100%);
+}
+
+/* Per-user analytics-opt-in pill. Same pill geometry as .theme-toggle
+   so the row of icon-buttons in top-chrome-right reads as a coherent
+   group. The icon (a bar-chart glyph) is the entire visible affordance.
+   role="switch" + aria-checked carry the on/off state for assistive
+   tech; the visual cue is a color shift from --muted (off) to --accent
+   (on), matching the existing "off-quiet, on-prominent" idiom used for
+   the ARMED state on the user pill confirm flow. */
+.analytics-toggle {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+  min-height: auto;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.analytics-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--surface);
+  transform: none;
+  box-shadow: var(--shadow-md);
+}
+
+.analytics-toggle[aria-checked="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.analytics-toggle svg {
+  display: block;
+}
+
+/* Visible label between icon and state-dot. JS fills it from
+   analytics.label so the chrome-pill ships without a server-rendered
+   English fallback that would leak past localized users. */
+.analytics-toggle {
+  gap: 0.4rem;
+}
+.analytics-toggle-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* State-at-a-glance dot. Muted when off, accent when on. The dot is
+   the visual switch (cheaper-feeling than a sliding pill on a chrome
+   button) and pairs with the chevron to communicate "this opens
+   something AND has a state". */
+.analytics-toggle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+  transition: background 150ms ease;
+  display: inline-block;
+}
+.analytics-toggle[aria-checked="true"] .analytics-toggle-dot {
+  background: var(--accent);
+}
+
+/* Chevron signals "opens a dialog/popover" -- resolves the "icon does
+   nothing visible" complaint. Rotates 180deg when the popover is open
+   so the affordance reads as "currently expanded". */
+.analytics-toggle-chevron {
+  display: block;
+  color: var(--muted);
+  transition: transform 150ms ease;
+}
+.analytics-toggle[aria-expanded="true"] .analytics-toggle-chevron {
+  transform: rotate(180deg);
+}
+
+/* Visible opt-OUT confirmation tip. position: fixed so it overlays the
+   page without taking flow space -- the prior inline-text shape pushed
+   the lang-picker / theme-toggle around when the ack appeared.
+   Anchored under the chrome row, right edge; the SR announcement still
+   rides the visually-hidden aria-live span next to it (sighted users
+   see this; screen-reader users hear the same text). */
+.analytics-toggle-ack-tip {
+  position: fixed;
+  top: 3.25rem;
+  inset-inline-end: 1rem;
+  z-index: 60;
+  padding: 0.4rem 0.75rem;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-sm);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+  pointer-events: none;
+}
+.analytics-toggle-ack-tip.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Confirmation popover for opt-IN on desktop. Anchored under the pill
+   right edge; the JS toggles `hidden` rather than `popover` for older-
+   browser compatibility. max-width keeps DE/FR copy from running too
+   wide; min-width gives the body enough room for the example clauses
+   to wrap naturally without orphan single words. */
+.analytics-popover {
+  position: fixed;
+  top: 3.5rem;
+  inset-inline-end: 1rem;
+  z-index: 60;
+  max-width: 320px;
+  min-width: 260px;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.analytics-popover-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.analytics-popover-body {
+  margin: 0 0 0.75rem;
+  color: var(--text);
+}
+.analytics-popover-note {
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.analytics-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.analytics-popover-cancel,
+.analytics-popover-confirm {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.analytics-popover-cancel:hover {
+  background: color-mix(in srgb, var(--muted) 8%, var(--surface));
+}
+.analytics-popover-confirm {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+.analytics-popover-confirm:hover {
+  filter: brightness(1.05);
+}
+
+/* Visually-hidden utility (standard a11y pattern: removed from sighted
+   layout but still in the accessibility tree, so aria-live announcements
+   reach screen readers without the text taking layout space). Used by
+   the analytics-opt-in opt-OUT ack -- the visual confirmation is the
+   dot color flip + switch animation; the spoken confirmation rides
+   this hidden span. */
+.visually-hidden {
+  /* biome-ignore lint/complexity/noImportantStyles: standard a11y utility -- must beat any author rule that would reposition the element back into flow. */
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.user-btn {
+  position: fixed;
+  top: 1rem;
+  inset-inline-start: 1rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  /* Off-scale by design: tuned for pill-height parity with .lang-picker
+     and .theme-toggle so the three pills line up across the chrome row. */
+  padding: 0.35rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  min-height: auto;
+  margin: 0;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+  z-index: 10;
+}
+
+.user-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  transition: background 150ms ease;
+}
+
+#user-name {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-sep {
+  color: var(--border);
+  /* Off-scale: hairline kerning around the "·" separator, deliberately
+     sub-token to keep the glyph optically tight against its neighbours. */
+  padding: 0 0.05rem;
+}
+.user-action {
+  text-transform: lowercase;
+}
+
+.user-btn:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--surface);
+  transform: none;
+  box-shadow: var(--shadow-md);
+}
+.user-btn:hover #user-name,
+.user-btn:hover .user-sep,
+.user-btn:hover .user-action {
+  color: var(--danger);
+}
+.user-btn:hover .user-dot {
+  background: var(--danger);
+}
+
+/* Armed state: first click prepares the sign-out, second click commits
+   (see sender.js). Visually stronger than :hover -- same danger-colour
+   family, but with a deliberate background tint so users can tell at a
+   glance that the button is "armed" rather than just being moused-over. */
+.user-btn.armed {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.user-btn.armed #user-name,
+.user-btn.armed .user-sep,
+.user-btn.armed .user-action {
+  color: var(--danger);
+}
+.user-btn.armed .user-dot {
+  background: var(--danger);
+}
+
+.user-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ===================================================================
+   Mobile chrome: hamburger menu
+
+   Replaces the desktop top-chrome + user pill below the mobile
+   breakpoint. Anatomy: a fixed (invisible) top bar that anchors the
+   hamburger button, a backdrop scrim that fades in with the drawer,
+   and a drawer that slides down from under the bar. Rows are
+   purpose-built for a vertical menu, grouped into sections, with a
+   switch-style toggle for theme and a two-click confirm for sign-out.
+   =================================================================== */
+
+/* Hidden above the mobile breakpoint; the @media block below is the
+   single opt-in. */
+.chrome-menu {
+  display: none;
+}
+
+/* Drawer-wide tap affordance hygiene:
+   - no tap-highlight flash during finger-down,
+   - no text selection or long-press callout on menu rows
+     (they're controls, not content).
+   Interactive targets additionally opt into touch-action: manipulation
+   to skip the 300ms tap delay on mobile browsers. */
+.chrome-menu,
+.chrome-menu * {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.chrome-menu-btn,
+.chrome-menu-row,
+.chrome-menu-row-native,
+.chrome-menu-scrim {
+  touch-action: manipulation;
+}
+
+@media (max-width: 720px) {
+  /* The desktop top-chrome + user-btn step aside in favor of the
+     drawer once the chrome row would crowd the centered "ephemera"
+     wordmark. Originally 480px; bumped to 720 when the analytics-opt-in
+     pill landed -- with lang-picker + analytics + theme on the right
+     and user-btn on the left, the row needs ~720px of clearance to
+     avoid colliding with the wordmark in the middle. The 480px block
+     just above this still applies for phone-style typography / card
+     layout below 480.
+
+     The bottom wordmark + .app-version STAY visible: they're the brand
+     signature and belong in their paired-baseline position above the
+     card, not squeezed into a toolbar. */
+  .top-chrome,
+  .user-btn {
+    display: none;
+  }
+
+  body {
+    /* Reserve room for the hamburger button's fixed slot; content begins
+       below the notional bar line even though the bar itself is invisible. */
+    padding-top: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
+  }
+
+  .chrome-menu {
+    display: block;
+  }
+
+  /* ----- Top bar -----
+     Intentionally invisible. The bar is a structural slot -- a landing
+     edge for the drawer to slide from, and an anchor point for the
+     hamburger button -- not a visible surface. pointer-events skip the
+     empty area so taps reach the page underneath; the button itself
+     opts back in. */
+  .chrome-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
+    padding: max(0.5rem, env(safe-area-inset-top)) 0.75rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    background: transparent;
+    pointer-events: none;
+    z-index: 12;
+  }
+
+  /* ----- Hamburger button -----
+     44px (2.75rem) hit target: Apple HIG minimum; Material recommends
+     48px but 44px clears both WCAG 2.5.8 and platform guidance. The
+     glyph inside stays small (18x14) so visual weight doesn't change,
+     only the touchable area. */
+  .chrome-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    pointer-events: auto;
+    -webkit-appearance: none;
+    appearance: none;
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+  /* Reset the interaction states inherited from the global
+     `button` / `button:hover` / `button:focus-visible` rules defined
+     earlier in this file -- those paint an accent background + lift +
+     focus-ring that's wrong for this transparent chrome button. The
+     class+pseudo specificity here beats element+pseudo, so the reset
+     applies unconditionally; the pointer-aware media block below is
+     the only place we re-opt-in to hover / focus-ring visuals. */
+  .chrome-menu-btn:hover,
+  .chrome-menu-btn:active,
+  .chrome-menu-btn:focus,
+  .chrome-menu-btn:focus-visible {
+    background: transparent;
+    transform: none;
+    box-shadow: none;
+    outline: none;
+  }
+  /* Re-apply hover + focus-visible affordances only where the PRIMARY
+     pointer is fine (mouse, trackpad). Gating on (hover: hover) alone
+     isn't enough: Samsung devices with an S Pen report hover-capable
+     even though the user is tapping with a finger, and the focus-ring
+     then paints as a persistent halo around the X after tap.
+     `(pointer: fine)` requires a precise primary pointer, which the
+     S Pen isn't (the device's primary is still the touchscreen). */
+  @media (hover: hover) and (pointer: fine) {
+    .chrome-menu-btn:hover {
+      background: color-mix(in srgb, var(--muted) 12%, transparent);
+    }
+    .chrome-menu-btn:focus-visible {
+      box-shadow: var(--focus-ring);
+    }
+  }
+
+  /* Icon: 3 lines built from spans, no SVG. Top and bottom rotate into
+     an X on open; middle fades out. The fixed icon box (18x14) pins the
+     center so the morph reads as transform, not relayout. */
+  .chrome-menu-btn-icon {
+    position: relative;
+    display: inline-block;
+    width: 1.125rem;
+    height: 0.875rem;
+  }
+  .chrome-menu-btn-icon-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1.6px;
+    background: currentColor;
+    border-radius: 2px;
+    transition:
+      transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1),
+      opacity 0.14s;
+    transform-origin: center;
+  }
+  .chrome-menu-btn-icon-line:nth-child(1) {
+    top: 0;
+  }
+  .chrome-menu-btn-icon-line:nth-child(2) {
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .chrome-menu-btn-icon-line:nth-child(3) {
+    bottom: 0;
+  }
+
+  html[data-chrome-menu-open] .chrome-menu-btn-icon-line:nth-child(1) {
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+  }
+  html[data-chrome-menu-open] .chrome-menu-btn-icon-line:nth-child(2) {
+    opacity: 0;
+    transform: translateY(-50%) scaleX(0.1);
+  }
+  html[data-chrome-menu-open] .chrome-menu-btn-icon-line:nth-child(3) {
+    bottom: 50%;
+    transform: translateY(50%) rotate(-45deg);
+  }
+
+  /* ----- Backdrop scrim ----- */
+  .chrome-menu-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-out;
+    z-index: 10;
+  }
+  html[data-chrome-menu-open] .chrome-menu-scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ----- Drawer ----- */
+  .chrome-menu-panel {
+    position: fixed;
+    top: calc(3.25rem + max(0.5rem, env(safe-area-inset-top)));
+    left: 0;
+    right: 0;
+    max-height: calc(100vh - 3.25rem - max(0.5rem, env(safe-area-inset-top)));
+    overflow-y: auto;
+    padding: 0.5rem 0.6rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-102%);
+    transition:
+      transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1),
+      visibility 0s linear 0.26s;
+    visibility: hidden;
+    z-index: 11;
+  }
+  html[data-chrome-menu-open] .chrome-menu-panel {
+    transform: translateY(0);
+    visibility: visible;
+    transition:
+      transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1),
+      visibility 0s linear 0s;
+  }
+
+  /* ----- Sections ----- */
+  .chrome-menu-section {
+    padding: 0.25rem 0;
+    /* Staggered entrance: each section (in source order via --stagger-i)
+       fades + rises in a beat later than the previous. Keeps the drawer
+       opening from reading as one flat slide. */
+    opacity: 0;
+    transform: translateY(-4px);
+    transition:
+      opacity 0.22s ease-out,
+      transform 0.22s ease-out;
+    transition-delay: 0s;
+  }
+  .chrome-menu-section + .chrome-menu-section {
+    border-top: 1px solid var(--border);
+    margin-top: 0.25rem;
+    padding-top: 0.5rem;
+  }
+  html[data-chrome-menu-open] .chrome-menu-section {
+    opacity: 1;
+    transform: translateY(0);
+    transition-delay: calc(60ms + var(--stagger-i, 0) * 40ms);
+  }
+
+  .chrome-menu-section-label {
+    margin: 0 0 0.2rem;
+    padding: 0 0.75rem;
+    font-size: 0.66rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  /* ----- User header ----- */
+  .chrome-menu-user {
+    display: flex;
+    flex-direction: column;
+    padding: 0.2rem 0.75rem 0.4rem;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+  .chrome-menu-user-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chrome-menu-user-sub {
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  /* ----- Rows ----- */
+  .chrome-menu-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0.5rem 0.75rem;
+    border: 0;
+    border-radius: 0.75rem;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.92rem;
+    text-align: start;
+    cursor: pointer;
+    transition:
+      background 0.12s,
+      color 0.12s;
+  }
+  .chrome-menu-row:hover,
+  .chrome-menu-row:active {
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+  }
+  .chrome-menu-row:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .chrome-menu-row-icon {
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+  .chrome-menu-row-label {
+    flex: 0 1 auto;
+  }
+
+  /* Confirmation disclosure for the analytics-opt-in row. Slides down
+     under the trigger button when aria-expanded="true" goes on the
+     button. Lives as a sibling element so it can render full-bleed
+     without inheriting button-padding constraints. The cancel/confirm
+     button shapes mirror the desktop popover so both surfaces feel
+     like the same dialog at different breakpoints. */
+  .chrome-menu-row-disclosure {
+    padding: 0.5rem 0.75rem 0.85rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+  .chrome-menu-row-disclosure-body {
+    margin: 0 0 0.6rem;
+  }
+  .chrome-menu-row-disclosure-note {
+    margin: 0 0 0.85rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .chrome-menu-row-disclosure-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+  .chrome-menu-row-disclosure-cancel,
+  .chrome-menu-row-disclosure-confirm {
+    padding: 0.45rem 0.95rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    transition:
+      background 120ms ease,
+      border-color 120ms ease;
+  }
+  .chrome-menu-row-disclosure-cancel:hover,
+  .chrome-menu-row-disclosure-cancel:active {
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+  }
+  .chrome-menu-row-disclosure-confirm {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast, #fff);
+  }
+  .chrome-menu-row-disclosure-confirm:hover {
+    filter: brightness(1.05);
+  }
+  .chrome-menu-row-value {
+    margin-inline-start: auto;
+    font-size: 0.85rem;
+    color: var(--muted);
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chrome-menu-row-chevron {
+    flex-shrink: 0;
+    color: var(--muted);
+    opacity: 0.8;
+  }
+  [dir="rtl"] .chrome-menu-row-chevron {
+    transform: scaleX(-1);
+  }
+
+  /* Language row: native <select> layered invisibly over the row so the
+     tap target is the whole row. Explicit color on <option> so Chromium
+     / Brave renders the popup text (the select itself is transparent;
+     options inherit color when we don't say otherwise). */
+  .chrome-menu-row-select {
+    cursor: pointer;
+  }
+  .chrome-menu-row-native {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: transparent;
+    opacity: 0;
+    appearance: none;
+    cursor: pointer;
+    font: inherit;
+  }
+  .chrome-menu-row-native option {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  /* Theme row: icon swaps with the current theme. The trailing switch
+     animates its thumb between the two ends. */
+  .chrome-menu-row-icon-sun {
+    display: inline-block;
+  }
+  .chrome-menu-row-icon-moon {
+    display: none;
+  }
+  html[data-theme="dark"] .chrome-menu-row-icon-sun {
+    display: none;
+  }
+  html[data-theme="dark"] .chrome-menu-row-icon-moon {
+    display: inline-block;
+  }
+
+  .chrome-menu-switch {
+    position: relative;
+    display: inline-block;
+    margin-inline-start: auto;
+    width: 2.4rem;
+    height: 1.3rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 30%, transparent);
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .chrome-menu-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: calc(1.3rem - 4px);
+    height: calc(1.3rem - 4px);
+    border-radius: 999px;
+    background: var(--surface);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  /* Switch is driven by `aria-checked` on the parent toggle button, not
+     by the global `<html data-theme>`. Both the theme row and the
+     analytics row use this component; chrome-menu.js syncs the theme
+     button's aria-checked from the theme attribute, analytics-toggle.js
+     syncs the analytics button's aria-checked from /api/me + click.
+     Tying the visual to aria-checked means a button's switch tracks
+     ITS OWN state, not whoever else's state happens to be ambient. */
+  .chrome-menu-row-toggle[aria-checked="true"] .chrome-menu-switch {
+    background: var(--accent);
+  }
+  .chrome-menu-row-toggle[aria-checked="true"] .chrome-menu-switch-thumb {
+    transform: translateX(1.1rem);
+  }
+  [dir="rtl"] .chrome-menu-row-toggle[aria-checked="true"] .chrome-menu-switch-thumb {
+    transform: translateX(-1.1rem);
+  }
+
+  /* Danger row (sign-out) + armed state */
+  .chrome-menu-row-danger {
+    color: var(--danger);
+  }
+  .chrome-menu-row-danger .chrome-menu-row-icon {
+    color: var(--danger);
+  }
+  .chrome-menu-row-danger:hover {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
+  .chrome-menu-row-danger.armed {
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+  .chrome-menu-row-danger.armed .chrome-menu-row-label {
+    animation: chrome-menu-armed-fade 0.18s ease-out;
+  }
+  @keyframes chrome-menu-armed-fade {
+    from {
+      opacity: 0;
+      transform: translateX(-0.2rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}

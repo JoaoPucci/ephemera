@@ -5,9 +5,10 @@
    Theme is toggled via `data-theme="light"|"dark"` on <html>.
 
    Lives in its own file so "what color is X" is answered by a single
-   short document instead of a search through style.css. Loaded via a
-   <link> tag before style.css in every HTML page so :root / [data-theme]
-   values are available wherever they're referenced via var().
+   short document instead of a search through the layered stylesheets.
+   Loaded via a <link> tag BEFORE base/forms/components/chrome/responsive
+   in every HTML page so :root / [data-theme] values are available
+   wherever they're referenced via var().
    =================================================================== */
 
 :root {

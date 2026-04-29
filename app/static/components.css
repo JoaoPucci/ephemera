@@ -1,0 +1,714 @@
+/* ===================================================================
+   ephemera -- component layer: card container, sender-form tabs,
+   image-upload dropzone, URL + revealed-content boxes, the tracked-
+   secrets panel, and the status pills the panel + sender result both
+   render. Loaded after forms.css. Companion files: base.css, forms.css,
+   chrome.css, responsive.css.
+   =================================================================== */
+
+/* ===================================================================
+   Card container
+   =================================================================== */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  max-width: 520px;
+  width: 100%;
+  padding: 2rem;
+  transition:
+    background 200ms ease,
+    border-color 200ms ease;
+}
+
+.card.wide {
+  max-width: 680px;
+}
+
+/* ===================================================================
+   Tabs
+   =================================================================== */
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-1);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.tab {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: 0.9rem;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 0;
+  min-height: 36px;
+  box-shadow: none;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+.tab.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ===================================================================
+   Dropzone
+   =================================================================== */
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    color 150ms ease;
+}
+
+.dropzone:hover,
+.dropzone.drag {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  color: var(--text);
+}
+
+/* ===================================================================
+   URL and revealed-content boxes
+   =================================================================== */
+
+.url-box {
+  background: var(--bg);
+  padding: var(--space-3);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  word-break: break-all;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88rem;
+}
+
+/* Variant of .url-box that hosts an inline action (show/hide). Mirrors the
+   .input-with-action pattern used on form inputs so the value box reads
+   visually identical to the compose-form passphrase field. */
+.url-box--with-action {
+  position: relative;
+  padding-inline-end: 4rem;
+}
+.url-box--with-action > .input-action {
+  inset-inline-end: 6px;
+}
+
+/* Result rows on the sender success screen: labeled stacks. Eyebrow above
+   value, action(s) below. The eyebrow carries the noun ("URL", "Passphrase")
+   so the helper text can stay short. */
+.result-row {
+  margin-top: var(--space-5);
+}
+.result-eyebrow {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--space-2);
+}
+.result-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: var(--space-2) 0 0;
+}
+
+/* Masked passphrase: the dots read as deliberate, not as a font glitch. Length
+   is capped in JS (see sender.js) so a shoulder-surfer can't infer the real
+   passphrase length from the bullet count. */
+#result-passphrase[data-masked="true"] {
+  letter-spacing: 0.15em;
+}
+
+.revealed-text {
+  background: var(--bg);
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0 0 var(--space-1);
+  animation: fadein 300ms ease;
+}
+
+/* The receiver text-reveal copy button sits very close to the revealed
+   text (which has its own bottom margin); tighter than the default
+   .copy-btn gap to keep the action visually paired with its target. */
+#state-text .copy-btn {
+  margin-top: var(--space-2);
+}
+#state-text .muted,
+#state-image .muted {
+  margin-top: var(--space-6);
+}
+
+#revealed-image {
+  max-width: 100%;
+  height: auto;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 6px;
+  display: block;
+  margin: 0 auto var(--space-4);
+  animation: fadein 300ms ease;
+  cursor: zoom-in;
+  transition:
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+#revealed-image:hover {
+  box-shadow: var(--shadow-md);
+}
+#revealed-image:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Fullscreen zoom overlay */
+#zoom-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  cursor: zoom-out;
+  animation: fadein 180ms ease;
+  padding: 1rem;
+}
+#zoom-image {
+  max-width: 95vw;
+  max-height: 95vh;
+  border-radius: 4px;
+  display: block;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  animation: zoomin 200ms ease;
+}
+.zoom-close {
+  position: fixed;
+  top: 1rem;
+  inset-inline-end: 1rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  min-height: auto;
+  margin: 0;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.zoom-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: none;
+  box-shadow: none;
+}
+.zoom-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.4);
+}
+
+@keyframes zoomin {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadein {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ===================================================================
+   Tracked-secrets panel
+   A collapsible panel: the whole header bar is a button; the body
+   animates its max-height on expand; list is capped + internally
+   scrollable so it never pushes the compose form off-screen.
+   =================================================================== */
+
+#tracked-section {
+  margin-bottom: var(--space-5);
+}
+
+.tracked-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+  margin: 0;
+  min-height: auto;
+  box-shadow: none;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.tracked-panel-header:hover {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  transform: none;
+  box-shadow: none;
+}
+.tracked-panel-header:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tracked-panel-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.tracked-panel-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  /* Off-scale by design: badge padding is tuned to the digit width at
+     0.72rem; --space-* horizontals would make the pill ovular. */
+  padding: 0.1rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  min-width: 1.25rem;
+  text-align: center;
+}
+
+/* Chevron drawn from two borders; rotates 180deg on open. The two
+   filled borders (right + bottom) form a V that points down; rotation
+   state toggles it up vs down. The V is vertical (no left/right
+   semantic), so margin uses the logical form to push to the flex end,
+   but the borders themselves stay physical -- swapping them for
+   inline-end/block-end under RTL would rotate the V into an L. */
+.tracked-panel-chevron {
+  margin-inline-start: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+#tracked-section.open .tracked-panel-chevron {
+  transform: rotate(-135deg) translate(1.5px, 1.5px);
+}
+
+/* Body: max-height transition. Start at 0, animate up to the cap on open.
+   Internal scroll kicks in for lists longer than the cap. */
+.tracked-panel-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 260ms ease;
+}
+#tracked-section.open .tracked-panel-body {
+  max-height: 22rem; /* ~280px; room for ~5 rows + footer */
+  overflow-y: auto;
+}
+/* Themed scrollbar -- the OS default clashes with the dark surface.
+   Firefox / recent Safari / Chromium use the standard properties;
+   Webkit pseudo-elements cover the rest. Both paths pull from the
+   same theme tokens, so dark mode just works. */
+.tracked-panel-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.tracked-panel-body::-webkit-scrollbar {
+  width: 8px;
+}
+.tracked-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tracked-panel-body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+.tracked-panel-body::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+.tracked-panel-inner {
+  padding: var(--space-1) var(--space-1) 0;
+}
+
+#tracked-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) var(--space-1) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tracked-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-1);
+  margin-top: var(--space-2);
+  border-top: 1px dashed var(--border);
+}
+.tracked-panel-footer:empty,
+.tracked-panel-footer:has(> [hidden]) {
+  display: none;
+}
+
+.tracked-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  transition: border-color 150ms ease;
+}
+
+.tracked-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+/* Clickable rows (have a cached URL we can re-copy). */
+.tracked-item.copyable {
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 80ms ease;
+}
+.tracked-item.copyable:hover {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.tracked-item.copyable:active {
+  transform: translateY(1px);
+}
+.tracked-item.copyable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tracked-item.flash-copy {
+  background: color-mix(in srgb, var(--success) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.tracked-item.flash-copy .time {
+  color: var(--success);
+}
+
+.tracked-item.flash-error {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+.tracked-item.flash-error .time {
+  color: var(--danger);
+}
+
+/* Rows we can't re-copy (server has them, browser doesn't hold the URL). */
+.tracked-item.orphan {
+  cursor: default;
+  opacity: 0.75;
+}
+.tracked-item.orphan:hover {
+  border-color: var(--border);
+  background: var(--bg);
+}
+.tracked-item.orphan .label {
+  font-weight: 400;
+}
+.orphan-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+  letter-spacing: 0.01em;
+  /* Off-scale: optical baseline correction. Italic descenders sit
+     ~1px high; this 0.8px push pulls the hint visually onto the same
+     baseline as the row's primary label above it. */
+  margin-top: 0.05rem;
+}
+
+.tracked-meta {
+  display: flex;
+  flex-direction: column;
+  /* Off-scale by design: deliberately super-tight intra-meta gap so
+     the label + time stack reads as a single visual block, not as two
+     siblings. --space-1 (4px) opens it up too much. */
+  gap: 0.15rem;
+  min-width: 0;
+}
+/* Labels are capped at 60 chars on the input side, but even 40 chars can
+   overflow a narrow card and push everything sideways. Truncate visually
+   with ellipsis; the full text lives in the `title` attribute for hover. */
+/* biome-ignore lint/style/noDescendingSpecificity: `.tracked-item.orphan .label`
+   (more specific, earlier) overrides this default font-weight on purpose.
+   That's the standard modifier-class pattern; the warning is a false
+   positive here. */
+.tracked-meta .label {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Single line + ellipsis keeps the row height predictable. The full text
+   is always in the `title` attribute, so hovering reveals everything. */
+/* biome-ignore lint/style/noDescendingSpecificity: `.tracked-item.flash-copy
+   .time` above intentionally overrides this base color when the row is in
+   the post-copy flash state. Modifier-class-over-default is the pattern. */
+.tracked-meta .time {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.tracked-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tracked-remove {
+  background: none;
+  color: var(--muted);
+  border: none;
+  /* Off-scale: icon-only "x" button, padding tuned to the glyph
+     footprint rather than the spacing scale. */
+  padding: 0.2rem 0.45rem;
+  min-height: auto;
+  margin: 0;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  box-shadow: none;
+  border-radius: 4px;
+  transition:
+    color 150ms ease,
+    background 150ms ease;
+}
+
+.tracked-remove:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  transform: none;
+  box-shadow: none;
+}
+
+/* Revoke-the-URL action on pending tracked rows. Two states: idle (muted
+   text, "cancel") and armed (danger text, "confirm?") -- user clicks once
+   to arm, clicks within 3s to confirm. Prevents accidental revocation. */
+.tracked-cancel,
+.tracked-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  /* Off-scale: pill-button padding tuned to the 0.78rem font + the
+     idle/armed state transition. .tracked-clear bumps this slightly
+     (see below) to carry an icon. */
+  padding: 0.3rem 0.7rem;
+  min-height: auto;
+  margin: 0;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  box-shadow: none;
+  border-radius: 999px;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+/* Raise the clear-button's visual weight a hair since it carries an icon.
+   The per-row cancel button stays text-only / tighter. */
+.tracked-clear {
+  padding: 0.35rem 0.8rem;
+}
+
+.tracked-clear-icon {
+  flex-shrink: 0;
+  /* stroke inherits via currentColor; size is fixed relative to the label */
+}
+.tracked-cancel:hover,
+.tracked-clear:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  transform: none;
+  box-shadow: none;
+}
+.tracked-cancel.armed,
+.tracked-clear.armed {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.tracked-cancel:focus-visible,
+.tracked-clear:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tracked-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ===================================================================
+   Status pills
+   =================================================================== */
+
+.status-widget {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: var(--space-2) 0 var(--space-4);
+}
+
+.status-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-pill {
+  display: inline-block;
+  /* Off-scale by design: compact pill tuned to the 6px dot + 0.78rem
+     text vertical centring; --space-* values would visibly oversize it. */
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  text-transform: lowercase;
+  /* Belt on the suspender: if a row ever gets squeezed enough to push the
+     pill content toward wrapping, keep dot + text on one line regardless. */
+  white-space: nowrap;
+}
+
+.status-pill.pending {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.status-pill.pending::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-inline-end: var(--space-2);
+  vertical-align: middle;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.status-pill.viewed {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.status-pill.burned,
+.status-pill.expired,
+.status-pill.canceled {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
+.status-pill.gone {
+  color: var(--muted);
+  background: var(--border);
+  border-color: var(--border);
+}
+
+.muted-inline {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+#result-expiry {
+  margin-top: var(--space-5);
+}
