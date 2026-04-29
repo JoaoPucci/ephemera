@@ -70,10 +70,30 @@ def test_manifest_has_required_keys(client):
     assert not missing, f"manifest missing required keys: {sorted(missing)}"
 
 
-def test_manifest_start_url_carries_pwa_source(client):
+def test_manifest_pins_stable_id(client):
+    # id decouples the install's identity from start_url. Without it,
+    # browsers fall back to start_url for identity and a future change
+    # to where the app lands could fork the installed app from a fresh
+    # install. Pin "/" forever so the same install upgrades in place
+    # across start_url moves (e.g. when the app is eventually re-rooted
+    # at /). Must be same-origin as start_url per the manifest spec.
     r = client.get("/static/manifest.webmanifest")
     data = json.loads(r.text)
-    assert data["start_url"] == "/?source=pwa"
+    assert data.get("id") == "/", (
+        "manifest must pin id=/ so identity is stable across start_url changes"
+    )
+
+
+def test_manifest_start_url_lands_on_sender(client):
+    # The operator's job-to-be-done from the home screen is "create a
+    # secret right now" -- the sender form is the unambiguous answer.
+    # The bare root (/) returns 404 today, so start_url must point at
+    # /send, not /. ?source=pwa is the presence-only signal a future
+    # telemetry consumer can use to distinguish a home-screen launch
+    # from a browser visit.
+    r = client.get("/static/manifest.webmanifest")
+    data = json.loads(r.text)
+    assert data["start_url"] == "/send?source=pwa"
 
 
 def test_manifest_display_is_standalone(client):
