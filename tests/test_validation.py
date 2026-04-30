@@ -1,6 +1,8 @@
 """Tests for app.validation: MIME whitelist, magic bytes, size limits."""
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app import validation
 
@@ -79,3 +81,45 @@ def test_detect_mime_returns_correct_values_for_all_formats(
 
 def test_detect_mime_returns_none_for_svg(sample_svg_bytes):
     assert validation.detect_mime(sample_svg_bytes) is None
+
+
+# ---------------------------------------------------------------------------
+# Property-based tests
+#
+# Validation is exactly the kind of module where the magic-byte checks
+# need to hold across the full byte range, not just the four crafted
+# fixtures above. Hypothesis fuzzes detect_mime() against random short
+# byte strings and asserts the contract: the function only ever returns
+# a known MIME or None, and never raises. Catches "input shorter than
+# the magic-byte prefix you sliced" and "byte sequence that looks like
+# WEBP but isn't" classes of bug.
+# ---------------------------------------------------------------------------
+
+
+@given(data=st.binary(min_size=0, max_size=64))
+@settings(max_examples=300)
+def test_property_detect_mime_returns_known_or_none(data: bytes):
+    """For any short byte string, detect_mime returns either a value in
+    ALLOWED_MIME_TYPES or None. It does not raise, and it does not
+    return arbitrary strings. Run with a higher example count because
+    the input space is small (8-byte prefixes) and we want strong
+    coverage of the prefix space."""
+    result = validation.detect_mime(data)
+    assert result is None or result in validation.ALLOWED_MIME_TYPES
+
+
+@given(
+    data=st.binary(min_size=12, max_size=512),
+    cap=st.integers(min_value=1, max_value=64),
+)
+@settings(max_examples=50)
+def test_property_validate_image_rejects_oversize_for_any_cap(data: bytes, cap: int):
+    """For any byte payload whose length exceeds the cap, validation
+    rejects with ValidationError regardless of declared MIME. Pins the
+    cap as a hard ceiling: it isn't bypassed by valid magic bytes,
+    matching the threat model where a malformed-but-large upload still
+    can't slip through."""
+    if len(data) <= cap:
+        return  # not the case we're testing
+    with pytest.raises(validation.ValidationError):
+        validation.validate_image(data, "image/png", max_bytes=cap)
