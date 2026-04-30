@@ -38,7 +38,15 @@ audit/
 .coverage
 .coverage.*
 coverage.xml
+coverage.json
 htmlcov/
+
+# Mutmut. `mutants/` is the sandbox mutmut copies the codebase into for
+# mutation runs; `mutmut-stats.json` is its progress cache. Both are
+# generated artifacts of the weekly mutation-test workflow (and any
+# local smoke runs); never committed.
+mutants/
+mutmut-stats.json
 
 # Node (Vitest + Playwright)
 node_modules/

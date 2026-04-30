@@ -1,0 +1,124 @@
+# Weekly mutation-testing run.
+#
+# Mutation testing mutates the codebase line-by-line and re-runs the
+# test suite against each mutant; if no test fails, the test suite
+# missed the change. Surviving mutants are evidence of "test theatre"
+# -- coverage-counted code that isn't actually verified by an
+# assertion. Catches the failure mode that coverage% alone hides,
+# particularly relevant in AI-assisted development where co-written
+# tests tend to mirror the implementation rather than describe the
+# spec.
+#
+# Scheduled rather than per-PR because a single full mutmut run on a
+# bcrypt-cost-12 test suite isn't going to fit in an acceptable PR
+# round-trip. Sunday 03:17 UTC is off-peak (avoids GitHub's :00 cron
+# congestion) and far enough from the human business day that an
+# accidentally-noisy run doesn't compete for attention.
+#
+# Configuration lives in pyproject.toml [tool.mutmut]; this workflow
+# only orchestrates execution.
+
+name: Mutation testing (mutmut)
+
+on:
+  schedule:
+    # Sunday 03:17 UTC. Odd minute deliberately -- GitHub's scheduler
+    # can delay or skip runs that fall on busy minutes (the docs warn
+    # about :00 specifically). Adjust the cron once we have data on
+    # actual run duration; if it consistently bumps against the 6h
+    # job ceiling, split the codebase across two scheduled runs on
+    # different days.
+    - cron: '17 3 * * 0'
+  # Manual trigger so the operator can fire the job on-demand without
+  # waiting for the next Sunday. Useful when validating a config
+  # change to [tool.mutmut] or after a major refactor where it makes
+  # sense to re-baseline test strength.
+  workflow_dispatch:
+
+# Workflow-level permissions: read-only. The job uploads an artifact
+# but doesn't push commits, comment on issues, or call any write API.
+permissions:
+  contents: read
+
+jobs:
+  mutmut:
+    name: Mutmut full run
+    runs-on: ubuntu-latest
+    # GitHub-hosted runner per-job cap is 6 hours. Mutmut's runtime
+    # scales with mutant count * single-test-run time; for the
+    # currently-scoped paths_to_mutate this is well within the
+    # ceiling. If a future expansion of paths starts pushing close,
+    # raise this floor and split scope across multiple jobs.
+    timeout-minutes: 330  # 5h30m -- 30m headroom before the hard limit
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install deps
+        # --require-hashes verifies every package against the lockfile
+        # hashes. Same posture as the main test-suite workflow.
+        run: pip install --require-hashes -r requirements-dev.txt
+
+      - name: Run mutmut
+        # `--max-children` parallelises the test runs. ubuntu-latest
+        # GitHub-hosted runners ship with 4 vCPU as of 2026; tracking
+        # that as a safe default. Capped via timeout-minutes above so
+        # a runaway run doesn't consume the full 6-hour ceiling.
+        #
+        # No continue-on-error: in mutmut 3.5, `run` exits 0 on a
+        # normal completion REGARDLESS of how many mutants survived
+        # (surviving counts are reported in `mutmut results` /
+        # the cache, not the exit code). Non-zero exit means a real
+        # failure -- pre-mutation clean tests failed, the test suite
+        # doesn't cover any mutated code, mutmut crashed -- all of
+        # which should fail the workflow so the noise gets noticed
+        # rather than producing a misleading "succeeded with empty
+        # report" run. Surviving-mutant accounting is the report
+        # step's job, below.
+        run: python -m mutmut run --max-children 4
+
+      - name: Generate mutmut report
+        if: always()
+        # `mutmut results` lists each mutant with its kill/survive
+        # status. Pipe to a markdown file for upload + step-summary
+        # rendering. `|| true` shields against mutmut returning
+        # non-zero (same reasoning as above).
+        run: |
+          python -m mutmut results > mutmut-report.txt 2>&1 || true
+          {
+            echo "## Mutation testing report"
+            echo ""
+            echo "Run: \`$(date -u +%Y-%m-%d) $(date -u +%H:%MZ)\`"
+            echo ""
+            echo '```'
+            cat mutmut-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mutmut report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutmut-report
+          path: mutmut-report.txt
+          retention-days: 60
+
+      - name: Upload mutmut sandbox artifact
+        # The mutants/ directory is the full sandbox mutmut copied the
+        # code into, including each mutant's mutated source. Useful
+        # for digging into a specific surviving mutant locally
+        # (`python -m mutmut show <mutant_name>`); not load-bearing
+        # for the report itself, which is why retention is short.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutmut-sandbox
+          path: mutants/
+          retention-days: 14
+          if-no-files-found: warn
