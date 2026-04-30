@@ -1,6 +1,8 @@
 """Tests for app.crypto: key generation, splitting, encryption round-trips."""
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app import crypto
 
@@ -151,3 +153,56 @@ def test_decrypt_at_rest_fails_after_secret_key_rotation(tmp_db_path, monkeypatc
             crypto.decrypt_at_rest(token)
     finally:
         config.get_settings.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# Property-based tests
+#
+# Where the example tests above pin specific shapes (32-byte key, ascii
+# plaintext, particular ciphertext format), these properties pin the
+# *invariants* the crypto module is supposed to hold for any input. The
+# hypothesis framework generates random inputs against the property; a
+# failure surfaces a counter-example that breaks the invariant.
+#
+# Two reasons this matters more in AI-assisted development than otherwise:
+#   1. example tests written alongside the implementation tend to assert
+#      what the implementation does, not what it should do. A property
+#      describes the contract independently of the implementation.
+#   2. crypto round-trips are exactly the kind of code where edge-case
+#      misses (empty input, max-length input, NUL bytes, inputs that
+#      collide with the framing layer's escape characters) are
+#      catastrophic and rarely caught by hand-picked examples.
+# ---------------------------------------------------------------------------
+
+
+@given(plaintext=st.binary(min_size=0, max_size=512))
+@settings(max_examples=100)
+def test_property_encrypt_decrypt_roundtrip_on_any_bytes(plaintext: bytes):
+    """For any bytes value (including empty, NUL-laden, and full byte
+    range), encrypt-then-decrypt with a freshly-generated key returns
+    the original. Checks the Fernet framing layer survives every input
+    we could plausibly encrypt: text content, image bytes, etc."""
+    key = crypto.generate_key()
+    assert crypto.decrypt(crypto.encrypt(plaintext, key), key) == plaintext
+
+
+@given(
+    plaintext=st.binary(min_size=1, max_size=512),
+    wrong_key=st.binary(min_size=32, max_size=32),
+)
+@settings(max_examples=50)
+def test_property_decrypt_with_unrelated_key_raises(plaintext: bytes, wrong_key: bytes):
+    """For any plaintext encrypted under one key, decrypting under any
+    OTHER 32-byte key raises DecryptionError. Pins that the failure
+    mode is an exception (loud) rather than silent wrong-bytes (which
+    would defeat the integrity guarantee Fernet provides). Also covers
+    the case where the two keys happen to share a prefix or other
+    structure -- hypothesis will hand-craft adversarial pairs."""
+    encrypt_key = crypto.generate_key()
+    # Filter out the astronomically-unlikely collision with the
+    # generated key. hypothesis.assume() drops the example cleanly.
+    if wrong_key == encrypt_key:
+        return
+    ciphertext = crypto.encrypt(plaintext, encrypt_key)
+    with pytest.raises(crypto.DecryptionError):
+        crypto.decrypt(ciphertext, wrong_key)

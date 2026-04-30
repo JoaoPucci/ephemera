@@ -97,6 +97,42 @@ jobs:
           use_oidc: true
           fail_ci_if_error: false
 
+      - name: CRAP report (informational, non-blocking)
+        # Combines radon's per-function cyclomatic complexity with the
+        # coverage data emitted above to rank methods by Change Risk
+        # Anti-Pattern score (CRAP). Surfaces drift -- a function that
+        # grew a branch without a covering test moves up the list.
+        # Never fails the build; the report ships as a job-summary
+        # block visible in the run UI and as a downloadable artifact.
+        # Pull `coverage.json` from `.coverage` (the SQLite DB pytest-
+        # cov leaves on disk); coverage.xml is the wrong shape for
+        # per-line lookups.
+        #
+        # `continue-on-error: true` enforces the "informational, non-
+        # blocking" contract: any failure inside the script (radon
+        # missing, coverage.json malformed, etc.) leaves the job
+        # green. The `if: always()` ensures the step still runs after
+        # a pytest failure -- a CRAP rank is still useful even when
+        # the test suite is red.
+        if: always()
+        continue-on-error: true
+        run: |
+          coverage json -o coverage.json
+          python scripts/crap_report.py --top 25 > crap-report.md
+          {
+            echo "<!-- CRAP report begin -->"
+            cat crap-report.md
+            echo "<!-- CRAP report end -->"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CRAP report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crap-report-python
+          path: crap-report.md
+          retention-days: 14
+
   frontend-unit:
     name: Frontend unit tests (Vitest)
     runs-on: ubuntu-latest
