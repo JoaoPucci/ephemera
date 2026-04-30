@@ -84,6 +84,47 @@ extend-immutable-calls = [
 # Ruff's default format rules already match Black, which is what the
 # existing code was loosely written in. No overrides needed.
 
+[tool.mutmut]
+# Mutation testing configuration consumed by .github/workflows/
+# mutation-test.yml (weekly schedule; manual workflow_dispatch trigger
+# also wired). Mutmut mutates the codebase line-by-line and re-runs
+# the test suite to find places where tests don't catch broken code
+# -- "test theatre" that coverage% alone won't surface.
+#
+# Scope is deliberately limited to the highest-leverage / security-
+# relevant modules for v1: a full-codebase mutation run on ephemera's
+# ~190 callables would blow GitHub Actions' 6-hour per-job ceiling
+# on hosted runners. Expand the list as test-suite speed and runner
+# capacity allow.
+paths_to_mutate = [
+  "app/crypto.py",
+  "app/validation.py",
+  "app/auth/",
+  "app/dependencies.py",
+]
+tests_dir = ["tests/"]
+# `mutate_only_covered_lines` limits mutation generation to lines the
+# test suite actually exercises -- a mutant on dead code would
+# trivially "survive" (no test could catch it because no test ever
+# reaches that line) and add noise to the report.
+mutate_only_covered_lines = true
+# Skip the test-only and infra files that happen to live under the
+# scoped paths. Mutating dependencies.py's bootstrapping branches
+# isn't actionable; same for any __init__.py glue.
+do_not_mutate = [
+  "*/__init__.py",
+]
+# `paths_to_mutate` only copies the files it mutates into mutmut's
+# sandbox; the rest of the `app/` package (other modules, the
+# package's own __init__.py, app.admin, app.routes, etc.) has to be
+# copied as-is so imports like `from app import admin` resolve when
+# the test suite runs against the mutated tree. `also_copy` is the
+# right lever for that -- it copies-but-doesn't-mutate.
+also_copy = [
+  "app/",
+  "conftest.py",
+]
+
 [tool.coverage.run]
 # Coverage data is generated on demand: CI invokes pytest with --cov;
 # local runs are unaffected unless the developer opts in. The config
