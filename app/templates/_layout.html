@@ -32,13 +32,13 @@
      and does NOT reflow on a later OS-theme change (platform limit
      on both iOS and Android), so we ship the dark-bg/light-glyph
      variant as the captured-at-install primary. #}
-  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
-  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="{{ pwa_apple_touch_icon }}">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="ephemera">
+  <meta name="apple-mobile-web-app-title" content="{{ pwa_name }}">
   {# Stylesheets load in cascade order: tokens (CSS-var definitions) ->
      base (resets, typography, utilities) -> forms (inputs + buttons) ->
      components (card, tabs, dropzone, url-box, tracked panel, status

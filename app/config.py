@@ -83,6 +83,18 @@ class Settings(BaseSettings):
     # no user identity, no payload content -- enough to answer "did
     # anyone hit the cap, how often" but nothing more.
     analytics_enabled: bool = Field(default=False)
+    # Suffix appended to the PWA manifest's `name`/`short_name` and used
+    # to pick the apple-touch-icon when an operator runs more than one
+    # ephemera instance (typical: a dev / staging box alongside prod).
+    # Empty (default) is the prod posture: name="ephemera" and the
+    # visually-light apple-touch-icon (light bg, dark glyph). Any non-
+    # empty value ("dev", "staging") flips both: name becomes
+    # "ephemera-{label}" and the apple-touch-icon switches to the
+    # visually-dark variant (dark bg, light glyph) so the two installs
+    # are at-a-glance distinguishable on the home screen. Captured icons
+    # don't auto-refresh from the manifest, so this only takes effect on
+    # a fresh install (or remove-and-re-add of the home-screen entry).
+    deployment_label: str = Field(default="")
 
     @property
     def origins(self) -> list[str]:

@@ -124,7 +124,17 @@ def send_login(
         value=make_session_cookie(user["id"], int(user["session_generation"])),
         max_age=settings.session_max_age,
         httponly=True,
-        samesite="strict",
+        # Lax (rather than Strict) so the cookie persists across home-screen
+        # launches of the installed PWA -- Chrome treats an OS-initiated
+        # standalone-shell launch as a non-same-site navigation and drops
+        # Strict cookies on it, forcing a fresh login on every PWA open.
+        # CSRF protection on writes is provided by verify_same_origin
+        # (Origin-header check) on every POST/DELETE/PATCH endpoint, not
+        # by SameSite, so this isn't loosening the actual write defence.
+        # All authenticated GETs are read-only, so the Strict-vs-Lax delta
+        # (which only affects cross-site top-level GETs) doesn't open a
+        # state-mutation surface either.
+        samesite="lax",
         secure=settings.session_cookie_secure,
     )
     return LoginResponse(username=user["username"])
@@ -138,7 +148,10 @@ def send_login(
 def send_logout(response: Response, settings: Settings = Depends(get_settings)):
     response.delete_cookie(
         settings.session_cookie_name,
-        samesite="strict",
+        # Must match the SameSite used by set_cookie above; some browsers
+        # refuse to honour a delete whose attributes don't match the
+        # original.
+        samesite="lax",
         secure=settings.session_cookie_secure,
     )
     return LogoutResponse()

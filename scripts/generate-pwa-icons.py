@@ -13,13 +13,21 @@ Inputs (in app/static/icons/):
 
 Outputs (in app/static/icons/):
   icon-{purpose}-{theme}-{192,512}.png  manifest icon entries
-  apple-touch-icon.png                  iOS Add-to-Home-Screen (180px,
-                                        always the any-light variant per
-                                        designer brief: dark-bg/light-
-                                        glyph stands out on busy
-                                        wallpapers; iOS doesn't honour
-                                        prefers-color-scheme on touch
-                                        icons).
+  apple-touch-icon.png                  iOS Add-to-Home-Screen, prod
+                                        posture: 180px any-DARK master
+                                        (light-bg/dark-glyph -- the
+                                        default tile new operators see
+                                        on first install).
+  apple-touch-icon-dev.png              iOS Add-to-Home-Screen, non-prod
+                                        posture: 180px any-LIGHT master
+                                        (dark-bg/light-glyph -- visually
+                                        the inverse of the prod tile so
+                                        a dev / staging install on the
+                                        same phone is at-a-glance
+                                        distinguishable). Wired in by
+                                        EPHEMERA_DEPLOYMENT_LABEL via
+                                        template_context (see
+                                        app/i18n.py).
 
 Backend: librsvg (via PyGObject) + cairo. Both ship with the system
 packages already installed in the dev environment (gir1.2-rsvg-2.0,
@@ -45,7 +53,15 @@ MASTERS = [
 ]
 MANIFEST_SIZES = (192, 512)
 APPLE_TOUCH_SIZE = 180
-APPLE_TOUCH_SOURCE = "icon-master-any-light.svg"
+# Two apple-touch-icons: prod (the default at the bare filename iOS
+# auto-discovers) ships the visually-light master (any-dark in our file
+# naming -- "dark" describes the OS theme it serves, not the tile's
+# appearance), non-prod / dev ships the visually-dark inverse so the
+# two installs are at-a-glance different on the home screen.
+APPLE_TOUCH_OUTPUTS = {
+    "apple-touch-icon.png": "icon-master-any-dark.svg",
+    "apple-touch-icon-dev.png": "icon-master-any-light.svg",
+}
 
 
 def rasterize(svg_path: Path, png_path: Path, size: int) -> None:
@@ -82,10 +98,11 @@ def main() -> int:
             rasterize(svg, out, size)
             produced.append(out)
 
-    apple_src = ICONS_DIR / APPLE_TOUCH_SOURCE
-    apple_out = ICONS_DIR / "apple-touch-icon.png"
-    rasterize(apple_src, apple_out, APPLE_TOUCH_SIZE)
-    produced.append(apple_out)
+    for out_name, src_name in APPLE_TOUCH_OUTPUTS.items():
+        src = ICONS_DIR / src_name
+        out = ICONS_DIR / out_name
+        rasterize(src, out, APPLE_TOUCH_SIZE)
+        produced.append(out)
 
     for p in produced:
         print(f"wrote {p.relative_to(ICONS_DIR.parent.parent.parent)}")

@@ -89,7 +89,7 @@ def test_login_sets_secure_flag_on_session_cookie(
     set_cookie = r.headers.get("set-cookie", "").lower()
     assert "secure" in set_cookie
     assert "httponly" in set_cookie
-    assert "samesite=strict" in set_cookie
+    assert "samesite=lax" in set_cookie
 
 
 def test_login_same_error_for_wrong_user_vs_password_vs_totp(client, provisioned_user):
