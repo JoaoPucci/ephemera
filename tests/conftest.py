@@ -1,5 +1,6 @@
 """Shared fixtures for the ephemera test suite."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -7,6 +8,42 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+
+# Mutmut interaction shim. mutmut spawns pytest in a forked subprocess
+# (the subprocess inherits multiprocessing's already-set start method
+# from mutmut's parent). The trampoline injected into every mutated
+# file then runs `from mutmut.__main__ import record_trampoline_hit`
+# at first call -- which executes mutmut/__main__.py's module-level
+# `set_start_method('fork')` (line ~1152) -- raising
+# RuntimeError: context has already been set, because the subprocess
+# already has the start method set via the inherited state.
+#
+# Patch `multiprocessing.set_start_method` to be idempotent so the
+# subsequent call from mutmut's import is a no-op rather than a fatal
+# error. Gated on the MUTANT_UNDER_TEST env var (set by mutmut at run
+# start; inherited into the pytest subprocess via fork) so production
+# pytest runs see the original strict behaviour.
+#
+# The patch must run BEFORE mutmut's __main__ is imported. conftest.py
+# is loaded by pytest before any test or fixture, which is before the
+# first trampoline call. mutmut's `from multiprocessing import
+# set_start_method` at its module-load time then picks up the patched
+# version.
+if os.environ.get("MUTANT_UNDER_TEST"):
+    import multiprocessing
+
+    _orig_set_start_method = multiprocessing.set_start_method
+
+    def _idempotent_set_start_method(method, force=False):
+        try:
+            _orig_set_start_method(method, force=force)
+        except RuntimeError as e:
+            if "context has already been set" in str(e) and not force:
+                return
+            raise
+
+    multiprocessing.set_start_method = _idempotent_set_start_method
 
 
 TEST_USERNAME = "alice"
