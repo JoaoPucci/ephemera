@@ -107,7 +107,15 @@ jobs:
         # Pull `coverage.json` from `.coverage` (the SQLite DB pytest-
         # cov leaves on disk); coverage.xml is the wrong shape for
         # per-line lookups.
+        #
+        # `continue-on-error: true` enforces the "informational, non-
+        # blocking" contract: any failure inside the script (radon
+        # missing, coverage.json malformed, etc.) leaves the job
+        # green. The `if: always()` ensures the step still runs after
+        # a pytest failure -- a CRAP rank is still useful even when
+        # the test suite is red.
         if: always()
+        continue-on-error: true
         run: |
           coverage json -o coverage.json
           python scripts/crap_report.py --top 25 > crap-report.md

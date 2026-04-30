@@ -74,13 +74,31 @@ def _coverage_for_lines(file_cov: dict, start: int, end: int) -> float:
     counted as executed for this file. Lines outside coverage's
     `executed_lines` and `missing_lines` are non-executable (comments,
     blank lines, etc.) and are excluded from the denominator.
+
+    Two distinct "no signal" cases that have to be told apart so
+    unmeasured files don't masquerade as fully covered:
+
+    - `file_cov` is empty / absent (the file is missing from
+      coverage.json entirely -- coverage didn't run on this file at
+      all, OR the path didn't match between radon and coverage). In
+      that case we return 0.0, treating the function as uncovered so
+      it surfaces high in the CRAP ranking. Better to over-report a
+      missing-data row than silently hide a potentially risky method.
+
+    - `file_cov` is populated but [start, end] doesn't intersect any
+      executable line (e.g. the function is purely declarations / a
+      single `...` body). That case is genuinely not-measurable and
+      returns 1.0 -- the function has no behaviour for coverage to
+      score.
     """
+    if not file_cov:
+        return 0.0
     executable = set(file_cov.get("executed_lines", [])) | set(
         file_cov.get("missing_lines", [])
     )
     in_range = {n for n in executable if start <= n <= end}
     if not in_range:
-        return 1.0  # nothing executable in this range -> not measurable
+        return 1.0  # genuinely no executable lines in this range
     executed = set(file_cov.get("executed_lines", [])) & in_range
     return len(executed) / len(in_range)
 
