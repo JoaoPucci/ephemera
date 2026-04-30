@@ -94,5 +94,12 @@
     "cancel": "Cancelar",
     "disabled_ack": "Compartilhamento desativado",
     "enabled_ack": "Compartilhamento ativado"
+  },
+  "lang_confirm": {
+    "title": "Trocar de idioma?",
+    "body": "Seu rascunho será descartado quando a página recarregar.",
+    "body_with_image": "Seu rascunho e a imagem anexada serão descartados quando a página recarregar.",
+    "cancel": "Continuar editando",
+    "confirm": "Trocar e descartar"
   }
 }

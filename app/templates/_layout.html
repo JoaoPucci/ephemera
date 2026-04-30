@@ -69,7 +69,16 @@
      that fades in with the drawer, and the drawer itself (slides down
      from under the bar). Rows are purpose-built for a vertical menu,
      grouped into sections with uppercase muted labels, and the drawer
-     traps focus while open. #}
+     traps focus while open.
+
+     INVARIANT: nothing in this menu may trigger location.reload() on
+     pages where chrome_variant == "receiver". The receiver flow is
+     one-shot -- a reload after reveal destroys data the user came to
+     see. The current violator was the language picker (its setLocale
+     reloads to swap server-rendered translations); future rows that
+     add reloading behaviour (locale-tied date format, currency, etc.)
+     must also be gated out for receiver, OR rebuilt to swap state
+     without a reload. #}
   <div class="chrome-menu" id="chrome-menu">
     {# Bar is intentionally invisible: it's only an anchor slot for the
        hamburger button and a notional top edge for the drawer to slide
@@ -110,11 +119,13 @@
       <section class="chrome-menu-section" style="--stagger-i: 1;">
         <h2 class="chrome-menu-section-label">{{ _("settings") }}</h2>
 
-        {% if launched|length > 1 %}
+        {% if launched|length > 1 and chrome_variant != "receiver" %}
         {# Drawer row uses the lowercase `language` msgid for internal
            consistency with the other lowercase rows; the desktop
            <select>'s aria-label below the bar uses the title-cased
-           `Language` msgid (form-control field-label context). #}
+           `Language` msgid (form-control field-label context).
+           Gated out on receiver flows -- see the INVARIANT comment at
+           the chrome-menu wrapper. #}
         <label class="chrome-menu-row chrome-menu-row-select" role="menuitem">
           <svg class="chrome-menu-row-icon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18">
             <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
@@ -224,7 +235,10 @@
     </div>
   </div>
   <div class="top-chrome top-chrome-right">
-    {% if launched|length > 1 %}
+    {% if launched|length > 1 and chrome_variant != "receiver" %}
+    {# Gated out on receiver flows -- the picker's setLocale() reloads,
+       which destroys a revealed one-shot secret. See the INVARIANT
+       comment at the chrome-menu wrapper above. #}
     <select id="lang-picker" class="lang-picker" aria-label="{{ _('Language') }}">
       {% for tag in launched %}
       <option value="{{ tag }}"{% if tag == locale %} selected{% endif %}>{{ language_labels[tag] }}</option>
@@ -280,6 +294,37 @@
     <button type="button" id="theme-toggle" class="theme-toggle" aria-label="{{ _('toggle theme') }}"></button>
   </div>
   {% block chrome %}{% endblock %}
+  {% if chrome_variant == "sender" %}
+  {# Language-switch confirmation dialog. Renders only on the sender
+     form (chrome_variant=="sender") because that's the only surface
+     with "dirty form" state to lose -- typed content or an attached
+     image. lang-confirm.js intercepts a picker change when the form
+     is dirty, opens this dialog instead of letting setLocale() reload
+     the page, and proceeds only if the user clicks Confirm.
+
+     The two body slots (default + with-image) are both rendered;
+     lang-confirm.js shows whichever one matches the current dirty
+     shape. Strings are filled from the JSON catalogue at runtime
+     (lang_confirm.* namespace), like analytics-popover does. #}
+  <div class="lang-confirm" id="lang-confirm-dialog" role="dialog"
+       aria-modal="false" aria-labelledby="lang-confirm-title" hidden>
+    <div class="lang-confirm-panel">
+      <h2 class="lang-confirm-title" id="lang-confirm-title"
+          data-i18n="lang_confirm.title"></h2>
+      <p class="lang-confirm-body" id="lang-confirm-body"
+         data-i18n="lang_confirm.body"
+         data-i18n-image="lang_confirm.body_with_image"></p>
+      <div class="lang-confirm-actions">
+        <button type="button" class="lang-confirm-cancel"
+                id="lang-confirm-cancel"
+                data-i18n="lang_confirm.cancel"></button>
+        <button type="button" class="lang-confirm-confirm"
+                id="lang-confirm-confirm"
+                data-i18n="lang_confirm.confirm"></button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
   <div class="wordmark">ephemera</div>
   {# Ambient version reference, grouped with the wordmark rather than
      floating at the viewport edge. `git describe` at import time --
@@ -292,5 +337,12 @@
   {% block scripts %}{% endblock %}
   <script type="module" src="/static/chrome-menu.js"></script>
   <script src="/static/analytics-toggle.js"></script>
+  {% if chrome_variant == "sender" %}
+  {# lang-confirm.js intercepts language-picker changes when the
+     sender form is dirty (typed content / attached image) and shows
+     the confirmation dialog above. Only loaded on the sender so the
+     guard is dead code on every other surface. #}
+  <script type="module" src="/static/lang-confirm.js"></script>
+  {% endif %}
 </body>
 </html>

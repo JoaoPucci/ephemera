@@ -93,5 +93,12 @@
     "cancel": "Abbrechen",
     "disabled_ack": "Teilen ausgeschaltet",
     "enabled_ack": "Teilen eingeschaltet"
+  },
+  "lang_confirm": {
+    "title": "Sprache wechseln?",
+    "body": "Dein Entwurf wird beim Neuladen der Seite verworfen.",
+    "body_with_image": "Dein Entwurf und das angehängte Bild werden beim Neuladen der Seite verworfen.",
+    "cancel": "Weiter bearbeiten",
+    "confirm": "Wechseln und verwerfen"
   }
 }

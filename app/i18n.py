@@ -425,6 +425,17 @@ def template_context(request: Request) -> dict:
         "version": VERSION,
         "pwa_name": pwa_name,
         "pwa_apple_touch_icon": pwa_apple_touch_icon,
+        # Chrome-shape hint for _layout.html. Default empty so any route
+        # that doesn't explicitly set it (login, auth-gated docs, future
+        # surfaces) gets the operator-shaped chrome (lang picker, theme,
+        # sign-out, analytics opt-in -- all of which are operator-only
+        # already). receiver.py overrides to "receiver" to strip the
+        # language picker entirely (its reload would destroy a revealed
+        # one-shot secret); sender.py overrides to "sender" so the
+        # lang-confirm dialog markup renders. Nothing in the recipient-
+        # visible chrome may trigger location.reload() -- that's the
+        # load-bearing invariant; the picker was the current violator.
+        "chrome_variant": "",
     }
 
 
