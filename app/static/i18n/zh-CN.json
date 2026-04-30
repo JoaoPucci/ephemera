@@ -92,5 +92,12 @@
     "cancel": "取消",
     "disabled_ack": "已关闭共享",
     "enabled_ack": "已开启共享"
+  },
+  "lang_confirm": {
+    "title": "要切换语言吗？",
+    "body": "页面重新加载时，你的草稿会被清除。",
+    "body_with_image": "页面重新加载时，你的草稿和已附加的图片会被清除。",
+    "cancel": "继续编辑",
+    "confirm": "切换并清除"
   }
 }

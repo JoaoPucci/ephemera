@@ -94,5 +94,12 @@
     "cancel": "Cancelar",
     "disabled_ack": "Compartir desactivado",
     "enabled_ack": "Compartir activado"
+  },
+  "lang_confirm": {
+    "title": "¿Cambiar de idioma?",
+    "body": "Tu borrador se borrará al recargar la página.",
+    "body_with_image": "Tu borrador y la imagen adjunta se borrarán al recargar la página.",
+    "cancel": "Seguir editando",
+    "confirm": "Cambiar y descartar"
   }
 }

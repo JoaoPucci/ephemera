@@ -94,5 +94,12 @@
     "cancel": "Annuler",
     "disabled_ack": "Partage désactivé",
     "enabled_ack": "Partage activé"
+  },
+  "lang_confirm": {
+    "title": "Changer de langue ?",
+    "body": "Ton brouillon sera effacé au rechargement de la page.",
+    "body_with_image": "Ton brouillon et l'image jointe seront effacés au rechargement de la page.",
+    "cancel": "Continuer la rédaction",
+    "confirm": "Changer et effacer"
   }
 }

@@ -93,5 +93,12 @@
     "cancel": "Cancel",
     "disabled_ack": "Sharing turned off",
     "enabled_ack": "Sharing turned on"
+  },
+  "lang_confirm": {
+    "title": "Switch language?",
+    "body": "Your draft will be cleared when the page reloads.",
+    "body_with_image": "Your draft and the attached image will be cleared when the page reloads.",
+    "cancel": "Keep editing",
+    "confirm": "Switch and clear"
   }
 }

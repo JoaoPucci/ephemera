@@ -40,8 +40,13 @@ def _load_live_row(token: str):
 def landing_page(token: str, request: Request):
     from .. import TEMPLATES
 
+    # chrome_variant="receiver" strips the language picker from the chrome
+    # menu (its reload would destroy a revealed one-shot secret) -- see
+    # the invariant comment in app/templates/_layout.html near the menu.
     return TEMPLATES.TemplateResponse(
-        request, "landing.html", template_context(request)
+        request,
+        "landing.html",
+        {**template_context(request), "chrome_variant": "receiver"},
     )
 
 

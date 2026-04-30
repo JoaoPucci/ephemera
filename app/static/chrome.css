@@ -1004,3 +1004,91 @@
     }
   }
 }
+
+/* ----------------------------------------------------------------------
+   Language-switch confirm dialog
+   ----------------------------------------------------------------------
+   Renders only when chrome_variant == "sender" (see app/i18n.py +
+   _layout.html). Scrim-backed centered modal so it works identically
+   from the desktop top-chrome picker and the mobile drawer drawer
+   picker, without two separate placements. Designer brief allowed for
+   anchored-popover (desktop) + inline-disclosure (mobile) refinement
+   later -- v1 ships this simpler unified shape because both pickers
+   trigger the same logical event ("user wants to switch language on
+   a dirty form") and the modal makes the consequence equally
+   prominent in both surfaces.
+
+   Reuses the analytics-popover surface tokens (--surface, --border,
+   --shadow-md, --accent) so the dialog feels like part of the same
+   family of confirmation surfaces. Touch targets >= 44px via the
+   shared button geometry. */
+.lang-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, var(--text) 32%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Slight breathing room on small screens so the panel does not glue
+     to the viewport edges. On desktop this is well below the panel
+     min-width and never affects layout. */
+  padding: var(--space-4);
+}
+.lang-confirm[hidden] {
+  display: none;
+}
+.lang-confirm-panel {
+  width: min(420px, 100%);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-md);
+  /* Off-scale inline (1.1rem) matches analytics-popover so the two
+     dialog surfaces feel like part of one family. */
+  padding: var(--space-4) 1.1rem;
+}
+.lang-confirm-title {
+  margin: 0 0 var(--space-2);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.lang-confirm-body {
+  margin: 0 0 var(--space-3);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.lang-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.lang-confirm-cancel,
+.lang-confirm-confirm {
+  /* Same off-scale pill geometry as the analytics-popover buttons so
+     confirmation surfaces share one button shape. Min-height 44px is
+     the WCAG touch target floor. */
+  min-height: 44px;
+  padding: 0.4rem 0.9rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.lang-confirm-cancel {
+  background: var(--surface);
+  color: var(--text);
+}
+.lang-confirm-cancel:hover {
+  background: color-mix(in srgb, var(--muted) 8%, var(--surface));
+}
+.lang-confirm-confirm {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+.lang-confirm-confirm:hover {
+  filter: brightness(1.05);
+}

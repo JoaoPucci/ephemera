@@ -92,5 +92,12 @@
     "cancel": "取消",
     "disabled_ack": "已關閉分享",
     "enabled_ack": "已開啟分享"
+  },
+  "lang_confirm": {
+    "title": "要切換語言嗎？",
+    "body": "頁面重新載入時，你的草稿會被清除。",
+    "body_with_image": "頁面重新載入時，你的草稿和已附加的圖片會被清除。",
+    "cancel": "繼續編輯",
+    "confirm": "切換並清除"
   }
 }

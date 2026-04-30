@@ -74,7 +74,15 @@ def send_page(request: Request):
     from .. import TEMPLATES
 
     page = "sender.html" if is_logged_in(request) else "login.html"
-    return TEMPLATES.TemplateResponse(request, page, template_context(request))
+    # chrome_variant="sender" pulls in the lang-confirm dialog markup so
+    # lang-confirm.js can intercept a picker change on a dirty form
+    # (typed content / attached image) before triggering the page
+    # reload that setLocale() ultimately fires.
+    return TEMPLATES.TemplateResponse(
+        request,
+        page,
+        {**template_context(request), "chrome_variant": "sender"},
+    )
 
 
 # ---------------------------------------------------------------------------
