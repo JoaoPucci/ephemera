@@ -47,7 +47,7 @@
     if (result && !result.hidden) return false;
     if (!form) return false;
     const hasText = !!(contentInput && contentInput.value.length > 0);
-    const hasFile = !!(fileInput && fileInput.files && fileInput.files.length > 0);
+    const hasFile = !!(fileInput?.files && fileInput.files.length > 0);
     return hasText || hasFile;
   }
 
@@ -56,7 +56,7 @@
     // The dialog renders both body keys via data-i18n / data-i18n-image;
     // the i18n shim populates whichever is the active text on init.
     // For the image variant we re-resolve at open time.
-    const hasFile = !!(fileInput && fileInput.files && fileInput.files.length > 0);
+    const hasFile = !!(fileInput?.files && fileInput.files.length > 0);
     const key = hasFile
       ? body.getAttribute('data-i18n-image') || body.getAttribute('data-i18n')
       : body.getAttribute('data-i18n');
