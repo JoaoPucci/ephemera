@@ -24,7 +24,10 @@ extend-exclude = [
 #   B       flake8-bugbear (common real-world anti-patterns)
 #   UP      pyupgrade (suggest modern syntax for the pinned Python)
 #   SIM     flake8-simplify (obvious boolean / conditional simplifications)
-select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+#   C901    mccabe cyclomatic complexity ceiling -- a tripwire for
+#           functions that grow into hard-to-reason-about branchy
+#           shapes. Threshold is set in [tool.ruff.lint.mccabe] below.
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "C901"]
 ignore = [
   # E501 (line too long) is delegated to the formatter -- it handles wrapping
   # when it can, and when it can't (long URLs, long test assertions), failing
@@ -38,6 +41,25 @@ ignore = [
 # appears later in the body). Allow F841 there without loosening it globally.
 "tests/**" = ["F841"]
 "tests-e2e/**" = ["F841"]
+
+[tool.ruff.lint.mccabe]
+# Cyclomatic-complexity ceiling for the C901 rule above. ruff's default
+# is 10; we relax to 12 because legitimate state-machine-shaped code in
+# this project (init_db, authenticate, the v3 migration, the reveal
+# route) lands in the 11-12 range without being pathological. Above 12
+# is a real signal that a function is doing too many things.
+#
+# Two functions presently sit above 12 and carry an explicit
+# `# noqa: C901` annotation with a rationale:
+#   - app/analytics.py::_validate_payload (19) -- registry-driven
+#     validation; splitting hides complexity in helper calls without
+#     reducing the cognitive load.
+#   - app/routes/sender.py::create_secret (13) -- route handler that
+#     gathers, validates, encrypts, persists in one linear flow;
+#     splitting into helpers would obscure the request-lifecycle.
+# Both are deliberate deferrals; pull the noqa and refactor when the
+# function next changes shape.
+max-complexity = 12
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's dependency-injection idiom is `param: T = Depends(fn)` -- a

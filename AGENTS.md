@@ -91,7 +91,49 @@ file later" is how layers end up untested forever.
 
 ---
 
-## 3. Before you commit
+## 3. Acceptance tests are the spec
+
+`tests-e2e/` (the Playwright suite) is the system's acceptance layer:
+a black-box description of what ephemera *does* end-to-end, written
+from the user's perspective. The rest of the test suite — pytest
+under `tests/`, Vitest under `tests-js/` — describes how the
+implementation is built; the acceptance suite describes what the
+product is.
+
+This distinction matters more in AI-assisted development than it does
+otherwise. Implementation-aligned tests can be co-written with the
+code they cover, and the same agent that produces the change tends to
+produce tests that reflect the change rather than the original intent.
+The acceptance suite is the only test layer that sits *outside* the
+code-and-test pair an agent might modify together — it's the line in
+the sand against silently moving the goalposts.
+
+The rule:
+
+- **The default response to a bug is to change the implementation
+  until the existing acceptance test passes**, not to change the
+  acceptance test until the new implementation passes.
+- **If a feature genuinely requires the acceptance test to change
+  shape**, that change ships as a *separate first commit*, reviewed
+  by a human on its own merits, before the implementation change
+  lands. The PR description names the acceptance change explicitly so
+  it isn't read as part of the implementation diff.
+- **`tests-e2e/` is not modified to make a failing test pass when the
+  implementation breaks**. A red e2e test is a signal the
+  implementation regressed; the implementation is what gives.
+
+The same principle applies, in a softer form, to other tests that
+function as specs rather than implementation-mirroring assertions
+(security invariants in `tests/test_security.py`, audit-trail
+invariants in `tests/test_security_log.py`, the privacy invariants
+documented in `tests/test_analytics.py`). When in doubt about whether
+a test is a spec or an implementation aid, treat it as a spec — the
+cost of asking is cheaper than the cost of silently weakening the
+contract.
+
+---
+
+## 4. Before you commit
 
 Every commit must pass, locally, the same gates CI will run on it.
 Discovering a lint failure on a CI round-trip is a 4–5 minute waste of
@@ -128,7 +170,7 @@ If a hook is genuinely wrong, fix the hook in its own commit.
 
 ---
 
-## 4. Security is part of "done"
+## 5. Security is part of "done"
 
 A feature is not finished when it works on the happy path. It's finished
 when you've considered, and have an answer for, the obvious failure
@@ -163,7 +205,7 @@ gives an attacker a free oracle.
 
 ---
 
-## 5. Personal information deserves a conversation
+## 6. Personal information deserves a conversation
 
 Any change that captures, stores, links, or emits information about
 real users — identifiers, IPs, content payloads, telemetry, audit
@@ -191,7 +233,7 @@ them, the discussion comes before the diff, not after.
 
 ---
 
-## 6. Triple-check for leaks before anything goes public
+## 7. Triple-check for leaks before anything goes public
 
 This is the rule with zero tolerance. Anything that goes into a public
 artifact — a commit, a PR title or body, a comment, a release note, a
@@ -207,7 +249,7 @@ delete it from someone's mirror at all.
    cookies, private URLs, hostnames or IPs of internal/staging/prod
    infrastructure, real user data (emails, usernames, names),
    `.env`-style files, anything from `~/`, anything that came out of a
-   secret manager. The explicit-staging rule from §3 exists exactly to
+   secret manager. The explicit-staging rule from §4 exists exactly to
    make this scan possible — review the actual list of files in the
    commit, not "whatever was dirty in the tree".
 2. **Scan the metadata.** PR title, PR body, commit message, branch
@@ -234,7 +276,7 @@ free; a leaked secret is not.
 
 ---
 
-## 7. Commits, branches, and PRs
+## 8. Commits, branches, and PRs
 
 **Commit messages** are imperative one-sentence summaries that explain
 the *why*, not just the *what* — "Pin pip in the runtime lockfile so
@@ -264,7 +306,7 @@ closest semantic match from that palette rather than inventing a hex.
 
 ---
 
-## 8. Evolving these rules
+## 9. Evolving these rules
 
 These rules exist because past mistakes made them necessary. If one of
 them is friction without payoff in a specific case, that's information
