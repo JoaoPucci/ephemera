@@ -97,7 +97,19 @@ extend-immutable-calls = [
 # on hosted runners. Expand the list as test-suite speed and runner
 # capacity allow.
 paths_to_mutate = [
-  "app/crypto.py",
+  # app/crypto.py deliberately omitted -- mutmut's source-instrumentation
+  # interacts badly with cryptography's PyO3-backed Rust bindings (HKDF,
+  # Fernet). When the trampolined `_at_rest_key` runs through the stats-
+  # collection trampoline, the Rust HKDF binding raises
+  # `TypeError: Expected instance of hashes.HashAlgorithm.` on a
+  # `hashes.SHA256()` value that the same binding accepts in plain
+  # pytest runs. Reproduces in CI but not locally; root cause is
+  # somewhere in the stats-phase context (env vars, mutmut globals,
+  # rather than something in our code). Track upstream via mutmut's
+  # issue tracker; until fixed, copy crypto.py as-is via also_copy
+  # below so the test suite still imports cleanly. Same may apply to
+  # other Rust-backed paths (bcrypt in auth/) -- expand this comment if
+  # they fail similarly on the next CI run.
   "app/validation.py",
   "app/auth/",
   "app/dependencies.py",
@@ -141,6 +153,12 @@ also_copy = [
   "app/analytics.py",
   "app/cleanup.py",
   "app/config.py",
+  # app/crypto.py is in also_copy (NOT paths_to_mutate) because its
+  # PyO3-backed cryptography library calls fail under mutmut's
+  # trampoline instrumentation -- see the comment in paths_to_mutate
+  # above for the diagnostic. Add back to paths_to_mutate if the
+  # upstream interaction is fixed.
+  "app/crypto.py",
   "app/errors.py",
   "app/i18n.py",
   "app/limiter.py",
