@@ -23,6 +23,7 @@ function mountSenderWithLangConfirm() {
       <option value="en" selected>English</option>
       <option value="ja">日本語</option>
     </select>
+    <span id="chrome-menu-lang-label">English</span>
     <select id="chrome-menu-lang">
       <option value="en" selected>English</option>
       <option value="ja">日本語</option>
@@ -32,7 +33,7 @@ function mountSenderWithLangConfirm() {
       <input type="file" id="file">
     </form>
     <section id="result" hidden></section>
-    <div id="lang-confirm-dialog" role="dialog" aria-modal="false"
+    <div id="lang-confirm-dialog" role="dialog" aria-modal="true"
          aria-labelledby="lang-confirm-title" hidden>
       <h2 id="lang-confirm-title" data-i18n="lang_confirm.title"></h2>
       <p id="lang-confirm-body" data-i18n="lang_confirm.body"
@@ -163,6 +164,89 @@ describe('lang-confirm.js — dirty form (textarea has content)', () => {
     fireChange('lang-picker', 'ja');
     await flushAsync();
     expect(document.activeElement.id).toBe('lang-confirm-cancel');
+  });
+
+  it('Cancel from the drawer also restores #chrome-menu-lang-label so the row stops claiming the previewed language', async () => {
+    // Repro Codex P2: chrome-menu.js updates #chrome-menu-lang-label
+    // on the drawer select's `input` event during preview. If cancel
+    // only resets select.value without also fixing the label, the
+    // drawer row keeps showing the previewed (cancelled) language
+    // until the next interaction.
+    await loadModule('lang-confirm');
+    spyOnSetLocale();
+    // Simulate the chrome-menu.js input-handler path: user previews
+    // the new option in the drawer, label visibly flips to that
+    // language's name, THEN the change event fires (which our guard
+    // catches because the form is dirty).
+    document.getElementById('chrome-menu-lang-label').textContent = '日本語';
+    fireChange('chrome-menu-lang', 'ja');
+    await flushAsync();
+    document.getElementById('lang-confirm-cancel').click();
+    await flushAsync();
+    expect(document.getElementById('chrome-menu-lang').value).toBe('en');
+    expect(document.getElementById('chrome-menu-lang-label').textContent).toBe('English');
+  });
+
+  it('Escape stops propagating so chrome-menu.js does not also close the drawer', async () => {
+    // Repro Codex P2: without stopPropagation, the document-level
+    // Escape handler in chrome-menu.js also fires and closes the
+    // drawer as a side effect of cancelling the language switch.
+    await loadModule('lang-confirm');
+    spyOnSetLocale();
+    fireChange('lang-picker', 'ja');
+    await flushAsync();
+
+    let drawerSawEscape = false;
+    document.addEventListener(
+      'keydown',
+      (e) => {
+        if (e.key === 'Escape') drawerSawEscape = true;
+      },
+      false // bubble phase, like chrome-menu.js
+    );
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    );
+    await flushAsync();
+    expect(drawerSawEscape).toBe(false);
+  });
+
+  it('Tab from the last focusable wraps to the first (focus trap)', async () => {
+    await loadModule('lang-confirm');
+    spyOnSetLocale();
+    fireChange('lang-picker', 'ja');
+    await flushAsync();
+
+    const cancel = document.getElementById('lang-confirm-cancel');
+    const confirmBtn = document.getElementById('lang-confirm-confirm');
+    confirmBtn.focus();
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    );
+    await flushAsync();
+    expect(document.activeElement).toBe(cancel);
+  });
+
+  it('Shift+Tab from the first focusable wraps to the last (focus trap)', async () => {
+    await loadModule('lang-confirm');
+    spyOnSetLocale();
+    fireChange('lang-picker', 'ja');
+    await flushAsync();
+
+    const cancel = document.getElementById('lang-confirm-cancel');
+    const confirmBtn = document.getElementById('lang-confirm-confirm');
+    cancel.focus();
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Tab',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await flushAsync();
+    expect(document.activeElement).toBe(confirmBtn);
   });
 });
 

@@ -29,6 +29,11 @@
 
   const desktopPicker = document.getElementById('lang-picker');
   const drawerPicker = document.getElementById('chrome-menu-lang');
+  // Visible label inside the drawer language row that chrome-menu.js
+  // updates on the select's input event. We have to keep this in sync
+  // on cancel; otherwise the row visually claims the previewed (but
+  // cancelled) language, even though the active locale didn't change.
+  const drawerPickerLabel = document.getElementById('chrome-menu-lang-label');
   const form = document.getElementById('secret-form');
   const contentInput = document.getElementById('content');
   const fileInput = document.getElementById('file');
@@ -93,6 +98,16 @@
     // Revert the select that fired the change so the dropdown does not
     // visually lie about the active locale.
     if (pendingTarget) pendingTarget.value = priorValue;
+    // Also restore the drawer's visible language label. chrome-menu.js
+    // updates this label on the select's `input` event (before the
+    // change event fires), so by the time we get here on the drawer
+    // path the label may already show the previewed-but-cancelled
+    // language. Read the option text for the reverted value to
+    // reconstruct the right display string.
+    if (pendingTarget === drawerPicker && drawerPickerLabel) {
+      const restoredOpt = drawerPicker.options[drawerPicker.selectedIndex];
+      if (restoredOpt) drawerPickerLabel.textContent = restoredOpt.textContent;
+    }
     closeDialog();
   }
 
@@ -133,13 +148,55 @@
   if (cancelBtn) cancelBtn.addEventListener('click', cancel);
   if (confirmBtn) confirmBtn.addEventListener('click', confirm);
 
-  // Escape closes like Cancel (preserves draft).
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !dialog.hidden) {
-      e.preventDefault();
-      cancel();
-    }
-  });
+  // Returns the focusable elements inside the dialog panel, in tab
+  // order. Used by both the focus trap and to decide where Tab should
+  // wrap to. Recomputed on each call because the dialog could in
+  // principle gain or lose interactive children (none today, but the
+  // contract is "trap whatever is in the panel right now").
+  function dialogFocusables() {
+    if (!dialog) return [];
+    return Array.from(
+      dialog.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((el) => !el.hasAttribute('disabled'));
+  }
+
+  // Capture-phase keydown listener so we see Escape and Tab BEFORE
+  // chrome-menu.js's own document-level Escape handler can close the
+  // drawer as a side effect of cancelling the language switch.
+  // stopPropagation prevents that handler from firing at all while
+  // the dialog is open.
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (dialog.hidden) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        cancel();
+        return;
+      }
+      // Focus trap: Tab from the last focusable wraps to the first;
+      // Shift+Tab from the first wraps to the last. With aria-modal
+      // set to true on the dialog and this trap in place, AT users
+      // can't navigate to controls behind the dialog.
+      if (e.key === 'Tab') {
+        const focusables = dialogFocusables();
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    },
+    true
+  );
 
   // Click on the scrim (the dialog element itself, outside the panel)
   // closes like Cancel. Clicks inside the panel don't bubble to here
