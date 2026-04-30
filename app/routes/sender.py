@@ -179,7 +179,7 @@ def send_logout(response: Response, settings: Settings = Depends(get_settings)):
         Depends(verify_same_origin),
     ],
 )
-async def create_secret(
+async def create_secret(  # noqa: C901
     request: Request,
     user: dict = Depends(verify_api_token_or_session),
     settings: Settings = Depends(get_settings),

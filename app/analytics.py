@@ -129,7 +129,7 @@ class AnalyticsValidationError(ValueError):
     """Raised when a record_event() call doesn't conform to the registry."""
 
 
-def _validate_payload(event_type: str, payload: dict | None) -> dict:
+def _validate_payload(event_type: str, payload: dict | None) -> dict:  # noqa: C901
     """Pure function -- no DB. Validates payload against EVENT_REGISTRY
     and returns the validated copy. Raises AnalyticsValidationError on
     any deviation (unknown event type, unknown keys, wrong types, nested
