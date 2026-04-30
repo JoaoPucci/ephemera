@@ -129,37 +129,61 @@ def collect_rows() -> list[dict]:
     cov_by_file = {_normalise(k): v for k, v in cov.get("files", {}).items()}
     radon_by_file = _radon_complexity(APP_DIR)
 
-    rows = []
+    rows: list[dict] = []
     for raw_path, blocks in radon_by_file.items():
         rel_path = _normalise(raw_path)
         file_cov = cov_by_file.get(rel_path, {})
         for block in blocks:
-            # radon's per-file output mixes top-level functions, top-level
-            # classes (with their `methods` nested as a list), and any
-            # closures defined inside top-level functions. We want a leaf
-            # row per scoreable callable, so:
-            #   - module-level function/method blocks land directly
-            #   - a class block expands into its `methods` list (skip the
-            #     class block itself; its `complexity` is the sum of its
-            #     methods, not a separate signal we want to score)
-            # Methods carry `classname` -- prefix the display name with it
-            # so a 12-complexity `User.authenticate` is distinguishable
-            # from a same-named free function.
-            if block.get("type") == "class":
-                for method in block.get("methods", []):
-                    name = f"{block['name']}.{method['name']}"
-                    rows.append(_row_for(rel_path, name, method, file_cov))
-                continue
-            rows.append(_row_for(rel_path, block["name"], block, file_cov))
+            _expand_block(block, rel_path, file_cov, parent_name=None, rows=rows)
     rows.sort(key=lambda r: r["crap"], reverse=True)
     return rows
 
 
+def _expand_block(
+    block: dict,
+    rel_path: str,
+    file_cov: dict,
+    parent_name: str | None,
+    rows: list[dict],
+) -> None:
+    """Walk one radon block, appending one row per scoreable callable.
+
+    radon's per-file output is a tree:
+      - top-level functions / classes
+      - classes contain a `methods` array
+      - functions and methods both contain a `closures` array
+        (nested callables defined inside the body)
+
+    We want a row per LEAF callable, with the display name carrying
+    the nesting context so `create_app.healthz` is distinguishable
+    from a free `healthz` function. Recurses into both `methods` and
+    `closures` so a route-handler closure two levels deep
+    (`create_app.docs.swagger_ui`) still surfaces.
+
+    The class block itself is intentionally skipped -- radon's class-
+    level complexity is the sum of its methods, not a separate
+    signal. We score the leaves.
+    """
+    name = block["name"]
+    qualified = f"{parent_name}.{name}" if parent_name else name
+
+    if block.get("type") == "class":
+        for method in block.get("methods", []):
+            _expand_block(method, rel_path, file_cov, qualified, rows)
+        return
+
+    rows.append(_row_for(rel_path, qualified, block, file_cov))
+    for closure in block.get("closures", []):
+        _expand_block(closure, rel_path, file_cov, qualified, rows)
+
+
 def _row_for(rel_path: str, display_name: str, block: dict, file_cov: dict) -> dict:
     """Build one ranked row from a radon callable block (function, top-
-    level method, or class-nested method). `display_name` is what the
-    report prints; for class-nested methods we pre-prefix the classname
-    so the row reads as `MyClass.do_thing` rather than just `do_thing`."""
+    level method, class-nested method, or any nested closure inside
+    those). `display_name` carries the dotted nesting path
+    (`create_app.healthz`) so the row pinpoints the callable rather
+    than reporting an unqualified name that could collide across
+    scopes in the same file."""
     complexity = int(block["complexity"])
     start = int(block["lineno"])
     end = int(block.get("endline", start))
