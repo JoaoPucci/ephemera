@@ -60,6 +60,30 @@ def test_manifest_endpoint_returns_200(client):
     assert r.status_code == 200, r.text
 
 
+def test_legacy_static_manifest_path_still_serves_manifest(client):
+    # PR #106 shipped the manifest as a static file at
+    # /static/manifest.webmanifest. PR #107 (this PR) moved it to a
+    # route at /manifest.webmanifest so the content can vary per
+    # deployment. Any phone that installed the PWA against the v#106
+    # URL has the old path captured in its browser-side install state
+    # and will keep polling it for manifest updates; if that path
+    # 404s, Chrome silently stops propagating name/icon/start_url
+    # changes to those installs. Both paths therefore serve the same
+    # dynamic manifest. Drop the alias only when no operator could
+    # plausibly still have a v#106 install pinned to the old URL.
+    r = client.get("/static/manifest.webmanifest")
+    assert r.status_code == 200, r.text
+    ctype = r.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    assert ctype == "application/manifest+json"
+    legacy = json.loads(r.text)
+    canonical = json.loads(client.get(MANIFEST_URL).text)
+    assert legacy == canonical, (
+        "legacy /static/manifest.webmanifest must serve byte-equivalent "
+        "content to the canonical /manifest.webmanifest URL so existing "
+        "installs see the same manifest as fresh ones"
+    )
+
+
 def test_manifest_endpoint_uses_manifest_mime(client):
     r = client.get(MANIFEST_URL)
     ctype = r.headers.get("content-type", "").split(";", 1)[0].strip().lower()

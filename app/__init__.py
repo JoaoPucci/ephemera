@@ -142,13 +142,32 @@ def create_app() -> FastAPI:
     # (see app/config.py and app/__init__.py:_build_pwa_manifest). Sets
     # the spec'd application/manifest+json MIME explicitly -- browsers
     # reject manifests served as application/octet-stream.
+    #
+    # Two paths bind to the same handler. /manifest.webmanifest is the
+    # canonical URL (what the layout's <link rel="manifest"> points at
+    # going forward). /static/manifest.webmanifest is a legacy alias for
+    # already-installed PWAs whose browsers captured the old static-file
+    # URL before this change -- letting that path 404 would silently
+    # block manifest updates from propagating to those installs (Chrome
+    # may stop polling the manifest after a 404 and serve cached
+    # name/icon/start_url forever). The static mount underneath is
+    # registered AFTER these routes, so the explicit handler wins for
+    # this specific path while every other /static/* request falls
+    # through to StaticFiles as usual.
 
-    @app.get("/manifest.webmanifest", include_in_schema=False)
-    def manifest():
+    def _manifest_response():
         return JSONResponse(
             _build_pwa_manifest(get_settings()),
             media_type="application/manifest+json",
         )
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest():
+        return _manifest_response()
+
+    @app.get("/static/manifest.webmanifest", include_in_schema=False)
+    def manifest_legacy_path():
+        return _manifest_response()
 
     # ---- Health probe -----------------------------------------------------
     # Unauthenticated, rate-limit-exempt liveness + readiness check. Touches
