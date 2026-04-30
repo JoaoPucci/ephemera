@@ -116,27 +116,44 @@ def collect_rows() -> list[dict]:
         rel_path = _normalise(raw_path)
         file_cov = cov_by_file.get(rel_path, {})
         for block in blocks:
-            # radon emits classes too (with .complexity = sum of methods);
-            # the methods themselves come through as nested entries on the
-            # block. For the report we want leaf functions/methods only.
+            # radon's per-file output mixes top-level functions, top-level
+            # classes (with their `methods` nested as a list), and any
+            # closures defined inside top-level functions. We want a leaf
+            # row per scoreable callable, so:
+            #   - module-level function/method blocks land directly
+            #   - a class block expands into its `methods` list (skip the
+            #     class block itself; its `complexity` is the sum of its
+            #     methods, not a separate signal we want to score)
+            # Methods carry `classname` -- prefix the display name with it
+            # so a 12-complexity `User.authenticate` is distinguishable
+            # from a same-named free function.
             if block.get("type") == "class":
+                for method in block.get("methods", []):
+                    name = f"{block['name']}.{method['name']}"
+                    rows.append(_row_for(rel_path, name, method, file_cov))
                 continue
-            complexity = int(block["complexity"])
-            start = int(block["lineno"])
-            end = int(block.get("endline", start))
-            coverage = _coverage_for_lines(file_cov, start, end)
-            rows.append(
-                {
-                    "path": rel_path,
-                    "name": block["name"],
-                    "lineno": start,
-                    "complexity": complexity,
-                    "coverage": coverage,
-                    "crap": _crap(complexity, coverage),
-                }
-            )
+            rows.append(_row_for(rel_path, block["name"], block, file_cov))
     rows.sort(key=lambda r: r["crap"], reverse=True)
     return rows
+
+
+def _row_for(rel_path: str, display_name: str, block: dict, file_cov: dict) -> dict:
+    """Build one ranked row from a radon callable block (function, top-
+    level method, or class-nested method). `display_name` is what the
+    report prints; for class-nested methods we pre-prefix the classname
+    so the row reads as `MyClass.do_thing` rather than just `do_thing`."""
+    complexity = int(block["complexity"])
+    start = int(block["lineno"])
+    end = int(block.get("endline", start))
+    coverage = _coverage_for_lines(file_cov, start, end)
+    return {
+        "path": rel_path,
+        "name": display_name,
+        "lineno": start,
+        "complexity": complexity,
+        "coverage": coverage,
+        "crap": _crap(complexity, coverage),
+    }
 
 
 def render_markdown(rows: list[dict], top: int) -> str:
