@@ -119,10 +119,40 @@ do_not_mutate = [
 # package's own __init__.py, app.admin, app.routes, etc.) has to be
 # copied as-is so imports like `from app import admin` resolve when
 # the test suite runs against the mutated tree. `also_copy` is the
-# right lever for that -- it copies-but-doesn't-mutate.
+# right lever -- copy-but-don't-mutate.
+#
+# Listed explicitly per-path rather than `also_copy = ["app/"]`
+# because the package list overlaps with `paths_to_mutate` and the
+# overlap is brittle: even if the current mutmut version copies in
+# a safe order (mutants generated AFTER also_copy, so no clobber
+# today), a future copy-order change could turn the overlap into
+# a silent correctness regression where mutated files get
+# overwritten with originals before tests run. Listing only the
+# non-mutated subset keeps the contract straightforward: each
+# `also_copy` entry is "as-is", every `paths_to_mutate` entry is
+# "mutated", no file appears in both. When a new top-level module
+# lands under `app/`, decide whether to mutate it (add to
+# paths_to_mutate) or keep it as-is (add here) -- both can't be
+# true.
 also_copy = [
-  "app/",
   "conftest.py",
+  "app/__init__.py",
+  "app/admin/",
+  "app/analytics.py",
+  "app/cleanup.py",
+  "app/config.py",
+  "app/errors.py",
+  "app/i18n.py",
+  "app/limiter.py",
+  "app/models/",
+  "app/routes/",
+  "app/schemas.py",
+  "app/security_headers.py",
+  "app/security_log.py",
+  "app/static/",
+  "app/templates/",
+  "app/translations/",
+  "app/version.py",
 ]
 
 [tool.coverage.run]
