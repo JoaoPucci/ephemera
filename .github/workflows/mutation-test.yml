@@ -70,12 +70,18 @@ jobs:
         # GitHub-hosted runners ship with 4 vCPU as of 2026; tracking
         # that as a safe default. Capped via timeout-minutes above so
         # a runaway run doesn't consume the full 6-hour ceiling.
+        #
+        # No continue-on-error: in mutmut 3.5, `run` exits 0 on a
+        # normal completion REGARDLESS of how many mutants survived
+        # (surviving counts are reported in `mutmut results` /
+        # the cache, not the exit code). Non-zero exit means a real
+        # failure -- pre-mutation clean tests failed, the test suite
+        # doesn't cover any mutated code, mutmut crashed -- all of
+        # which should fail the workflow so the noise gets noticed
+        # rather than producing a misleading "succeeded with empty
+        # report" run. Surviving-mutant accounting is the report
+        # step's job, below.
         run: python -m mutmut run --max-children 4
-        # mutmut returns non-zero when surviving mutants exist, by
-        # design -- "the run found work to do". For an informational
-        # report we don't want that to fail the workflow; the next
-        # step's report tells the operator exactly what survived.
-        continue-on-error: true
 
       - name: Generate mutmut report
         if: always()
