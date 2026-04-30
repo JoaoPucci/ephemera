@@ -97,24 +97,42 @@ extend-immutable-calls = [
 # on hosted runners. Expand the list as test-suite speed and runner
 # capacity allow.
 paths_to_mutate = [
-  # app/crypto.py deliberately omitted -- mutmut's source-instrumentation
-  # interacts badly with cryptography's PyO3-backed Rust bindings (HKDF,
-  # Fernet). When the trampolined `_at_rest_key` runs through the stats-
-  # collection trampoline, the Rust HKDF binding raises
+  # SCOPE NOTE -- v1 minimum-viable mutation. validation.py only.
+  #
+  # Earlier attempts scoped paths_to_mutate to the security-leverage
+  # set (crypto.py + validation.py + auth/ + dependencies.py).
+  # Two CI runs (#111, post-#113) reveal a hard interaction between
+  # mutmut's stats-collection environment and cryptography's
+  # PyO3-backed Rust bindings: the Rust HKDF binding raises
   # `TypeError: Expected instance of hashes.HashAlgorithm.` on a
   # `hashes.SHA256()` value that the same binding accepts in plain
-  # pytest runs. Reproduces in CI but not locally; root cause is
-  # somewhere in the stats-phase context (env vars, mutmut globals,
-  # rather than something in our code). Track upstream via mutmut's
-  # issue tracker; until fixed, copy crypto.py as-is via also_copy
-  # below so the test suite still imports cleanly. Same may apply to
-  # other Rust-backed paths (bcrypt in auth/) -- expand this comment if
-  # they fail similarly on the next CI run.
+  # pytest runs. The failure happens REGARDLESS of whether crypto.py
+  # is in paths_to_mutate or just in also_copy -- so it isn't about
+  # mutmut's source-instrumentation at all; something in mutmut's
+  # stats-phase environment (env vars / module globals / process
+  # state) breaks cryptography's class-identity check.
+  #
+  # The provoking call chain runs through provisioned_user ->
+  # models.create_user -> encrypt_at_rest -> _at_rest_key -> HKDF.
+  # Every test that uses the provisioned_user fixture trips it, so
+  # narrowing paths_to_mutate alone doesn't help -- mutmut's pytest
+  # invocation still collects ALL tests under tests_dir during stats.
+  #
+  # Workaround: limit BOTH paths_to_mutate AND tests_dir to a
+  # cryptography-free island. validation.py + tests/test_validation.py
+  # is that island -- pure-Python magic-byte detection, no auth, no
+  # bcrypt, no Fernet, no HKDF. Proves the mutmut infrastructure
+  # works at all on this codebase. Expand once we have a tighter MRE
+  # for the cryptography interaction (file upstream against mutmut,
+  # or work around in our code).
   "app/validation.py",
-  "app/auth/",
-  "app/dependencies.py",
 ]
-tests_dir = ["tests/"]
+# Pair `tests_dir` to `paths_to_mutate`: only run the tests that
+# exercise the mutated module. With paths_to_mutate=validation.py,
+# only test_validation.py is relevant -- and crucially, this test
+# file uses zero crypto / auth / Fernet / bcrypt code paths, so it
+# avoids the mutmut-x-PyO3 trip wire entirely.
+tests_dir = ["tests/test_validation.py"]
 # `mutate_only_covered_lines` limits mutation generation to lines the
 # test suite actually exercises -- a mutant on dead code would
 # trivially "survive" (no test could catch it because no test ever
