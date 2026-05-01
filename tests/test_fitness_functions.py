@@ -62,6 +62,45 @@ def _string_constants_outside_docstrings(tree: ast.AST):
 # ---------------------------------------------------------------------------
 
 
+def _autherror_local_names(tree: ast.AST) -> set[str]:
+    """Set of names in this module that resolve to AuthError. Always
+    includes the literal "AuthError" (covers the class definition in
+    _core.py + every direct `from ._core import AuthError`), plus any
+    local alias from `from ... import AuthError as <X>`. Without alias
+    resolution, `from ._core import AuthError as LoginError` followed
+    by `raise LoginError("wrong password")` would silently ship per-
+    factor wording while the test stayed green."""
+    names = {"AuthError"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "AuthError":
+                    names.add(alias.asname or "AuthError")
+    return names
+
+
+def _raise_calls_autherror(
+    node: ast.Raise, autherror_names: set[str]
+) -> ast.Call | None:
+    """If `node` is `raise <X>(...)` where `<X>` is a name resolving to
+    AuthError (Name form against `autherror_names`, OR Attribute form
+    with trailing `.AuthError` regardless of module alias), return the
+    Call node; otherwise None."""
+    if not isinstance(node.exc, ast.Call):
+        return None
+    func = node.exc.func
+    name = None
+    if isinstance(func, ast.Name):
+        name = func.id
+    elif isinstance(func, ast.Attribute):
+        name = func.attr
+    if name is None:
+        return None
+    if name == "AuthError" or name in autherror_names:
+        return node.exc
+    return None
+
+
 def test_authentication_only_raises_canonical_credential_error():
     """AGENTS.md §5: 'User-facing error copy on auth failures should not
     distinguish *why* a credential was rejected. "Invalid credentials" is
@@ -79,27 +118,17 @@ def test_authentication_only_raises_canonical_credential_error():
     offenders: list[str] = []
     for py in _py_files(APP_DIR / "auth"):
         tree = ast.parse(py.read_text())
+        autherror_names = _autherror_local_names(tree)
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
+            if not isinstance(node, ast.Raise):
                 continue
-            func = node.exc.func
-            # Accept both bare `raise AuthError(...)` and attribute-qualified
-            # forms like `raise auth_core.AuthError(...)` / `raise
-            # _core.AuthError(...)`. The qualified form was previously skipped
-            # because the detector required `func` to be ast.Name; that left
-            # a real bypass where a re-export could silently introduce
-            # per-factor wording.
-            name = None
-            if isinstance(func, ast.Name):
-                name = func.id
-            elif isinstance(func, ast.Attribute):
-                name = func.attr
-            if name != "AuthError":
+            call = _raise_calls_autherror(node, autherror_names)
+            if call is None:
                 continue
             ok = (
-                node.exc.args
-                and isinstance(node.exc.args[0], ast.Constant)
-                and node.exc.args[0].value == canonical
+                call.args
+                and isinstance(call.args[0], ast.Constant)
+                and call.args[0].value == canonical
             )
             if not ok:
                 rel = py.relative_to(REPO_ROOT)
@@ -256,17 +285,46 @@ def test_analytics_events_table_has_a_single_writer():
 # ---------------------------------------------------------------------------
 
 
+_MUTATING_VERBS = {"post", "put", "patch", "delete"}
+
+
 def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
-    """True iff `deco` is `@<expr>.<verb>(...)` where verb is one of
-    POST / PUT / PATCH / DELETE. The owner expression is allowed to be
-    a Name (`@router.post(...)`, `@app.post(...)`) OR an attribute chain
-    (`@api.router.post(...)`, `@app.state.router.post(...)`) -- whatever
-    the call target is, what matters for the CSRF gate is the verb."""
+    """True iff `deco` registers a state-mutating HTTP handler. Two
+    FastAPI shapes count:
+
+    - **Verb-named decorator**: `@<expr>.post(...)`, `@<expr>.put(...)`,
+      `@<expr>.patch(...)`, `@<expr>.delete(...)`. `<expr>` may be a
+      Name (`@router.post`, `@app.post`) or an attribute chain
+      (`@api.router.post`, `@app.state.router.post`).
+
+    - **Catch-all `api_route`** with methods= containing a mutating
+      verb: `@<expr>.api_route(..., methods=["POST", "PUT"])` is just
+      as state-changing as `@<expr>.post`, but its decorator name is
+      neutral. The earlier verb-only detector skipped this shape, so
+      a write endpoint registered through `api_route` could ship
+      without the CSRF gate while the test still passed.
+    """
     if not isinstance(deco, ast.Call):
         return False
     if not isinstance(deco.func, ast.Attribute):
         return False
-    return deco.func.attr in {"post", "put", "patch", "delete"}
+    attr = deco.func.attr
+    if attr in _MUTATING_VERBS:
+        return True
+    if attr == "api_route":
+        for kw in deco.keywords:
+            if kw.arg != "methods":
+                continue
+            if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
+                continue
+            for elt in kw.value.elts:
+                if (
+                    isinstance(elt, ast.Constant)
+                    and isinstance(elt.value, str)
+                    and elt.value.lower() in _MUTATING_VERBS
+                ):
+                    return True
+    return False
 
 
 def _is_origin_dependency(node: ast.AST) -> bool:
