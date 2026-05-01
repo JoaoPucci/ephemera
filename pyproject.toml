@@ -169,14 +169,22 @@ also_copy = [
   "app/__init__.py",
   "app/admin/",
   "app/analytics.py",
+  # app/auth/ moved here from paths_to_mutate after the cryptography
+  # PyO3 interaction (see the SCOPE NOTE above). Bcrypt in auth/ is
+  # also Rust-backed; restoring to paths_to_mutate awaits the same
+  # upstream resolution.
+  "app/auth/",
   "app/cleanup.py",
   "app/config.py",
-  # app/crypto.py is in also_copy (NOT paths_to_mutate) because its
-  # PyO3-backed cryptography library calls fail under mutmut's
-  # trampoline instrumentation -- see the comment in paths_to_mutate
-  # above for the diagnostic. Add back to paths_to_mutate if the
-  # upstream interaction is fixed.
+  # app/crypto.py here for the same reason as auth/ -- see SCOPE
+  # NOTE in paths_to_mutate above.
   "app/crypto.py",
+  # app/dependencies.py here too -- moved out of paths_to_mutate
+  # alongside auth/, since `app/__init__.py` imports from it
+  # (`from .dependencies import verify_api_token_or_session`) and
+  # leaving it absent breaks the import chain even though it never
+  # gets mutated.
+  "app/dependencies.py",
   "app/errors.py",
   "app/i18n.py",
   "app/limiter.py",
