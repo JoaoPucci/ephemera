@@ -293,40 +293,149 @@ def _sanctioned_totp_getter_aliases(tree: ast.AST, file_path: pathlib.Path) -> s
     return names
 
 
-def _scope_calls_with_totp_getter(scope: ast.AST, sanctioned_aliases: set[str]) -> bool:
-    """True iff `scope` actually CALLS one of the sanctioned data-layer
-    `get_user_with_totp_*` getters in its own body. Two shapes count:
+def _is_sanctioned_getter_call(call: ast.Call, sanctioned_aliases: set[str]) -> bool:
+    """True iff `call` is a sanctioned-getter invocation, in either
+    convention shape:
 
-      models.<getter>(...)  -- the convention used in this codebase;
-                               the receiver must be the bare Name
-                               `models` so an unrelated `svc.<getter>`
-                               or `obj.<getter>` method on a different
-                               class can't satisfy the quarantine.
-
-      <getter>(...)         -- the getter symbol was imported directly
-                               into this module; `sanctioned_aliases`
-                               carries the local names that map to a
-                               real sanctioned getter via `from ...
-                               import` (with optional alias).
-
-    Nested function bodies are skipped so a helper's getter call can't
-    satisfy the enclosing function's read; the helper is analyzed in
-    its own right when the outer loop reaches it.
+      models.<getter>(...)  -- Attribute call on the bare Name `models`
+                               (the receiver must be `models`, not
+                               `svc.<getter>` or `obj.<getter>` on an
+                               unrelated class).
+      <getter>(...)         -- Name call where `<getter>` was imported
+                               directly into this module via
+                               `from app.models[.users] import ...`,
+                               recorded in `sanctioned_aliases`.
     """
-    for node in _walk_local(scope):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id in sanctioned_aliases:
-            return True
-        if (
-            isinstance(func, ast.Attribute)
-            and func.attr in _WITH_TOTP_GETTERS
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "models"
-        ):
-            return True
+    func = call.func
+    if isinstance(func, ast.Name) and func.id in sanctioned_aliases:
+        return True
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr in _WITH_TOTP_GETTERS
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "models"
+    )
+
+
+def _is_sanctioned_or_none_source(
+    expr: ast.AST | None, sanctioned_aliases: set[str]
+) -> bool:
+    """True iff every reachable value of `expr` is either the result
+    of a sanctioned getter call OR `None`. Handles two real patterns:
+
+      Call:    `sanctioned(...)`                    -> trusted
+      None:    `None`                               -> trusted (any
+                                                       subscript on
+                                                       None raises at
+                                                       runtime, so a
+                                                       None branch
+                                                       can't carry
+                                                       a totp_secret
+                                                       read)
+      IfExp:   `sanctioned(...) if cond else None`  -> trusted
+               (the canonical login.py shape: bind to None when no
+               username, else fetch through the sanctioned getter;
+               the None branch falls through to a raise before any
+               read happens)
+
+    Other shapes (BoolOp `or`/`and`, Subscript, comprehension,
+    arbitrary Call) return False -- conservative direction matches
+    the rest of the test."""
+    if expr is None:
+        return False
+    if isinstance(expr, ast.Constant) and expr.value is None:
+        return True
+    if isinstance(expr, ast.Call):
+        return _is_sanctioned_getter_call(expr, sanctioned_aliases)
+    if isinstance(expr, ast.IfExp):
+        return _is_sanctioned_or_none_source(
+            expr.body, sanctioned_aliases
+        ) and _is_sanctioned_or_none_source(expr.orelse, sanctioned_aliases)
     return False
+
+
+def _locals_bound_to_sanctioned_getter(
+    scope: ast.AST, sanctioned_aliases: set[str]
+) -> set[str]:
+    """Set of local Name targets bound to a sanctioned-getter result
+    inside `scope`. Walks Assign statements (skipping nested function
+    bodies) and records `Name(X)` targets whose RHS is a
+    sanctioned-or-None source.
+
+    Limitation: doesn't track reassignment. `user = sanctioned(...);
+    user = other(...); user["totp_secret"]` would still treat `user`
+    as trusted because it once held a sanctioned value. A full
+    reaching-definitions pass would close that; the simple binding-set
+    is enough to catch the basic co-occurrence bypass while keeping
+    the helper readable. Tuple-unpacking and walrus assignments are
+    also out of scope; they don't appear in this codebase."""
+    bound: set[str] = set()
+    for node in _walk_local(scope):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not _is_sanctioned_or_none_source(node.value, sanctioned_aliases):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                bound.add(target.id)
+    return bound
+
+
+def _is_trusted_totp_receiver(
+    recv: ast.AST, trusted_locals: set[str], sanctioned_aliases: set[str]
+) -> bool:
+    """True iff `recv` (the expression on which `["totp_secret"]` or
+    `.pop("totp_secret", ...)` is performed) is sourced from a
+    sanctioned getter:
+
+      - A `Name` that's in `trusted_locals` (bound earlier in the
+        scope from a sanctioned-getter call).
+      - A direct sanctioned-getter `Call` (for the inline pattern
+        `models.get_user_with_totp_by_id(uid)["totp_secret"]`).
+    """
+    if isinstance(recv, ast.Name):
+        return recv.id in trusted_locals
+    if isinstance(recv, ast.Call):
+        return _is_sanctioned_getter_call(recv, sanctioned_aliases)
+    return False
+
+
+def _scope_totp_reads_are_quarantined(
+    scope: ast.AST, sanctioned_aliases: set[str]
+) -> bool:
+    """True iff every `totp_secret` read in `scope` is on a receiver
+    that came from a sanctioned-getter call (a name bound from one,
+    or the call expression itself). Replaces the earlier file-scope
+    co-occurrence check, which would pass any function that called
+    a sanctioned getter once AND read `totp_secret` from a different
+    object elsewhere -- a real bypass class.
+
+    Returns True if `scope` contains no `totp_secret` read at all,
+    so callers should still gate on `_scope_reads_totp_secret` first
+    when they want to skip read-free functions."""
+    trusted = _locals_bound_to_sanctioned_getter(scope, sanctioned_aliases)
+    for node in _walk_local(scope):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Load)
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value == "totp_secret"
+            and not _is_trusted_totp_receiver(node.value, trusted, sanctioned_aliases)
+        ):
+            return False
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"pop", "get"}
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "totp_secret"
+            and not _is_trusted_totp_receiver(
+                node.func.value, trusted, sanctioned_aliases
+            )
+        ):
+            return False
+    return True
 
 
 def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
@@ -334,16 +443,23 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
     plaintext TOTP seed is exposed only via `get_user_with_totp_*`
     getters; every other read path returns a dict that omits the column.
 
-    Static check: any FUNCTION that performs a real `["totp_secret"]`
-    Load-context read (or `.pop`/`.get` on the same key) must also CALL
-    one of the `get_user_with_totp_*` getters in its own body. The
-    coupling is at function scope, not file scope -- a sibling function
-    elsewhere in the same module that happens to call the getter does
-    NOT satisfy a separate function's read.
+    Static check: every `["totp_secret"]` read (or `.pop` / `.get` on
+    the same key) inside a function under app/ must operate on a
+    receiver that was bound from a sanctioned getter call -- either
+    a Name set to `models.<getter>(...)` / `<imported_getter>(...)`
+    earlier in the same scope, or the getter call itself used inline
+    as the subscripted expression.
 
-    Both halves are AST-grounded (not text/substring) so a comment,
-    import, or unrelated string mentioning either name can't satisfy
-    the guard. Files in the data layer itself (app/models/users.py,
+    The check is at function scope and dataflow-bound: a sibling
+    function elsewhere in the module doesn't satisfy a separate
+    function's read, AND a sanctioned-getter call elsewhere in the
+    same function doesn't cover a read on a different (un-trusted)
+    receiver. Catches the bypass shape where a function calls a
+    sanctioned getter for one variable and then reads `totp_secret`
+    from a different one (e.g., from a non-decrypting `get_user_by_id`
+    result).
+
+    Files in the data layer itself (app/models/users.py,
     app/models/_core.py for the plaintext-encryption migration) are
     exempt -- they are the source of the secret, not consumers of it.
     """
@@ -360,13 +476,14 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
                 continue
             if not _scope_reads_totp_secret(fn):
                 continue
-            if not _scope_calls_with_totp_getter(fn, sanctioned):
+            if not _scope_totp_reads_are_quarantined(fn, sanctioned):
                 offenders.append(f"{rel}:{fn.lineno} {fn.name}")
     assert not offenders, (
-        "Functions reading `totp_secret` must obtain it via a real "
-        "`get_user_with_totp_*` call in their own body, not lean on a "
-        "sibling function elsewhere in the module "
-        "(see app/models/users.py module docstring).\n  " + "\n  ".join(offenders)
+        "Every `totp_secret` read must be on a receiver sourced from a "
+        "sanctioned `get_user_with_totp_*` call in the same function -- "
+        "either a name bound from one, or the call inline. A sanctioned "
+        "call elsewhere in the function doesn't cover a read on a "
+        "different (un-trusted) variable.\n  " + "\n  ".join(offenders)
     )
 
 
