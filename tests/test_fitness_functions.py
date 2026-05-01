@@ -195,12 +195,25 @@ def _scope_reads_totp_secret(scope: ast.AST) -> bool:
     return False
 
 
+# The exact set of sanctioned data-layer getters that decrypt + return
+# `totp_secret`. Defined in app/models/users.py; any other call whose
+# name happens to start with `get_user_with_totp_` (a future
+# `get_user_with_totp_redacted_for_logs` helper, say) does NOT satisfy
+# the quarantine -- only these two do. New sanctioned getters land here
+# explicitly, in the same PR that adds them in app/models/.
+_WITH_TOTP_GETTERS = frozenset(
+    {"get_user_with_totp_by_id", "get_user_with_totp_by_username"}
+)
+
+
 def _scope_calls_with_totp_getter(scope: ast.AST) -> bool:
-    """True iff `scope` actually CALLS a `get_user_with_totp_*` function
-    in its own body -- a real `Call` node, not a comment, import, or
-    string. Nested function bodies are skipped so a helper's getter
-    call can't satisfy the enclosing function's read; the helper is
-    analyzed in its own right when the outer loop reaches it."""
+    """True iff `scope` actually CALLS one of the sanctioned data-layer
+    `get_user_with_totp_*` getters in its own body -- a real `Call`
+    node, name matched against the closed `_WITH_TOTP_GETTERS` set
+    (not a prefix). Nested function bodies are skipped so a helper's
+    getter call can't satisfy the enclosing function's read; the
+    helper is analyzed in its own right when the outer loop reaches
+    it."""
     for node in _walk_local(scope):
         if not isinstance(node, ast.Call):
             continue
@@ -210,7 +223,7 @@ def _scope_calls_with_totp_getter(scope: ast.AST) -> bool:
             name = func.id
         elif isinstance(func, ast.Attribute):
             name = func.attr
-        if name and name.startswith("get_user_with_totp_"):
+        if name in _WITH_TOTP_GETTERS:
             return True
     return False
 
@@ -312,6 +325,28 @@ def test_analytics_events_table_has_a_single_writer():
 _MUTATING_VERBS = {"post", "put", "patch", "delete"}
 
 
+def _kwargs_contain_mutating_method(keywords: list[ast.keyword]) -> bool:
+    """True iff `keywords` (a Call's `.keywords` list) carries
+    `methods=[...]` containing a state-mutating verb literal. Matches
+    `methods=["POST"]`, `methods=("PUT",)`, `methods={"PATCH"}` -- any
+    iterable literal of string constants. Used by both the
+    `api_route(...)` decorator detector and the imperative
+    `add_api_route(...)` registration scan."""
+    for kw in keywords:
+        if kw.arg != "methods":
+            continue
+        if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        for elt in kw.value.elts:
+            if (
+                isinstance(elt, ast.Constant)
+                and isinstance(elt.value, str)
+                and elt.value.lower() in _MUTATING_VERBS
+            ):
+                return True
+    return False
+
+
 def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
     """True iff `deco` registers a state-mutating HTTP handler. Two
     FastAPI shapes count:
@@ -336,19 +371,25 @@ def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
     if attr in _MUTATING_VERBS:
         return True
     if attr == "api_route":
-        for kw in deco.keywords:
-            if kw.arg != "methods":
-                continue
-            if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
-                continue
-            for elt in kw.value.elts:
-                if (
-                    isinstance(elt, ast.Constant)
-                    and isinstance(elt.value, str)
-                    and elt.value.lower() in _MUTATING_VERBS
-                ):
-                    return True
+        return _kwargs_contain_mutating_method(deco.keywords)
     return False
+
+
+def _is_imperative_mutating_registration(node: ast.AST) -> bool:
+    """True iff `node` is an imperative `<expr>.add_api_route(...)` call
+    that registers a state-mutating handler. FastAPI exposes
+    `router.add_api_route(path, endpoint, methods=[...], ...)` as the
+    function-call equivalent of the decorator API; the decorator-only
+    detector skipped this shape entirely, so a write endpoint added
+    imperatively could miss the CSRF gate while the test stayed
+    green."""
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Attribute):
+        return False
+    if node.func.attr != "add_api_route":
+        return False
+    return _kwargs_contain_mutating_method(node.keywords)
 
 
 def _is_origin_dependency(node: ast.AST) -> bool:
@@ -403,12 +444,12 @@ def test_state_mutating_routes_all_carry_origin_gate():
     handler regardless of whether anyone wrote a request-level test.
     """
     offenders: list[str] = []
-    # Both sync `def` and `async def` route handlers are valid FastAPI
-    # shapes -- e.g. app/routes/sender.py::create_secret is async. Walk
-    # both AST node kinds so a future async handler can't slip past the
-    # gate by virtue of its definition style.
     for py in _py_files(APP_DIR):
         tree = ast.parse(py.read_text())
+        # Pass 1: decorator-style registrations on FunctionDef /
+        # AsyncFunctionDef. Both sync `def` and `async def` shapes
+        # are valid FastAPI handlers (e.g. app/routes/sender.py::
+        # create_secret is async); walk both node kinds.
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -427,11 +468,28 @@ def test_state_mutating_routes_all_carry_origin_gate():
             if not ok:
                 rel = py.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}:{node.lineno} {node.name}")
+        # Pass 2: imperative `<expr>.add_api_route(path, endpoint,
+        # methods=[...])` calls anywhere in the module. We can't
+        # follow the endpoint reference to its signature statically,
+        # so the gate must be wired in the call's own keyword args
+        # (the standard `dependencies=[Depends(verify_same_origin)]`
+        # placement). A call that sneaks the dependency only into
+        # the endpoint's signature is an accepted miss -- a rare
+        # enough shape that we'd catch it in review rather than
+        # carry import-resolution machinery here.
+        for node in ast.walk(tree):
+            if not _is_imperative_mutating_registration(node):
+                continue
+            ok = any(_is_origin_dependency(inner) for inner in ast.walk(node))
+            if not ok:
+                rel = py.relative_to(REPO_ROOT)
+                offenders.append(f"{rel}:{node.lineno} add_api_route(...)")
     assert not offenders, (
-        "State-mutating routes (POST/PUT/PATCH/DELETE) must carry "
-        "`Depends(verify_same_origin)` -- either in the decorator's "
-        "`dependencies=` or as a function-parameter default.\n  "
-        + "\n  ".join(offenders)
+        "State-mutating routes (POST/PUT/PATCH/DELETE), whether registered "
+        "via a decorator or `<router>.add_api_route(...)`, must carry "
+        "`Depends(verify_same_origin)` -- either inline in the "
+        "registration's `dependencies=` or as a function-parameter "
+        "default.\n  " + "\n  ".join(offenders)
     )
 
 
@@ -461,11 +519,23 @@ def test_no_print_calls_in_request_path_or_data_layer():
             continue
         tree = ast.parse(py.read_text())
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "print"
-            ):
+            if not isinstance(node, ast.Call):
+                continue
+            # Match both bare `print(...)` and qualified shapes like
+            # `builtins.print(...)`. The qualified form was previously
+            # skipped because the detector required `func` to be ast.Name;
+            # `from builtins import print` aliases (renaming `print` to
+            # something else) are NOT detected -- they're exotic enough
+            # that we'd rather let them stand out in review than carry
+            # the import-resolution machinery here. Same posture the
+            # AuthError test already takes.
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name == "print":
                 offenders.append(f"{rel}:{node.lineno}")
     assert not offenders, (
         "`print()` calls outside `app/admin/` (the operator CLI) are not "
