@@ -41,33 +41,35 @@ module-path = "app/"
 # auth-touching test is in the hundreds of milliseconds; 30s is
 # generous headroom even for the heaviest mutant test runs.
 timeout = 30.0
-# Each entry is a fnmatch glob against the dotted module path
-# (NOT the file path). Everything outside the security-leverage
-# set is excluded so cosmic-ray doesn't waste mutation cycles on
-# routes / models / templates / etc. Listed long-form rather than
-# wildcard to make the in-scope set explicit -- a future
-# contributor adding a top-level module gets a chance to decide
-# whether to pull it into mutation testing or leave it out, and
-# the diff in this file makes the choice visible.
+# Each entry is a filesystem glob (passed to `glob.glob(p,
+# recursive=True)` by cosmic-ray's modules.filter_paths) -- NOT a
+# dotted module path. Patterns like `app.admin.*` would silently
+# match nothing and cosmic-ray would mutate the whole module-path
+# instead. Use file-path globs: directory-recursive patterns end
+# with `/**/*.py`; single-file patterns are the plain path.
+#
+# Everything outside the security-leverage set is excluded so
+# cosmic-ray doesn't waste mutation cycles on routes / models /
+# templates / etc. Listed long-form rather than wildcard to make
+# the in-scope set explicit -- a future contributor adding a
+# top-level module gets a chance to decide whether to pull it
+# into mutation testing or leave it out, and the diff in this
+# file makes the choice visible.
 excluded-modules = [
-  "app",
-  "app.__init__",
-  "app.admin",
-  "app.admin.*",
-  "app.analytics",
-  "app.cleanup",
-  "app.config",
-  "app.errors",
-  "app.i18n",
-  "app.limiter",
-  "app.models",
-  "app.models.*",
-  "app.routes",
-  "app.routes.*",
-  "app.schemas",
-  "app.security_headers",
-  "app.security_log",
-  "app.version",
+  "app/__init__.py",
+  "app/admin/**/*.py",
+  "app/analytics.py",
+  "app/cleanup.py",
+  "app/config.py",
+  "app/errors.py",
+  "app/i18n.py",
+  "app/limiter.py",
+  "app/models/**/*.py",
+  "app/routes/**/*.py",
+  "app/schemas.py",
+  "app/security_headers.py",
+  "app/security_log.py",
+  "app/version.py",
 ]
 # `test-command` runs once per mutant. Cosmic-ray spawns it as a
 # fresh subprocess so the codebase is re-imported each time --

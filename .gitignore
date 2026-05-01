@@ -43,7 +43,12 @@ htmlcov/
 
 # Cosmic-ray. SQLite session files produced by `cosmic-ray init` (one
 # per mutation run, named whatever the workflow / local invocation
-# passes as the second argument). Generated artifact; never committed.
+# passes as the second argument). The CI workflow uses the bare
+# `session.sqlite`; local invocations may pick anything. Cover the
+# common shapes -- `session.sqlite` (workflow + the cosmic-ray docs'
+# default), and the longer-form variants developers tend to use.
+# Generated artifact; never committed.
+session.sqlite
 *.cosmic-ray.sqlite
 cosmic-ray-session*.sqlite
 
