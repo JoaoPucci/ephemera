@@ -206,24 +206,56 @@ _WITH_TOTP_GETTERS = frozenset(
 )
 
 
-def _scope_calls_with_totp_getter(scope: ast.AST) -> bool:
+def _sanctioned_totp_getter_aliases(tree: ast.AST) -> set[str]:
+    """Local names that resolve to a sanctioned getter via direct
+    import. Walks the module's `from <X> import <getter>` /
+    `from <X> import <getter> as <alias>` statements (and the
+    matching plain `import` shapes are exotic enough to ignore).
+    Used so `<name>(uid)` calls are accepted only when `<name>` was
+    actually imported from the data layer, not when an unrelated
+    function happens to share the symbol's text."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        for alias in node.names:
+            if alias.name in _WITH_TOTP_GETTERS:
+                names.add(alias.asname or alias.name)
+    return names
+
+
+def _scope_calls_with_totp_getter(scope: ast.AST, sanctioned_aliases: set[str]) -> bool:
     """True iff `scope` actually CALLS one of the sanctioned data-layer
-    `get_user_with_totp_*` getters in its own body -- a real `Call`
-    node, name matched against the closed `_WITH_TOTP_GETTERS` set
-    (not a prefix). Nested function bodies are skipped so a helper's
-    getter call can't satisfy the enclosing function's read; the
-    helper is analyzed in its own right when the outer loop reaches
-    it."""
+    `get_user_with_totp_*` getters in its own body. Two shapes count:
+
+      models.<getter>(...)  -- the convention used in this codebase;
+                               the receiver must be the bare Name
+                               `models` so an unrelated `svc.<getter>`
+                               or `obj.<getter>` method on a different
+                               class can't satisfy the quarantine.
+
+      <getter>(...)         -- the getter symbol was imported directly
+                               into this module; `sanctioned_aliases`
+                               carries the local names that map to a
+                               real sanctioned getter via `from ...
+                               import` (with optional alias).
+
+    Nested function bodies are skipped so a helper's getter call can't
+    satisfy the enclosing function's read; the helper is analyzed in
+    its own right when the outer loop reaches it.
+    """
     for node in _walk_local(scope):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        name = None
-        if isinstance(func, ast.Name):
-            name = func.id
-        elif isinstance(func, ast.Attribute):
-            name = func.attr
-        if name in _WITH_TOTP_GETTERS:
+        if isinstance(func, ast.Name) and func.id in sanctioned_aliases:
+            return True
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in _WITH_TOTP_GETTERS
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "models"
+        ):
             return True
     return False
 
@@ -253,12 +285,13 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
         if rel in allowlist:
             continue
         tree = ast.parse(py.read_text())
+        sanctioned = _sanctioned_totp_getter_aliases(tree)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if not _scope_reads_totp_secret(fn):
                 continue
-            if not _scope_calls_with_totp_getter(fn):
+            if not _scope_calls_with_totp_getter(fn, sanctioned):
                 offenders.append(f"{rel}:{fn.lineno} {fn.name}")
     assert not offenders, (
         "Functions reading `totp_secret` must obtain it via a real "
@@ -298,6 +331,10 @@ def test_analytics_events_table_has_a_single_writer():
     # SQL keyword + (optional schema prefix) + (optionally quoted)
     # `analytics_events`. Covers every realistic SQLite/SQL form:
     #   FROM analytics_events
+    #   JOIN analytics_events                  (any join family --
+    #                                           INNER / LEFT / OUTER /
+    #                                           CROSS all reduce to
+    #                                           the JOIN keyword)
     #   FROM main.analytics_events             (schema-qualified)
     #   FROM "analytics_events"                (standard double quotes)
     #   FROM `analytics_events`                (MySQL-style backticks)
@@ -305,11 +342,16 @@ def test_analytics_events_table_has_a_single_writer():
     #   FROM _analytics_events_v4              (renamed-during-migration)
     # The bare-identifier version still has the trailing `\b` so partial
     # matches like `analytics_events_archive` don't trigger; the quoted
-    # versions are anchored by their closing delimiter. `RENAME TO ...`
-    # is a separate keyword we don't list here -- the only RENAME sites
-    # are inside the migration allowlist.
+    # versions are anchored by their closing delimiter.
+    #
+    # Limitations:
+    #   `RENAME TO ...` is a separate keyword we don't list here -- the
+    #   only RENAME sites are inside the migration allowlist.
+    #   Comma-separated FROM lists (`FROM users, analytics_events`)
+    #   are also unmatched; they're rare in modern SQL and the
+    #   codebase doesn't use them.
     sql_ref = re.compile(
-        r"\b(?:FROM|INTO|UPDATE|TABLE|ON|EXISTS)\s+"
+        r"\b(?:FROM|INTO|UPDATE|TABLE|ON|EXISTS|JOIN)\s+"
         r"(?:\w+\.)?"
         r"(?:"
         r'"_?analytics_events"'
