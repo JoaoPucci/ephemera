@@ -36,11 +36,29 @@
 # invocations with module-path narrowed per-target -- would
 # fragment the report across multiple session DBs.
 module-path = "app/"
-# Per-test timeout in seconds. ephemera's test suite uses bcrypt
-# at cost 12 (deliberate, see app/auth/password.py) so a single
-# auth-touching test is in the hundreds of milliseconds; 30s is
-# generous headroom even for the heaviest mutant test runs.
-timeout = 30.0
+# Per-mutant test-command timeout in seconds. ephemera's test
+# suite uses bcrypt at cost 12 (deliberate, see app/auth/
+# password.py) so the full sweep is ~10 minutes on the GitHub-
+# hosted runner. With -x in the test-command, killed mutants
+# exit fast (whenever the first test fails); only survived
+# mutants pay the full sweep cost. 720s (12m) gives the full-
+# sweep case ~20% headroom over the measured baseline -- enough
+# to absorb noise from a slow runner without making the per-
+# mutant cap a no-op.
+#
+# This is also what `cosmic-ray baseline` runs against -- the
+# unmutated full sweep must finish under this ceiling. If
+# baseline starts crowding it, the suite is genuinely slower
+# (or noisier) than expected and the right next step is fixing
+# that, not raising this further.
+#
+# The original value (30s) timed out the first weekly run at
+# baseline -- the bcrypt-cost-12 admin / sender / receiver /
+# models suites push pytest tests/ well past 30s. Raising
+# timeout was the right fix; narrowing test-command to a
+# subset of test files would have hidden real catches by
+# tests outside the narrow set.
+timeout = 720.0
 # Each entry is a filesystem glob (passed to `glob.glob(p,
 # recursive=True)` by cosmic-ray's modules.filter_paths) -- NOT a
 # dotted module path. Patterns like `app.admin.*` would silently
