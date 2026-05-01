@@ -115,11 +115,16 @@ function rootIdentifierName(node) {
   return null;
 }
 
-// Read the property name of a `MemberExpression` regardless of whether
-// it's `obj.prop` (computed=false, property is Identifier) or
-// `obj["prop"]` (computed=true, property is a string Literal). Returns
-// null for computed accesses with non-literal indexes (`obj[expr]`),
-// which can't be statically pinned to a single name.
+// Read the property name of a `MemberExpression` regardless of how
+// it's spelled. Three shapes count:
+//   obj.prop                computed=false, property is Identifier
+//   obj["prop"]             computed=true,  property is string Literal
+//   obj[`prop`]             computed=true,  property is TemplateLiteral
+//                                            with a single quasi and
+//                                            no `${}` interpolations
+// Computed accesses with non-literal indexes (`obj[expr]`,
+// `` obj[`pre${x}fix`] ``) return null -- their effective property
+// name can't be statically pinned to one string.
 function memberPropertyName(node) {
   if (!node || node.type !== 'MemberExpression') return null;
   if (!node.computed) {
@@ -127,6 +132,13 @@ function memberPropertyName(node) {
   }
   if (node.property.type === 'Literal' && typeof node.property.value === 'string') {
     return node.property.value;
+  }
+  if (
+    node.property.type === 'TemplateLiteral' &&
+    node.property.expressions.length === 0 &&
+    node.property.quasis.length === 1
+  ) {
+    return node.property.quasis[0].value.cooked;
   }
   return null;
 }
