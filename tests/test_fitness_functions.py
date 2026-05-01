@@ -83,7 +83,18 @@ def test_authentication_only_raises_canonical_credential_error():
             if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
                 continue
             func = node.exc.func
-            if not isinstance(func, ast.Name) or func.id != "AuthError":
+            # Accept both bare `raise AuthError(...)` and attribute-qualified
+            # forms like `raise auth_core.AuthError(...)` / `raise
+            # _core.AuthError(...)`. The qualified form was previously skipped
+            # because the detector required `func` to be ast.Name; that left
+            # a real bypass where a re-export could silently introduce
+            # per-factor wording.
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name != "AuthError":
                 continue
             ok = (
                 node.exc.args
@@ -105,7 +116,7 @@ def test_authentication_only_raises_canonical_credential_error():
 # ---------------------------------------------------------------------------
 
 
-def _file_reads_totp_secret(tree: ast.AST) -> bool:
+def _scope_reads_totp_secret(tree: ast.AST) -> bool:
     """True iff `tree` performs a real READ of `totp_secret` -- a Load-
     context subscript (`x["totp_secret"]`) or a `.pop` / `.get` call
     that returns the value. Store/Del subscripts (`row["totp_secret"]
@@ -132,7 +143,7 @@ def _file_reads_totp_secret(tree: ast.AST) -> bool:
     return False
 
 
-def _file_calls_with_totp_getter(tree: ast.AST) -> bool:
+def _scope_calls_with_totp_getter(tree: ast.AST) -> bool:
     """True iff `tree` actually CALLS a `get_user_with_totp_*` function --
     a real `Call` node, not just a comment, import, or string mentioning
     the name. The substring fallback in an earlier draft could be tricked
@@ -151,19 +162,23 @@ def _file_calls_with_totp_getter(tree: ast.AST) -> bool:
     return False
 
 
-def test_totp_secret_reads_only_in_files_that_use_with_totp_getters():
+def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
     """app/models/users.py module docstring pins the convention: the
     plaintext TOTP seed is exposed only via `get_user_with_totp_*`
     getters; every other read path returns a dict that omits the column.
 
-    Static check: any file that performs a real `["totp_secret"]` /
-    `.pop("totp_secret", ...)` read must also CALL one of the
-    `get_user_with_totp_*` getters in the same module. Both halves are
-    AST-grounded (not text/substring) so a comment, import, or unrelated
-    string mentioning either name can't satisfy the guard. Files in the
-    data layer itself (app/models/users.py, app/models/_core.py for the
-    plaintext-encryption migration) are exempt -- they are the source
-    of the secret, not consumers of it.
+    Static check: any FUNCTION that performs a real `["totp_secret"]`
+    Load-context read (or `.pop`/`.get` on the same key) must also CALL
+    one of the `get_user_with_totp_*` getters in its own body. The
+    coupling is at function scope, not file scope -- a sibling function
+    elsewhere in the same module that happens to call the getter does
+    NOT satisfy a separate function's read.
+
+    Both halves are AST-grounded (not text/substring) so a comment,
+    import, or unrelated string mentioning either name can't satisfy
+    the guard. Files in the data layer itself (app/models/users.py,
+    app/models/_core.py for the plaintext-encryption migration) are
+    exempt -- they are the source of the secret, not consumers of it.
     """
     allowlist = {"app/models/users.py", "app/models/_core.py"}
     offenders: list[str] = []
@@ -172,13 +187,17 @@ def test_totp_secret_reads_only_in_files_that_use_with_totp_getters():
         if rel in allowlist:
             continue
         tree = ast.parse(py.read_text())
-        if not _file_reads_totp_secret(tree):
-            continue
-        if not _file_calls_with_totp_getter(tree):
-            offenders.append(rel)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not _scope_reads_totp_secret(fn):
+                continue
+            if not _scope_calls_with_totp_getter(fn):
+                offenders.append(f"{rel}:{fn.lineno} {fn.name}")
     assert not offenders, (
-        "Files reading `totp_secret` must obtain it via a real "
-        "`get_user_with_totp_*` call in the same module "
+        "Functions reading `totp_secret` must obtain it via a real "
+        "`get_user_with_totp_*` call in their own body, not lean on a "
+        "sibling function elsewhere in the module "
         "(see app/models/users.py module docstring).\n  " + "\n  ".join(offenders)
     )
 
