@@ -106,15 +106,20 @@ def test_authentication_only_raises_canonical_credential_error():
 
 
 def _file_reads_totp_secret(tree: ast.AST) -> bool:
-    """True iff `tree` contains a real `something["totp_secret"]` subscript
-    or `something.pop("totp_secret", ...)` call -- i.e., an executable
-    read of the field, not just the literal string showing up in a comment
-    or unrelated string."""
+    """True iff `tree` performs a real READ of `totp_secret` -- a Load-
+    context subscript (`x["totp_secret"]`) or a `.pop` / `.get` call
+    that returns the value. Store/Del subscripts (`row["totp_secret"]
+    = "[redacted]"`, `del row["totp_secret"]`) are NOT reads -- they
+    don't expose the plaintext value, so they don't need a
+    `_with_totp` getter on the same path."""
     for node in ast.walk(tree):
-        if isinstance(node, ast.Subscript):
-            sl = node.slice
-            if isinstance(sl, ast.Constant) and sl.value == "totp_secret":
-                return True
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Load)
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value == "totp_secret"
+        ):
+            return True
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -245,13 +250,39 @@ def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
     return deco.func.attr in {"post", "put", "patch", "delete"}
 
 
+def _is_origin_dependency(node: ast.AST) -> bool:
+    """True iff `node` is a real `Depends(verify_same_origin)` call -- a
+    Call whose function is the bare name `Depends` and whose first
+    positional arg is the bare name `verify_same_origin`. Catches both
+    shapes used in the codebase:
+        dependencies=[Depends(verify_same_origin)]   # decorator form
+        _origin = Depends(verify_same_origin)        # parameter form
+    Rejects substring-only matches: a parameter literally NAMED
+    `verify_same_origin`, an annotation referencing the symbol, or a
+    docstring/comment containing the token are all not the dependency."""
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Name) or node.func.id != "Depends":
+        return False
+    if not node.args:
+        return False
+    first = node.args[0]
+    return isinstance(first, ast.Name) and first.id == "verify_same_origin"
+
+
 def test_state_mutating_routes_all_carry_origin_gate():
-    """Every POST/PUT/PATCH/DELETE handler under app/ must reference
-    `verify_same_origin`, either in its decorator's `dependencies=[...]`
-    keyword or in its function-parameter defaults
-    (`_origin = Depends(verify_same_origin)`). Both shapes are in active
-    use -- see app/routes/sender.py (decorator form) and
+    """Every POST/PUT/PATCH/DELETE handler under app/ must depend on
+    `Depends(verify_same_origin)`, either inside the decorator's
+    `dependencies=[...]` keyword or as a parameter default
+    (`_origin = Depends(verify_same_origin)`). Both shapes are in
+    active use -- see app/routes/sender.py (decorator form) and
     app/routes/prefs.py::patch_language (parameter form).
+
+    Structural check: walks the decorator subtree and the function
+    signature for the actual `Depends(verify_same_origin)` Call shape,
+    not a substring of `ast.dump`. A parameter merely named
+    `verify_same_origin` (no `Depends(...)`) does NOT satisfy the gate
+    and is correctly flagged.
 
     Why static: a runtime test that misses 'this new POST has no test
     yet' silently lets the origin gate slip. AST walk catches the
@@ -272,14 +303,21 @@ def test_state_mutating_routes_all_carry_origin_gate():
             ]
             if not mutating_decos:
                 continue
-            scope = "".join(ast.dump(d) for d in mutating_decos) + ast.dump(node.args)
-            if "verify_same_origin" not in scope:
+            roots: list[ast.AST] = list(mutating_decos)
+            roots.append(node.args)
+            ok = any(
+                _is_origin_dependency(inner)
+                for root in roots
+                for inner in ast.walk(root)
+            )
+            if not ok:
                 rel = py.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}:{node.lineno} {node.name}")
     assert not offenders, (
-        "State-mutating routes (POST/PUT/PATCH/DELETE) must depend on "
-        "`verify_same_origin` -- either in the decorator's `dependencies=` "
-        "or as a function parameter default.\n  " + "\n  ".join(offenders)
+        "State-mutating routes (POST/PUT/PATCH/DELETE) must carry "
+        "`Depends(verify_same_origin)` -- either in the decorator's "
+        "`dependencies=` or as a function-parameter default.\n  "
+        + "\n  ".join(offenders)
     )
 
 
