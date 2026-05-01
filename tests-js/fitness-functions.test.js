@@ -131,12 +131,15 @@ function memberPropertyName(node) {
   return null;
 }
 
-// Names that count as "the global object" -- callees rooted at either
-// of these are treated as if the dangerous global were referenced bare.
-// Without this, `window.eval(...)`, `globalThis.fetch("https://...")`,
-// `window.console.log(secret)`, `window.localStorage.setItem(...)`
+// Names that count as "the global object" -- callees rooted at any of
+// these are treated as if the dangerous global were referenced bare.
+// `window` and `globalThis` are universal; `self` is the standard
+// alias on workers and an explicit alias for `window` on the main
+// thread (used in some isomorphic libraries). Without this set,
+// `window.eval(...)`, `globalThis.fetch("https://...")`,
+// `self.console.log(secret)`, `window.localStorage.setItem(...)`
 // would all bypass the bare-name and method-on-name predicates.
-const GLOBAL_OBJECTS = new Set(['window', 'globalThis']);
+const GLOBAL_OBJECTS = new Set(['window', 'globalThis', 'self']);
 
 // Resolve whether `node` (a callee chain or a member-access object)
 // ultimately refers to the global named `targetName`. True for:
@@ -181,6 +184,37 @@ function isBareCallOf(node, name) {
 
 const ABSOLUTE_URL_RE = /^(?:https?:)?\/\//;
 
+// True iff `node` is a static string-shaped expression -- either a
+// regular string `Literal` or a `TemplateLiteral`. Both compile to a
+// string at runtime and both are dangerous as arguments to the
+// timer-string overloads (`setTimeout(\`code\`, n)` runs the cooked
+// template through eval just like `setTimeout("code", n)` does).
+function isStringShapedArg(node) {
+  if (!node) return false;
+  if (node.type === 'Literal' && typeof node.value === 'string') return true;
+  return node.type === 'TemplateLiteral';
+}
+
+// Read the static prefix of a string-shaped argument. For a regular
+// string literal, returns its value. For a template literal, returns
+// the cooked text of the FIRST quasi -- the part before any `${...}`
+// interpolation. Returns null if the node isn't string-shaped.
+//
+// The fetch URL guard uses this on argument 0: a template like
+// `\`https://evil.example/x\`` has no interpolation, so the cooked
+// prefix IS the full URL and matches the absolute-URL regex.
+// `\`/api/${id}\`` starts with `/api/`, doesn't match, correctly
+// stays out. `\`${HOST}/path\`` has an empty first quasi and falls
+// through (not a literal absolute URL we can statically prove).
+function staticStringPrefix(node) {
+  if (!node) return null;
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node.type === 'TemplateLiteral' && node.quasis.length > 0) {
+    return node.quasis[0].value.cooked;
+  }
+  return null;
+}
+
 describe('JS architectural fitness functions', () => {
   // -------------------------------------------------------------------
   // 1. Anti-RCE: no eval, no Function/new Function, no string-arg
@@ -208,9 +242,7 @@ describe('JS architectural fitness functions', () => {
         }
         if (
           (isBareCallOf(node, 'setTimeout') || isBareCallOf(node, 'setInterval')) &&
-          node.arguments.length > 0 &&
-          node.arguments[0].type === 'Literal' &&
-          typeof node.arguments[0].value === 'string'
+          isStringShapedArg(node.arguments[0])
         ) {
           offenders.push(
             `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
@@ -334,11 +366,17 @@ describe('JS architectural fitness functions', () => {
     for (const { rel, ast } of PARSED) {
       walkAST(ast, (node) => {
         if (!isBareCallOf(node, 'fetch')) return;
-        const first = node.arguments[0];
-        if (!first || first.type !== 'Literal' || typeof first.value !== 'string') return;
-        if (ABSOLUTE_URL_RE.test(first.value)) {
+        // Match both regular string literals and template literals;
+        // for templates, the static prefix is the cooked text of the
+        // first quasi (the part before any `${...}`). A template
+        // whose first quasi starts with `https?://` or `//` is a
+        // hard-coded absolute URL regardless of any later
+        // interpolation, and gets flagged.
+        const prefix = staticStringPrefix(node.arguments[0]);
+        if (prefix == null) return;
+        if (ABSOLUTE_URL_RE.test(prefix)) {
           offenders.push(
-            `${rel}:${node.loc.start.line}: fetch(${JSON.stringify(first.value).slice(0, 80)})`
+            `${rel}:${node.loc.start.line}: fetch(${JSON.stringify(prefix).slice(0, 80)})`
           );
         }
       });
