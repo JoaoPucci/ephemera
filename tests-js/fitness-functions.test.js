@@ -141,20 +141,44 @@ function memberPropertyName(node) {
 // would all bypass the bare-name and method-on-name predicates.
 const GLOBAL_OBJECTS = new Set(['window', 'globalThis', 'self']);
 
+// Peel a `SequenceExpression` (the comma operator) by taking its last
+// subexpression -- the comma's runtime value. Catches the indirect-call
+// pattern `(0, eval)("...")` where the parens wrap a comma expression
+// to reference `eval` without a member-access binding (which makes it
+// "indirect eval" -- runs in the global scope under non-strict mode).
+// Same trick works for any global: `(0, fetch)("https://...")`,
+// `(0, setTimeout)("code", n)`, etc. Without this peel, every such
+// call's callee parses as a `SequenceExpression` and slips past the
+// chain-ends-with checks.
+//
+// The loop handles pathological nesting like `((0, 1), eval)` -- the
+// outer comma returns the inner comma's value, which is `eval`.
+function unwrapSequence(node) {
+  let cur = node;
+  while (cur && cur.type === 'SequenceExpression' && cur.expressions.length > 0) {
+    cur = unwrapChain(cur.expressions[cur.expressions.length - 1]);
+  }
+  return cur;
+}
+
 // Resolve whether `node` (a callee chain or a member-access object)
 // ultimately refers to the global named `targetName`. True for:
 //   - bare `targetName` -- Identifier(targetName)
-//   - `window.<targetName>` / `globalThis.<targetName>` -- a single
-//     Member step from a global root, with the property name (dot or
-//     bracket-string form) matching `targetName`
-// Optional chaining at any layer is handled by `unwrapChain`.
+//   - `window.<targetName>` / `globalThis.<targetName>` / `self.<...>`
+//     -- a single Member step from a global root, with the property
+//     name (dot or bracket-string form) matching `targetName`
+//   - `(side, effect, <one of the above>)` -- the indirect-call /
+//     comma-operator wrapper that's used to call globals without a
+//     binding context
+// Optional chaining at any layer is handled by `unwrapChain`; comma
+// wrapping is handled by `unwrapSequence`.
 function chainEndsWithName(node, targetName) {
-  const u = unwrapChain(node);
+  const u = unwrapSequence(unwrapChain(node));
   if (!u) return false;
   if (u.type === 'Identifier') return u.name === targetName;
   if (u.type !== 'MemberExpression') return false;
   if (memberPropertyName(u) !== targetName) return false;
-  const obj = unwrapChain(u.object);
+  const obj = unwrapSequence(unwrapChain(u.object));
   return Boolean(obj && obj.type === 'Identifier' && GLOBAL_OBJECTS.has(obj.name));
 }
 
