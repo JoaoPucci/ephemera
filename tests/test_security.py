@@ -792,10 +792,19 @@ def test_property_session_cookie_roundtrips_any_id_pair(
 def test_property_session_cookie_rejects_byte_flip(
     tmp_db_path, user_id: int, generation: int, flip_index: int
 ):
-    """For any cookie, flipping a single character somewhere in its body
-    causes read_session_cookie to return None (signature verification
-    fails). Pins the integrity guarantee of TimestampSigner: an attacker
-    who alters even one byte cannot make the cookie pass."""
+    """For any cookie, a single-byte tamper cannot forge a cookie for a
+    DIFFERENT (user_id, generation) than the one originally minted.
+    Pins the integrity guarantee of TimestampSigner: an attacker can't
+    rewrite the payload and find a matching signature.
+
+    Subtler than "any flip rejects": itsdangerous compares HMAC bytes
+    AFTER base64-decoding the signature, so a flip in the padding
+    bits of the last base64 character of the signature can decode to
+    the same HMAC bytes and the cookie still verifies -- but for the
+    SAME payload. That's not a forgery (the attacker can only
+    reproduce the existing payload, which they already had), so we
+    accept the same-payload outcome alongside the reject-as-None
+    outcome."""
     from app import dependencies
 
     raw = dependencies.make_session_cookie(user_id, generation)
@@ -809,7 +818,13 @@ def test_property_session_cookie_rejects_byte_flip(
     tampered = "".join(chars)
     if tampered == raw:
         return  # XOR happened to land on a non-character; skip
-    assert dependencies.read_session_cookie(tampered) is None
+    parsed = dependencies.read_session_cookie(tampered)
+    # The integrity claim: a tamper either fails verification (None) or
+    # decodes to the same payload (a base64 padding-bit flip that's an
+    # equivalent encoding of the same HMAC, not a forgery). Producing a
+    # DIFFERENT (user_id, generation) than the original from a single
+    # byte flip is the bypass we forbid.
+    assert parsed is None or parsed == (user_id, generation)
 
 
 @given(
