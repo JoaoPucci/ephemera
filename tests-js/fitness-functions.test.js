@@ -156,10 +156,25 @@ function buildAliasMap(ast) {
     else map.set(name, [init]);
   }
 
+  // Bind `name` (the identifier captured by one ObjectPattern /
+  // ArrayPattern slot) to `init`. If the slot was a nested pattern,
+  // recurse into it instead.
+  function bindPatternSlot(value, init) {
+    let v = value;
+    if (v.type === 'AssignmentPattern') v = v.left;
+    if (v.type === 'Identifier') {
+      addAlias(v.name, init);
+    } else if (v.type === 'ObjectPattern') {
+      processObjectPattern(v, init);
+    } else if (v.type === 'ArrayPattern') {
+      processArrayPattern(v, init);
+    }
+  }
+
   // Walk an ObjectPattern (LHS of `const { ... } = init`) and
   // synthesize aliases for each named property. Recurses into
-  // nested ObjectPatterns and through AssignmentPattern wrappers
-  // (the `= default` shape).
+  // nested ObjectPatterns and ArrayPatterns and through
+  // AssignmentPattern wrappers (the `= default` shape).
   function processObjectPattern(pattern, init) {
     if (
       !init ||
@@ -173,46 +188,65 @@ function buildAliasMap(ast) {
       if (prop.type !== 'Property') continue;
       const keyName = patternPropertyName(prop);
       if (keyName === null) continue;
-      const synth = synthesizeMember(init, keyName);
-      let value = prop.value;
-      if (value.type === 'AssignmentPattern') value = value.left;
-      if (value.type === 'Identifier') {
-        addAlias(value.name, synth);
-      } else if (value.type === 'ObjectPattern') {
-        processObjectPattern(value, synth);
+      bindPatternSlot(prop.value, synthesizeMember(init, keyName));
+    }
+  }
+
+  // Walk an ArrayPattern (LHS of `const [...] = init`) and bind each
+  // slot to the corresponding init element BY INDEX. Only resolves
+  // when init is an ArrayExpression literal -- a non-literal init
+  // (`const [f] = something()`) can't be statically paired by index.
+  // RestElement (`const [a, ...rest] = ...`) and holes are skipped.
+  function processArrayPattern(pattern, init) {
+    if (!init || init.type !== 'ArrayExpression') return;
+    for (let i = 0; i < pattern.elements.length; i++) {
+      const slot = pattern.elements[i];
+      if (!slot || slot.type === 'RestElement') continue;
+      const initEl = init.elements[i];
+      if (!initEl || initEl.type === 'SpreadElement') continue;
+      bindPatternSlot(slot, initEl);
+    }
+  }
+
+  function processVariableDeclaration(node) {
+    for (const decl of node.declarations) {
+      if (!decl.init) continue;
+      if (decl.id?.type === 'Identifier') {
+        addAlias(decl.id.name, decl.init);
+      } else if (decl.id?.type === 'ObjectPattern') {
+        processObjectPattern(decl.id, decl.init);
+      } else if (decl.id?.type === 'ArrayPattern') {
+        processArrayPattern(decl.id, decl.init);
       }
+    }
+  }
+
+  function processAssignmentExpression(node) {
+    if (node.operator !== '=') return;
+    const left = node.left;
+    if (!left) return;
+    if (left.type === 'Identifier') {
+      // Plain `f = fetch` after an earlier `let f` (or any later
+      // rebinding). The let-with-no-init shape is invisible to the
+      // VariableDeclaration arm above (decl.init is null), so we
+      // pick the binding up here on the assignment expression.
+      addAlias(left.name, node.right);
+    } else if (left.type === 'ObjectPattern') {
+      // `({ fetch: f } = globalThis)` -- destructuring assignment to
+      // an existing binding. Same effect as `const { fetch: f } = ...`
+      // for our purposes.
+      processObjectPattern(left, node.right);
+    } else if (left.type === 'ArrayPattern') {
+      // `[f] = [fetch]` -- array-destructuring assignment.
+      processArrayPattern(left, node.right);
     }
   }
 
   function processNode(node) {
     if (node.type === 'VariableDeclaration') {
-      for (const decl of node.declarations) {
-        if (!decl.init) continue;
-        if (decl.id?.type === 'Identifier') {
-          addAlias(decl.id.name, decl.init);
-        } else if (decl.id?.type === 'ObjectPattern') {
-          processObjectPattern(decl.id, decl.init);
-        }
-      }
-    } else if (
-      node.type === 'AssignmentExpression' &&
-      node.operator === '=' &&
-      node.left?.type === 'Identifier'
-    ) {
-      // Plain `f = fetch` after an earlier `let f` (or any later
-      // rebinding). The let-with-no-init shape is invisible to the
-      // VariableDeclaration arm above (decl.init is null), so we
-      // pick the binding up here on the assignment expression.
-      addAlias(node.left.name, node.right);
-    } else if (
-      node.type === 'AssignmentExpression' &&
-      node.operator === '=' &&
-      node.left?.type === 'ObjectPattern'
-    ) {
-      // `({ fetch: f } = globalThis)` -- destructuring assignment to
-      // an existing binding. Same effect as `const { fetch: f } = ...`
-      // for our purposes.
-      processObjectPattern(node.left, node.right);
+      processVariableDeclaration(node);
+    } else if (node.type === 'AssignmentExpression') {
+      processAssignmentExpression(node);
     }
   }
 
