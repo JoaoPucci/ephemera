@@ -62,38 +62,62 @@ const PARSED = findJsFiles(STATIC_DIR).map((file) => {
     allowHashBang: true,
     locations: true,
   });
-  return { file, rel: relPath(file), ast, aliasMap: moduleLevelAliasMap(ast) };
+  return { file, rel: relPath(file), ast, aliasMap: buildAliasMap(ast) };
 });
 
-// Walk the top-level statements of a module and build a Name -> chain
-// map for every `const|let|var <name> = <chain>` declaration where
-// `<chain>` is either an Identifier or a MemberExpression (the kinds
-// we statically recognize as references to globals or methods on
-// them). This catches the basic alias-bypass pattern:
+// Walk the entire AST and build a Name -> chain map for every
+// `const|let|var <name> = <chain>` declaration where `<chain>` is
+// either an Identifier or a MemberExpression (the kinds we
+// statically recognize as references to globals or methods on them).
+// This catches the alias-bypass pattern at every scope:
 //
 //   const f = fetch;          aliasMap.set('f', Identifier('fetch'))
 //   const log = console.log;  aliasMap.set('log', Member(console, log))
-//   const cl = console;       aliasMap.set('cl', Identifier('console'))
+//   function fn() {           aliasMap also catches function-local
+//     const e = eval;         aliases like `const e = eval` so
+//     e(payload);             `e(payload)` reaches the eval check
+//   }
 //
-// Module-level only: aliasing inside a function body would need
-// scope-aware tracking (rebinding, parameter shadowing, etc.). The
-// realistic bypass surface here is the top-of-file convenience alias
-// pattern, which is what this map covers. Function-local aliases
-// remain a documented limitation.
-function moduleLevelAliasMap(ast) {
+// Single map covering all scopes. False-positive risk: a
+// function-local alias `const f = fetch` in one function leaks to
+// any use of `f` elsewhere in the file, even if the other scope's
+// `f` resolves to something different. For the realistic codebase
+// the trade is fine -- aliases are rare and the conservative
+// direction (over-flagging) matches the rest of the test posture.
+// A precise scope-aware resolver would need symbol-table tracking
+// for declarations, parameters, rebinds, and inner-function
+// boundaries; out of scope here.
+function buildAliasMap(ast) {
+  // Inline walk (rather than calling `walkAST`) because this runs at
+  // module-load time during the PARSED initialization, before
+  // walkAST's `META_KEYS` const is in scope. Same shape, narrower
+  // dependency.
   const map = new Map();
-  if (!ast?.body || !Array.isArray(ast.body)) return map;
-  for (const stmt of ast.body) {
-    if (stmt.type !== 'VariableDeclaration') continue;
-    for (const decl of stmt.declarations) {
-      if (decl.id?.type !== 'Identifier' || !decl.init) continue;
-      const init = decl.init;
-      if (
-        init.type === 'Identifier' ||
-        init.type === 'MemberExpression' ||
-        init.type === 'ChainExpression'
-      ) {
-        map.set(decl.id.name, init);
+  const stack = [ast];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object') continue;
+    if (node.type === 'VariableDeclaration') {
+      for (const decl of node.declarations) {
+        if (decl.id?.type !== 'Identifier' || !decl.init) continue;
+        const init = decl.init;
+        if (
+          init.type === 'Identifier' ||
+          init.type === 'MemberExpression' ||
+          init.type === 'ChainExpression'
+        ) {
+          map.set(decl.id.name, init);
+        }
+      }
+    }
+    for (const key of Object.keys(node)) {
+      if (key === 'type' || key === 'loc' || key === 'start' || key === 'end' || key === 'range')
+        continue;
+      const child = node[key];
+      if (Array.isArray(child)) {
+        for (const c of child) stack.push(c);
+      } else if (child && typeof child === 'object' && typeof child.type === 'string') {
+        stack.push(child);
       }
     }
   }
@@ -293,7 +317,88 @@ function chainEndsWithName(node, targetName, aliasMap) {
 // past the chain-ends-with predicates because the outer callee is
 // `<fn>.{call, apply}` (a MemberExpression with the wrong final
 // property name) or the entire bind() invocation result.
-function effectiveCall(node) {
+// Peel a single layer of `.bind(...)` from a value-position
+// expression and return the bound function. Used when a peeled
+// wrapper's resulting callee is itself a `.bind(...)` expression
+// (composed wrappers like `fetch.bind(window).call(window, "x")`).
+// Returns null if `node` isn't a bind call.
+function unwrapBindValue(node) {
+  if (!node || node.type !== 'CallExpression') return null;
+  const callee = unwrapSequence(unwrapChain(node.callee));
+  if (!callee || callee.type !== 'MemberExpression') return null;
+  if (memberPropertyName(callee) !== 'bind') return null;
+  return callee.object;
+}
+
+// If `newCallee` is itself a wrapped CallExpression, recurse into it
+// to keep peeling. Returns the deepest underlying function, after
+// also collapsing any trailing `.bind(...)` chain on the value.
+function resolveWrappedCallee(newCallee, depth) {
+  if (newCallee?.type === 'CallExpression') {
+    const inner = effectiveCall(newCallee, depth + 1);
+    if (inner) return peelBindChain(inner.callee);
+  }
+  return peelBindChain(newCallee);
+}
+
+// Shape: Reflect.apply(fn, thisArg, argsArray)
+//        Reflect.construct(fn, argsArray, newTarget?)
+function peelReflect(callee, node, depth) {
+  if (
+    !callee ||
+    callee.type !== 'MemberExpression' ||
+    !memberPropertyName(callee) ||
+    callee.object.type !== 'Identifier' ||
+    callee.object.name !== 'Reflect'
+  ) {
+    return null;
+  }
+  const which = memberPropertyName(callee);
+  if (which !== 'apply' && which !== 'construct') return null;
+  const innerFn = node.arguments[0];
+  const argsArrayIdx = which === 'apply' ? 2 : 1;
+  const argsArray = node.arguments[argsArrayIdx];
+  const args = argsArray?.type === 'ArrayExpression' ? argsArray.elements : null;
+  return { callee: resolveWrappedCallee(innerFn, depth), args };
+}
+
+// Shape: fn.bind(thisArg, ...partials)(args...) -- outer callee is
+// itself a CallExpression whose callee is `<fn>.bind`. The bound
+// function is `<fn>`; logical args are `[...partials, ...outerArgs]`.
+function peelImmediateBind(callee, node, depth) {
+  if (!callee || callee.type !== 'CallExpression') return null;
+  const innerCallee = unwrapSequence(unwrapChain(callee.callee));
+  if (
+    !innerCallee ||
+    innerCallee.type !== 'MemberExpression' ||
+    memberPropertyName(innerCallee) !== 'bind'
+  ) {
+    return null;
+  }
+  const partials = callee.arguments.slice(1);
+  const newCallee = innerCallee.object;
+  const newArgs = [...partials, ...node.arguments];
+  return { callee: resolveWrappedCallee(newCallee, depth), args: newArgs };
+}
+
+// Shape: fn.call(thisArg, ...args) or fn.apply(thisArg, argsArray)
+function peelCallOrApply(callee, node, depth) {
+  if (!callee || callee.type !== 'MemberExpression') return null;
+  const prop = memberPropertyName(callee);
+  if (prop !== 'call' && prop !== 'apply') return null;
+  const newCallee = callee.object;
+  let newArgs;
+  if (prop === 'call') {
+    newArgs = node.arguments.slice(1);
+  } else {
+    const argsArray = node.arguments[1];
+    newArgs = argsArray?.type === 'ArrayExpression' ? argsArray.elements : null;
+  }
+  return { callee: resolveWrappedCallee(newCallee, depth), args: newArgs };
+}
+
+function effectiveCall(node, depth = 0) {
+  if (depth > 8) return null;
   if (!node) return null;
   // NewExpression: `new fn(args...)`. No .call/.apply/.bind wrappers
   // (you can't `new fn.call(...)`), so just pass the callee + args
@@ -305,64 +410,28 @@ function effectiveCall(node) {
   if (node.type !== 'CallExpression') return null;
   const callee = unwrapSequence(unwrapChain(node.callee));
 
-  // Shape: Reflect.apply(fn, thisArg, argsArray) -- ES6 Reflect API
-  // wrapper that's equivalent to fn.apply(thisArg, argsArray).
-  // Reflect.construct(fn, argsArray, newTarget?) -- equivalent to
-  // `new fn(...argsArray)`. Both stay-dangerous; recognize them so
-  // `Reflect.apply(fetch, window, ["https://evil"])` reaches the URL
-  // guard.
-  if (
-    callee &&
-    callee.type === 'MemberExpression' &&
-    memberPropertyName(callee) &&
-    callee.object.type === 'Identifier' &&
-    callee.object.name === 'Reflect'
-  ) {
-    const which = memberPropertyName(callee);
-    if (which === 'apply' || which === 'construct') {
-      const innerFn = node.arguments[0];
-      const argsArrayIdx = which === 'apply' ? 2 : 1;
-      const argsArray = node.arguments[argsArrayIdx];
-      if (argsArray && argsArray.type === 'ArrayExpression') {
-        return { callee: innerFn, args: argsArray.elements };
-      }
-      return { callee: innerFn, args: null };
-    }
-  }
+  // Try each wrapper shape in turn. The branches are mutually
+  // exclusive at the AST level (Reflect call, immediate bind() call,
+  // .call()/.apply() chain), so order doesn't matter for correctness;
+  // first match wins.
+  return (
+    peelReflect(callee, node, depth) ||
+    peelImmediateBind(callee, node, depth) ||
+    peelCallOrApply(callee, node, depth) || { callee: node.callee, args: node.arguments }
+  );
+}
 
-  // Shape: fn.bind(thisArg, ...partials)(args...) -- outer callee is
-  // itself a CallExpression whose callee is `<fn>.bind`. The bound
-  // function is `<fn>`; the logical args are `[...partials,
-  // ...outerArgs]`.
-  if (callee && callee.type === 'CallExpression') {
-    const innerCallee = unwrapSequence(unwrapChain(callee.callee));
-    if (
-      innerCallee &&
-      innerCallee.type === 'MemberExpression' &&
-      memberPropertyName(innerCallee) === 'bind'
-    ) {
-      const partials = callee.arguments.slice(1);
-      return { callee: innerCallee.object, args: [...partials, ...node.arguments] };
-    }
+// Apply `unwrapBindValue` repeatedly so a callee that's a chain of
+// bind expressions (`fetch.bind(a).bind(b)...`) reduces to the
+// underlying function. Caps at 8 hops to bail on cycles.
+function peelBindChain(node) {
+  let cur = node;
+  for (let i = 0; i < 8; i++) {
+    const peeled = unwrapBindValue(cur);
+    if (!peeled) return cur;
+    cur = peeled;
   }
-
-  // Shape: fn.call(thisArg, ...args) or fn.apply(thisArg, argsArray)
-  if (callee && callee.type === 'MemberExpression') {
-    const prop = memberPropertyName(callee);
-    if (prop === 'call') {
-      return { callee: callee.object, args: node.arguments.slice(1) };
-    }
-    if (prop === 'apply') {
-      const argsArray = node.arguments[1];
-      if (argsArray && argsArray.type === 'ArrayExpression') {
-        return { callee: callee.object, args: argsArray.elements };
-      }
-      // Non-literal apply args -- callee identified, args unknown.
-      return { callee: callee.object, args: null };
-    }
-  }
-
-  return { callee: node.callee, args: node.arguments };
+  return cur;
 }
 
 // Predicate: `node` is a CallExpression whose LOGICAL callee (after
