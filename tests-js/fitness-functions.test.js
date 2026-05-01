@@ -15,6 +15,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as acornParse } from 'acorn';
 import { describe, expect, it } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -46,115 +47,51 @@ const JS_FILES = findJsFiles(STATIC_DIR);
 // Length-preserving keeps `path:line` offender reports accurate when
 // a regex match crosses lines.
 //
-// Walks character-by-character with simple state-tracking so the
-// stripper doesn't mistake `/*` / `*/` sequences inside string or
-// template literals for real comment delimiters. Without this, code
-// like `const x = "/*"; console.log("secret"); const y = "*/";` would
-// have the middle line erased (the regex sees one giant block comment
-// from the first `/*` literal to the trailing `*/` literal), letting
-// banned patterns evade every fitness check via valid JavaScript.
+// Uses acorn's parser to identify comment ranges precisely. This
+// handles every JS lexical context correctly -- string literals,
+// template literals, template `${...}` interpolations, regex literals
+// (including character classes and flags), and proper regex-vs-
+// division disambiguation. The earlier hand-rolled tokenizer kept
+// accreting bypass classes (string-content `/*`, regex-literal
+// escapes, etc.); switching to a real parser closes that whole
+// surface in one shot.
 //
-// Tracked contexts:
-//   - Code: block comments stripped here.
-//   - Line comments (`// ...` to newline): preserved as-is so a
-//     comment containing `/*` or `*/` doesn't trip the stripper.
-//     (Line comments themselves are not stripped -- the earlier
-//     `(^|[^:])` line-comment stripper ate `//` in protocol-relative
-//     URL strings, which we now intentionally allow to reach the
-//     fetch-test regex.)
-//   - String literals (`'...'`, `"..."`): contents preserved, walked
-//     with backslash-escape handling. Unterminated strings end at
-//     newline (matches JS's actual behavior; protects against runaway
-//     consumption on a malformed file).
-//   - Template literals (`` `...` ``): contents preserved, with simple
-//     `${...}` depth tracking. Code inside `${}` interpolations is
-//     NOT recursively scanned for block comments -- a documented
-//     limitation, since recursing would require a real parser.
-//   - Regex literals (`/.../flags`): NOT explicitly tracked. The
-//     realistic shapes in this codebase (i18n placeholder, alphanum
-//     filter, fragment anchor) don't contain `/*` or `*/`. A future
-//     regex literal embedding those delimiters would be mis-handled;
-//     if one is added, this scanner needs a regex-state branch.
+// Line comments are intentionally still NOT stripped -- the earlier
+// `(^|[^:])` regex stripper ate `//` in protocol-relative URL
+// strings (`fetch('//evil.example/x')`), which is exactly the
+// pattern the same-origin test wants to flag. Letting line comments
+// reach the regex check is the right call for this codebase: the
+// only line comment in production JS that mentions a banned pattern
+// is two-click.js:115's "Log to console.error..." prose, which our
+// regex correctly ignores (no `(` after the method name).
+//
+// On a parse failure (a syntactically invalid source file), fall
+// back to the unstripped source. Any banned pattern in commented-out
+// code would then trip the regex -- but a syntax error in app/static/
+// would also trip biome's lint job and the rest of the test suite,
+// so the failure is loud regardless.
 function stripBlockComments(source) {
-  const out = [];
-  const n = source.length;
-  let i = 0;
-  while (i < n) {
-    const ch = source[i];
-    const nx = i + 1 < n ? source[i + 1] : '';
-
-    if (ch === '/' && nx === '*') {
-      const end = source.indexOf('*/', i + 2);
-      if (end === -1) {
-        // Unterminated -- pad the tail with spaces, keep newlines.
-        for (let j = i; j < n; j++) out.push(source[j] === '\n' ? '\n' : ' ');
-        return out.join('');
-      }
-      for (let j = i; j <= end + 1; j++) out.push(source[j] === '\n' ? '\n' : ' ');
-      i = end + 2;
-      continue;
-    }
-
-    if (ch === '/' && nx === '/') {
-      while (i < n && source[i] !== '\n') {
-        out.push(source[i]);
-        i++;
-      }
-      continue;
-    }
-
-    if (ch === "'" || ch === '"') {
-      const quote = ch;
-      out.push(ch);
-      i++;
-      while (i < n) {
-        const c = source[i];
-        if (c === '\\' && i + 1 < n) {
-          out.push(c, source[i + 1]);
-          i += 2;
-          continue;
-        }
-        out.push(c);
-        i++;
-        if (c === quote || c === '\n') break;
-      }
-      continue;
-    }
-
-    if (ch === '`') {
-      out.push(ch);
-      i++;
-      let depth = 0;
-      while (i < n) {
-        const c = source[i];
-        if (c === '\\' && i + 1 < n) {
-          out.push(c, source[i + 1]);
-          i += 2;
-          continue;
-        }
-        if (c === '$' && i + 1 < n && source[i + 1] === '{') {
-          out.push(c, '{');
-          i += 2;
-          depth++;
-          continue;
-        }
-        if (c === '}' && depth > 0) {
-          out.push(c);
-          i++;
-          depth--;
-          continue;
-        }
-        out.push(c);
-        i++;
-        if (c === '`' && depth === 0) break;
-      }
-      continue;
-    }
-
-    out.push(ch);
-    i++;
+  const blockRanges = [];
+  try {
+    acornParse(source, {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      allowHashBang: true,
+      onComment(isBlock, _text, start, end) {
+        if (isBlock) blockRanges.push([start, end]);
+      },
+    });
+  } catch {
+    return source;
   }
-  return out.join('');
+  if (blockRanges.length === 0) return source;
+  const chars = source.split('');
+  for (const [start, end] of blockRanges) {
+    for (let i = start; i < end; i++) {
+      if (chars[i] !== '\n') chars[i] = ' ';
+    }
+  }
+  return chars.join('');
 }
 
 function relPath(file) {
