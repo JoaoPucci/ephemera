@@ -295,8 +295,28 @@ def test_analytics_events_table_has_a_single_writer():
         "app/models/migrations/v4.py",
         "app/models/migrations/v5.py",
     }
+    # SQL keyword + (optional schema prefix) + (optionally quoted)
+    # `analytics_events`. Covers every realistic SQLite/SQL form:
+    #   FROM analytics_events
+    #   FROM main.analytics_events             (schema-qualified)
+    #   FROM "analytics_events"                (standard double quotes)
+    #   FROM `analytics_events`                (MySQL-style backticks)
+    #   FROM [analytics_events]                (T-SQL-style brackets)
+    #   FROM _analytics_events_v4              (renamed-during-migration)
+    # The bare-identifier version still has the trailing `\b` so partial
+    # matches like `analytics_events_archive` don't trigger; the quoted
+    # versions are anchored by their closing delimiter. `RENAME TO ...`
+    # is a separate keyword we don't list here -- the only RENAME sites
+    # are inside the migration allowlist.
     sql_ref = re.compile(
-        r"\b(?:FROM|INTO|UPDATE|TABLE|ON|EXISTS)\s+_?analytics_events\b",
+        r"\b(?:FROM|INTO|UPDATE|TABLE|ON|EXISTS)\s+"
+        r"(?:\w+\.)?"
+        r"(?:"
+        r'"_?analytics_events"'
+        r"|`_?analytics_events`"
+        r"|\[_?analytics_events\]"
+        r"|_?analytics_events\b"
+        r")",
         re.IGNORECASE,
     )
     offenders: list[str] = []
@@ -327,16 +347,25 @@ _MUTATING_VERBS = {"post", "put", "patch", "delete"}
 
 def _kwargs_contain_mutating_method(keywords: list[ast.keyword]) -> bool:
     """True iff `keywords` (a Call's `.keywords` list) carries
-    `methods=[...]` containing a state-mutating verb literal. Matches
-    `methods=["POST"]`, `methods=("PUT",)`, `methods={"PATCH"}` -- any
-    iterable literal of string constants. Used by both the
-    `api_route(...)` decorator detector and the imperative
-    `add_api_route(...)` registration scan."""
+    `methods=...` that we can't statically prove is purely read-only.
+
+    FastAPI accepts `methods` as any `Sequence[str]`. We can introspect
+    iterable literals (`["POST"]`, `("PUT",)`, `{"PATCH"}`) and decide
+    based on what's inside, but variable references (`methods=
+    MUTATING_METHODS`) and computed expressions can't be resolved
+    statically. Treating those as mutating is the conservative default:
+    a future variable-driven registration site that turns out to be
+    read-only can be allowlisted explicitly; the alternative -- silently
+    skipping anything non-literal -- leaves a real CSRF-gate bypass.
+
+    Used by both the `api_route(...)` decorator detector and the
+    imperative `add_api_route(...)` registration scan."""
     for kw in keywords:
         if kw.arg != "methods":
             continue
+        # Non-literal expression -- assume mutating.
         if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
-            continue
+            return True
         for elt in kw.value.elts:
             if (
                 isinstance(elt, ast.Constant)
