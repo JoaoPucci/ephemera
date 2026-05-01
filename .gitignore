@@ -52,6 +52,14 @@ session.sqlite
 *.cosmic-ray.sqlite
 cosmic-ray-session*.sqlite
 
+# Stryker. The JS-side mutation runner writes its sandbox copy under
+# .stryker-tmp/ (a fresh per-run temp tree) and its HTML + JSON
+# reports under reports/mutation/. Both are generated artifacts;
+# the CI workflow uploads `reports/mutation/` and the temp tree
+# never needs to leave the runner.
+.stryker-tmp/
+reports/mutation/
+
 # Node (Vitest + Playwright)
 node_modules/
 coverage/

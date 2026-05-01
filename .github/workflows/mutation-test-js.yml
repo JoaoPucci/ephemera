@@ -1,0 +1,113 @@
+# Weekly JS mutation-testing run.
+#
+# Mirror of mutation-test.yml on the Python side: scheduled mutation
+# testing, security-leverage subset, fail-loud baseline, artifact
+# upload. Differences vs. the Python harness:
+#
+#   - Stryker (the JS standard) instead of cosmic-ray (the Python one).
+#   - Vitest's per-test runtime is microseconds, so this runs in
+#     minutes instead of hours -- the timeout-minutes floor is
+#     correspondingly lower.
+#   - No bcrypt, no SQLite I/O on the test path; the per-mutant cost
+#     is dominated by jsdom env startup, which Stryker amortizes via
+#     its perTest coverage analysis.
+#   - Configuration lives in stryker.config.mjs at the repo root;
+#     scope is currently sender/form.js + reveal.js + login.js (the
+#     security-leverage subset). Local baseline ran 563 mutants in
+#     ~1m53s with concurrency=2.
+
+name: Mutation testing (Stryker, JS)
+
+on:
+  schedule:
+    # Sunday 04:23 UTC. Different minute than the Python cosmic-ray
+    # cron (03:17) so the two mutation runs don't compete for runner
+    # capacity. Odd minute deliberately -- GitHub's scheduler can
+    # delay or skip jobs at :00.
+    - cron: '23 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stryker:
+    name: Stryker full run
+    runs-on: ubuntu-latest
+    # Local baseline finishes in <2 min; CI runners are slower (less
+    # parallelism, slower I/O), so a 30-minute ceiling gives ~15x
+    # headroom. If a future scope expansion (more files in `mutate`)
+    # pushes against this, raise the floor here -- but that's also
+    # the moment to consider whether the scope expansion makes sense
+    # or whether the workflow should split across multiple jobs.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install npm deps
+        # Same posture as the rest of the JS CI workflows. `npm ci`
+        # validates the lockfile against package.json before
+        # installing, so a divergence between the two fails loudly
+        # here rather than producing a phantom mutation report.
+        run: npm ci
+
+      - name: Baseline (unmutated Vitest must be green)
+        # Stryker's own runner does its own internal baseline check,
+        # but a separate explicit pass first means a flaky baseline
+        # surfaces as a Vitest failure (clear) rather than as a
+        # cryptic Stryker error (less clear). Same rationale the
+        # Python cosmic-ray workflow uses for its `cosmic-ray
+        # baseline` step before `cosmic-ray exec`.
+        run: npm run test:unit
+
+      - name: Run Stryker (mutate + test)
+        # Default concurrency=2 from the config matches the runner's
+        # 2 vCPU. Stryker writes both an HTML and a JSON report into
+        # reports/mutation/; both get uploaded as artifacts below.
+        run: npx stryker run
+
+      - name: Append summary to GitHub run UI
+        if: always()
+        # Stryker's clear-text reporter wrote the table to stdout; we
+        # also have reports/mutation/mutation.json for the machine-
+        # readable view. Pull a top-line summary into the run page.
+        run: |
+          if [ -f reports/mutation/mutation.json ]; then
+            {
+              echo "## Mutation testing report (Stryker)"
+              echo ""
+              echo "Run: \`$(date -u +%Y-%m-%d) $(date -u +%H:%MZ)\`"
+              echo ""
+              # Pull the per-file mutation score from the JSON. The
+              # `files` object is keyed by absolute path; jq's `to_entries`
+              # gives an iterable list. mutationScore is in `metrics`
+              # at the file level, alongside killed / survived / etc.
+              echo '```'
+              if command -v jq >/dev/null 2>&1; then
+                jq -r '
+                  "Total mutation score: \(.metrics.mutationScore | tostring | .[0:5])%",
+                  "",
+                  "Per-file:",
+                  (.files | to_entries[] | "  \(.key | split("/") | .[-2:] | join("/")): \(.value.metrics.mutationScore | tostring | .[0:5])% (\(.value.metrics.killed) killed / \(.value.metrics.survived) survived / \(.value.metrics.noCoverage) no-cov)")
+                ' reports/mutation/mutation.json
+              else
+                echo "(jq not available; see uploaded artifact for details)"
+              fi
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload mutation report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stryker-mutation-report
+          path: reports/mutation/
+          retention-days: 60
+          if-no-files-found: warn
