@@ -38,27 +38,37 @@
 module-path = "app/"
 # Per-mutant test-command timeout in seconds. ephemera's test
 # suite uses bcrypt at cost 12 (deliberate, see app/auth/
-# password.py) so the full sweep is ~10 minutes on the GitHub-
-# hosted runner. With -x in the test-command, killed mutants
-# exit fast (whenever the first test fails); only survived
-# mutants pay the full sweep cost. 720s (12m) gives the full-
-# sweep case ~20% headroom over the measured baseline -- enough
-# to absorb noise from a slow runner without making the per-
-# mutant cap a no-op.
+# password.py). Empirically (queried across 14 recent successful
+# `test-suite / Python tests (pytest)` jobs on
+# `actions/runs?per_page=100`):
+#   min 15m27s, median 17m4s, max 19m5s
+#
+# Two prior weekly runs failed at the baseline gate with
+# timeouts that were too low (initial 30s, then 720s = 12m). The
+# 12-min value was based on a wrong "~10 min" estimate of the
+# pytest job's runtime; the actual distribution is 15-19 min.
+# 1800s (30 min) gives ~10 min of headroom over the observed
+# max, which absorbs runner variance (GitHub-hosted runners are
+# load-dependent shared CPUs).
+#
+# With -x in the test-command, killed mutants exit fast
+# (whenever the first test fails); only survived mutants pay
+# the full sweep cost. The timeout caps each invocation -- not
+# the typical runtime -- so a survivor completing normally
+# takes ~17 min, NOT 30. The 30-min cap exists for the abnormal
+# case (e.g. a mutation introducing an infinite loop), where
+# `timeout` is cosmic-ray's only signal to declare the mutant
+# killed-by-timeout.
 #
 # This is also what `cosmic-ray baseline` runs against -- the
 # unmutated full sweep must finish under this ceiling. If
-# baseline starts crowding it, the suite is genuinely slower
-# (or noisier) than expected and the right next step is fixing
-# that, not raising this further.
-#
-# The original value (30s) timed out the first weekly run at
-# baseline -- the bcrypt-cost-12 admin / sender / receiver /
-# models suites push pytest tests/ well past 30s. Raising
-# timeout was the right fix; narrowing test-command to a
-# subset of test files would have hidden real catches by
-# tests outside the narrow set.
-timeout = 720.0
+# baseline starts crowding 30 min, the suite is genuinely
+# slower than the empirical range and the right next step is
+# investigating why (pytest-xdist? a slow new fixture?), not
+# raising this further. NOT narrowing test-command to a subset
+# of test files -- that would hide real catches by tests
+# outside the narrow set (see prior thread on PR #117).
+timeout = 1800.0
 # Each entry is a filesystem glob (passed to `glob.glob(p,
 # recursive=True)` by cosmic-ray's modules.filter_paths) -- NOT a
 # dotted module path. Patterns like `app.admin.*` would silently
