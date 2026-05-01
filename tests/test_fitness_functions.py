@@ -269,6 +269,25 @@ _WITH_TOTP_GETTERS = frozenset(
 # keeps the trust surface small.
 _DATA_LAYER_ABSOLUTE_MODULES = frozenset({"app.models", "app.models.users"})
 
+# Names whose canonical implementation lives at a specific module path.
+# An `import` (or `from ... import`) that brings ANY of these names into
+# scope from a NON-canonical source shadows the legit binding, and the
+# rebound-names sweep treats the name as no longer resolving to the
+# trusted symbol. Names not in this dict aren't tracked -- a stray
+# `import urllib` doesn't make every downstream `urllib` reference
+# shadowed, and the consumers (`_scope_totp_reads_are_quarantined`,
+# `test_state_mutating_routes_all_carry_origin_gate`) only look up the
+# specific names they care about.
+#
+# `verify_same_origin` is defined in `app/dependencies.py`. `models` is
+# the package `app/models/`, exposed by both `from app import models`
+# (re-export through `app/__init__.py`) and direct `from app.models
+# import ...` for individual symbols.
+_CANONICAL_IMPORT_SOURCES: dict[str, frozenset[str]] = {
+    "models": frozenset({"app", "app.models"}),
+    "verify_same_origin": frozenset({"app.dependencies"}),
+}
+
 
 def _resolve_import_module(node: ast.ImportFrom, file_path: pathlib.Path) -> str | None:
     """Return the absolute dotted module path for `node` (a `from ...
@@ -645,13 +664,55 @@ def _update_trust_from_stmt(
     sanctioned_aliases.update(na)
 
 
-def _name_is_bound_in_scope(name: str, scope: ast.AST) -> bool:
+def _import_binds_name_from_non_canonical_source(
+    stmt: ast.Import | ast.ImportFrom,
+    name: str,
+    file_path: pathlib.Path | None,
+) -> bool:
+    """True iff `stmt` brings `name` into scope from a source module
+    that is NOT one of the canonical sources for that name (per
+    `_CANONICAL_IMPORT_SOURCES`). Names not tracked in that dict
+    return False unconditionally -- importing `urllib` shouldn't make
+    `urllib` a shadowed name. Returns False if `name` is in the dict
+    but the import comes from a canonical source -- that's the legit
+    binding."""
+    allowed = _CANONICAL_IMPORT_SOURCES.get(name)
+    if allowed is None:
+        return False
+    if isinstance(stmt, ast.ImportFrom):
+        resolved = (
+            _resolve_import_module(stmt, file_path) if file_path is not None else None
+        )
+        for alias in stmt.names:
+            bound = alias.asname or alias.name
+            if bound == name and resolved not in allowed:
+                return True
+        return False
+    # ast.Import: `import X [as Y]` -- the source module is `alias.name`.
+    # The name brought into scope is `alias.asname` if present, else the
+    # top-level component of `alias.name` (e.g. `import a.b.c` binds `a`).
+    for alias in stmt.names:
+        bound = alias.asname or alias.name.partition(".")[0]
+        if bound == name and alias.name not in allowed:
+            return True
+    return False
+
+
+def _name_is_bound_in_scope(
+    name: str,
+    scope: ast.AST,
+    file_path: pathlib.Path | None = None,
+) -> bool:
     """True iff `name` is bound somewhere in `scope` (function
-    parameters or local Assign / AnnAssign in the body), and would
-    therefore SHADOW any same-named module-level import for the
-    duration of this function. Used to detect when `models` no longer
-    resolves to the data-layer package because of a parameter named
-    `models` or a local rebind."""
+    parameters, local Assign / AnnAssign, or a non-canonical
+    function-local `import` / `from ... import`) and would therefore
+    SHADOW the module-level binding for the duration of this function.
+
+    Function-local `import attacker as models` rebinds `models` to a
+    non-data-layer package; subsequent `models.<getter>(...)` calls
+    inside this function must NOT count as sanctioned. Imports from
+    a canonical source for `name` (per `_CANONICAL_IMPORT_SOURCES`)
+    don't shadow -- they're how the legit symbol can be brought in."""
     if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return False
     args = scope.args
@@ -671,18 +732,37 @@ def _name_is_bound_in_scope(name: str, scope: ast.AST) -> bool:
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
             and node.target.id == name
+        ) or (
+            isinstance(node, (ast.Import, ast.ImportFrom))
+            and _import_binds_name_from_non_canonical_source(node, name, file_path)
         ):
             return True
     return False
 
 
-def _module_level_rebound_names(tree: ast.AST) -> set[str]:
-    """Names that have been rebound at module scope via top-level
-    Assign / AnnAssign. Treat any subsequent Name reference in this
-    module as resolving to the rebound value, not to whatever was
-    imported under the same name. Used so a `models = something` or
-    `verify_same_origin = something` at module level shadows the
-    import for every downstream use."""
+def _module_level_rebound_names(
+    tree: ast.AST,
+    file_path: pathlib.Path | None = None,
+) -> set[str]:
+    """Names that have been rebound at module scope so they no longer
+    resolve to their canonical implementation. Three shadowing channels:
+
+      Assign:     `<name> = <something>`              -- module-level
+      AnnAssign:  `<name>: T = <something>`           -- module-level
+      Import:     `import <name>` / `from <m> import <name>` from a
+                  source module that is NOT one of the canonical
+                  sources for that name (per
+                  `_CANONICAL_IMPORT_SOURCES`).
+
+    Imports of names NOT tracked in `_CANONICAL_IMPORT_SOURCES`
+    aren't added -- a stray `from urllib import parse` at module
+    scope doesn't shadow anything we care about.
+
+    Without the import channel, a malicious-or-mistaken
+    `from attacker import models` / `from attacker import
+    verify_same_origin` would still satisfy the TOTP-quarantine and
+    origin-gate checks even though the symbol resolves to a
+    non-canonical implementation."""
     names: set[str] = set()
     if not isinstance(tree, ast.Module):
         return names
@@ -693,6 +773,12 @@ def _module_level_rebound_names(tree: ast.AST) -> set[str]:
                     names.add(target.id)
         elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
             names.add(stmt.target.id)
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            for tracked_name in _CANONICAL_IMPORT_SOURCES:
+                if _import_binds_name_from_non_canonical_source(
+                    stmt, tracked_name, file_path
+                ):
+                    names.add(tracked_name)
     return names
 
 
@@ -700,6 +786,7 @@ def _scope_totp_reads_are_quarantined(
     scope: ast.AST,
     sanctioned_aliases: set[str],
     module_rebound: set[str] | None = None,
+    file_path: pathlib.Path | None = None,
 ) -> bool:
     """True iff every `totp_secret` read in `scope` is on a receiver
     that's trusted at the point of the read. Walks the function body
@@ -752,7 +839,7 @@ def _scope_totp_reads_are_quarantined(
     # rebind, or module-level reassignment.
     models_shadowed = (
         "models" in (module_rebound or set())
-    ) or _name_is_bound_in_scope("models", scope)
+    ) or _name_is_bound_in_scope("models", scope, file_path)
     for stmt in scope.body:
         if not _stmt_reads_are_quarantined(
             stmt, trusted, local_sanctioned, models_shadowed
@@ -795,13 +882,15 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
             continue
         tree = ast.parse(py.read_text())
         sanctioned = _sanctioned_totp_getter_aliases(tree, py)
-        module_rebound = _module_level_rebound_names(tree)
+        module_rebound = _module_level_rebound_names(tree, py)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if not _scope_reads_totp_secret(fn):
                 continue
-            if not _scope_totp_reads_are_quarantined(fn, sanctioned, module_rebound):
+            if not _scope_totp_reads_are_quarantined(
+                fn, sanctioned, module_rebound, py
+            ):
                 offenders.append(f"{rel}:{fn.lineno} {fn.name}")
     assert not offenders, (
         "Every `totp_secret` read must be on a receiver sourced from a "
@@ -1047,7 +1136,7 @@ def test_state_mutating_routes_all_carry_origin_gate():
         # imported symbol for every downstream Depends(...) reference
         # in this file -- the decorator runs at definition time using
         # the lexical binding then-in-scope. Compute once per file.
-        vso_shadowed = "verify_same_origin" in _module_level_rebound_names(tree)
+        vso_shadowed = "verify_same_origin" in _module_level_rebound_names(tree, py)
         # Pass 1: decorator-style registrations on FunctionDef /
         # AsyncFunctionDef. Both sync `def` and `async def` shapes
         # are valid FastAPI handlers (e.g. app/routes/sender.py::
