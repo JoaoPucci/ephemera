@@ -6,6 +6,15 @@
 // previously-issued URL from their tracked list, we have to cache it in the
 // browser that created it. Keyed by the server-issued UUID, which is stable
 // and present in every /api/secrets/tracked item.
+//
+// Lookups go through `Object.hasOwn` rather than truthy-coalesce
+// (`m[id] || null`). That's a prototype-pollution hardening: a plain
+// `JSON.parse('{}')`-rooted object inherits Object.prototype, so for
+// any prototype-shadowed key (`toString`, `hasOwnProperty`,
+// `valueOf`, ...) `m[id]` reads back the inherited function reference
+// even if the cache never set that key. Production ids are server-
+// issued UUIDs so the collision shouldn't happen in practice -- this
+// is a structural belt-and-braces, not a fix for an observed bug.
 
 const URL_STORE_KEY = 'ephemera_urls_v1';
 
@@ -31,14 +40,17 @@ export function cacheUrl(id, url) {
 
 export function forgetUrl(id) {
   const m = loadUrls();
-  if (m[id]) {
+  if (Object.hasOwn(m, id)) {
     delete m[id];
     saveUrls(m);
   }
 }
 
 export function getUrl(id) {
-  return loadUrls()[id] || null;
+  const m = loadUrls();
+  if (!Object.hasOwn(m, id)) return null;
+  const v = m[id];
+  return typeof v === 'string' && v ? v : null;
 }
 
 // Drop any cached entries the server no longer has (expired, canceled, or
