@@ -24,12 +24,21 @@ hypothesis>=6.100
 # scripts/crap_report.py in CI. Pinned only as a floor; the report is
 # informational and a minor bump won't change rank order in practice.
 radon>=6.0
-# mutmut is the mutation-testing engine used by the weekly
+# cosmic-ray is the mutation-testing engine used by the weekly
 # .github/workflows/mutation-test.yml job. Mutates the codebase and
 # re-runs the test suite to find places where tests don't actually
 # fail when the code is broken (test theatre). Slow per-run -- run
 # scheduled, not per-PR. Pinned floor only; the report is
-# informational and minor mutmut bumps don't change the contract.
-mutmut>=3.0
+# informational and minor cosmic-ray bumps don't change the contract.
+#
+# Migrated from mutmut after a hard interaction between mutmut's
+# stats-phase pytest invocation and cryptography's PyO3 Rust
+# bindings -- mutmut's reuse of a single Python process across all
+# mutants caused a class-identity check inside cryptography's HKDF
+# binding to fail. Cosmic-ray's session/job model spawns a fresh
+# subprocess per mutant, so cryptography re-initialises cleanly each
+# time. Confirmed via local spike: 96/106 mutants killed on
+# crypto.py in 90 seconds; 71/85 on validation.py.
+cosmic-ray>=8.4
 httpx>=0.27
 pip-tools>=7.4
