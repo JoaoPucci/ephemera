@@ -98,31 +98,129 @@ const PARSED = findJsFiles(STATIC_DIR).map((file) => {
 // the safer side of a security-shape check. A precise scope-aware
 // resolver would need symbol-table tracking for declarations,
 // parameters, rebinds, and inner-function boundaries; out of scope.
+// Synthesize a MemberExpression node `init.<propertyName>` for the
+// alias map. The destructuring helper uses this when binding a name
+// extracted from a destructured pattern: `const { fetch: f } = G`
+// yields `f -> synthesizeMember(G, 'fetch')`, which downstream
+// helpers (chainEndsWithName, resolvesToGlobalObject) can walk
+// exactly like a hand-written `G.fetch` Member node.
+function synthesizeMember(object, propertyName) {
+  return {
+    type: 'MemberExpression',
+    object,
+    property: { type: 'Identifier', name: propertyName },
+    computed: false,
+    optional: false,
+  };
+}
+
+// Read the property name from one ObjectPattern property, or null
+// if it isn't statically resolvable (computed keys with a non-string
+// expression). Handles both bare-identifier keys (`{ fetch: ... }`)
+// and computed-string keys (`{ ["fetch"]: ... }` / `{ [`fetch`]: ... }`)
+// for the same template-literal-key support `memberPropertyName` has.
+function patternPropertyName(prop) {
+  if (!prop.computed && prop.key.type === 'Identifier') return prop.key.name;
+  if (prop.computed && prop.key.type === 'Literal' && typeof prop.key.value === 'string') {
+    return prop.key.value;
+  }
+  if (
+    prop.computed &&
+    prop.key.type === 'TemplateLiteral' &&
+    prop.key.expressions.length === 0 &&
+    prop.key.quasis.length === 1
+  ) {
+    return prop.key.quasis[0].value.cooked;
+  }
+  return null;
+}
+
 function buildAliasMap(ast) {
   // Inline walk (rather than calling `walkAST`) because this runs at
   // module-load time during the PARSED initialization, before
   // walkAST's `META_KEYS` const is in scope. Same shape, narrower
   // dependency.
   const map = new Map();
+
+  function addAlias(name, init) {
+    if (
+      !init ||
+      (init.type !== 'Identifier' &&
+        init.type !== 'MemberExpression' &&
+        init.type !== 'ChainExpression')
+    ) {
+      return;
+    }
+    const list = map.get(name);
+    if (list) list.push(init);
+    else map.set(name, [init]);
+  }
+
+  // Walk an ObjectPattern (LHS of `const { ... } = init`) and
+  // synthesize aliases for each named property. Recurses into
+  // nested ObjectPatterns and through AssignmentPattern wrappers
+  // (the `= default` shape).
+  function processObjectPattern(pattern, init) {
+    if (
+      !init ||
+      (init.type !== 'Identifier' &&
+        init.type !== 'MemberExpression' &&
+        init.type !== 'ChainExpression')
+    ) {
+      return;
+    }
+    for (const prop of pattern.properties) {
+      if (prop.type !== 'Property') continue;
+      const keyName = patternPropertyName(prop);
+      if (keyName === null) continue;
+      const synth = synthesizeMember(init, keyName);
+      let value = prop.value;
+      if (value.type === 'AssignmentPattern') value = value.left;
+      if (value.type === 'Identifier') {
+        addAlias(value.name, synth);
+      } else if (value.type === 'ObjectPattern') {
+        processObjectPattern(value, synth);
+      }
+    }
+  }
+
+  function processNode(node) {
+    if (node.type === 'VariableDeclaration') {
+      for (const decl of node.declarations) {
+        if (!decl.init) continue;
+        if (decl.id?.type === 'Identifier') {
+          addAlias(decl.id.name, decl.init);
+        } else if (decl.id?.type === 'ObjectPattern') {
+          processObjectPattern(decl.id, decl.init);
+        }
+      }
+    } else if (
+      node.type === 'AssignmentExpression' &&
+      node.operator === '=' &&
+      node.left?.type === 'Identifier'
+    ) {
+      // Plain `f = fetch` after an earlier `let f` (or any later
+      // rebinding). The let-with-no-init shape is invisible to the
+      // VariableDeclaration arm above (decl.init is null), so we
+      // pick the binding up here on the assignment expression.
+      addAlias(node.left.name, node.right);
+    } else if (
+      node.type === 'AssignmentExpression' &&
+      node.operator === '=' &&
+      node.left?.type === 'ObjectPattern'
+    ) {
+      // `({ fetch: f } = globalThis)` -- destructuring assignment to
+      // an existing binding. Same effect as `const { fetch: f } = ...`
+      // for our purposes.
+      processObjectPattern(node.left, node.right);
+    }
+  }
+
   const stack = [ast];
   while (stack.length) {
     const node = stack.pop();
     if (!node || typeof node !== 'object') continue;
-    if (node.type === 'VariableDeclaration') {
-      for (const decl of node.declarations) {
-        if (decl.id?.type !== 'Identifier' || !decl.init) continue;
-        const init = decl.init;
-        if (
-          init.type === 'Identifier' ||
-          init.type === 'MemberExpression' ||
-          init.type === 'ChainExpression'
-        ) {
-          const list = map.get(decl.id.name);
-          if (list) list.push(init);
-          else map.set(decl.id.name, [init]);
-        }
-      }
-    }
+    processNode(node);
     for (const key of Object.keys(node)) {
       if (key === 'type' || key === 'loc' || key === 'start' || key === 'end' || key === 'range')
         continue;
