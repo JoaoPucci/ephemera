@@ -155,7 +155,7 @@ function buildAliasMap(ast) {
     //     resolve through to a global identifier for the URL / RCE /
     //     console / storage guards.
     //   - Strings: Literal (string) / TemplateLiteral -- exposed to
-    //     `isStringShapedArg` and `staticStringPrefix` so a `const
+    //     `isStringShapedArg` and `staticStringPrefixes` so a `const
     //     code = "alert(1)"; setTimeout(code, 0)` indirection still
     //     reaches the timer guard, and an aliased URL string still
     //     reaches the absolute-URL fetch guard.
@@ -728,27 +728,28 @@ function isStringShapedArg(node, aliasMap) {
   return false;
 }
 
-// Static prefix of any string-shaped value `node` can resolve to.
-// For a regular string Literal, returns the value. For a
-// TemplateLiteral, returns the cooked text of the FIRST quasi (the
-// span before any `${...}` interpolation). Iterates aliased
-// candidates and returns the first non-null prefix; an aliased URL
-// string `const url = "https://evil"; fetch(url)` reaches the
-// absolute-URL guard the same way an inline `fetch("https://evil")`
-// would.
+// Yield the static prefix of EVERY string-shaped value `node` can
+// resolve to. For a regular string Literal, the prefix is the value.
+// For a TemplateLiteral, the prefix is the cooked text of the FIRST
+// quasi (the span before any `${...}` interpolation). The URL guard
+// iterates and tests each prefix against `ABSOLUTE_URL_RE` -- any
+// reachable candidate matching the regex is treated as a hit, since
+// the multi-binding alias map can record more than one binding per
+// name (file-wide map across scopes), and a benign prefix returned
+// first would otherwise mask a dangerous one.
 //
 // `\`https://evil.example/x\`` -- no interpolation, full URL is
 // the cooked prefix, matches the absolute-URL regex.
 // `\`/api/${id}\``             -- prefix `/api/`, doesn't match.
 // `\`${HOST}/path\``           -- empty first quasi, no prefix.
-function staticStringPrefix(node, aliasMap) {
+function* staticStringPrefixes(node, aliasMap) {
   for (const candidate of stringShapedCandidates(node, aliasMap)) {
-    if (candidate.type === 'Literal') return candidate.value;
-    if (candidate.type === 'TemplateLiteral' && candidate.quasis.length > 0) {
-      return candidate.quasis[0].value.cooked;
+    if (candidate.type === 'Literal' && typeof candidate.value === 'string') {
+      yield candidate.value;
+    } else if (candidate.type === 'TemplateLiteral' && candidate.quasis.length > 0) {
+      yield candidate.quasis[0].value.cooked;
     }
   }
-  return null;
 }
 
 describe('JS architectural fitness functions', () => {
@@ -927,12 +928,17 @@ describe('JS architectural fitness functions', () => {
         // thisArg/etc. that .call/.apply/.bind interpose.
         const eff = effectiveCall(node, 0, aliasMap);
         if (!eff?.args) return;
-        const prefix = staticStringPrefix(eff.args[0], aliasMap);
-        if (prefix == null) return;
-        if (ABSOLUTE_URL_RE.test(prefix)) {
-          offenders.push(
-            `${rel}:${node.loc.start.line}: fetch(${JSON.stringify(prefix).slice(0, 80)})`
-          );
+        // Iterate every string-shaped candidate the first arg can
+        // resolve to. The multi-binding alias map can record more
+        // than one binding per name across scopes; a benign prefix
+        // returned first would otherwise mask a dangerous one.
+        for (const prefix of staticStringPrefixes(eff.args[0], aliasMap)) {
+          if (ABSOLUTE_URL_RE.test(prefix)) {
+            offenders.push(
+              `${rel}:${node.loc.start.line}: fetch(${JSON.stringify(prefix).slice(0, 80)})`
+            );
+            break;
+          }
         }
       });
     }
