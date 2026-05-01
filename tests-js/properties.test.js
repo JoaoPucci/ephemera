@@ -35,17 +35,12 @@ import { loadModule } from './helpers.js';
 // is the bottleneck; here every iteration is microseconds).
 const PROP_RUNS = 50;
 
-// Names that exist on `Object.prototype` and would collide with the
-// plain-object map used inside sender/url-cache.js. fast-check
-// surfaced this on the very first run: `getUrl("toString")` returns
-// `Function.prototype.toString` because `loadUrls()[id]` walks the
-// prototype chain on a miss. In production, ids are server-issued
-// UUIDs so the collision can't actually happen; filter them out of
-// the generated input space to focus the property test on the
-// functional invariant. A future hardening (use `Object.create(null)`
-// or `Object.hasOwn` in url-cache.js) would let us drop the filter.
-const PROTO_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype));
-const cacheIdArb = fc.string({ minLength: 1, maxLength: 50 }).filter((s) => !PROTO_KEYS.has(s));
+// Arbitrary URL-cache ids. The id input space here is the full
+// non-empty string range -- url-cache.js now uses `Object.hasOwn`
+// for ownership checks (instead of the truthy-coalesce that walked
+// the prototype chain), so prototype-name ids like `"toString"` no
+// longer leak the inherited function reference back through getUrl.
+const cacheIdArb = fc.string({ minLength: 1, maxLength: 50 });
 
 // ---------------------------------------------------------------------------
 // sender/url-cache.js
