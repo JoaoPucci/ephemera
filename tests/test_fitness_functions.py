@@ -649,9 +649,14 @@ def _apply_loop(
     sanctioned. The else clause runs only if the loop exits without a
     break; thread it through the body-end state."""
     body_t, body_a = set(trusted), set(aliases)
-    if isinstance(stmt, (ast.For, ast.AsyncFor)) and isinstance(stmt.target, ast.Name):
-        body_t.discard(stmt.target.id)
-        body_a.discard(stmt.target.id)
+    if isinstance(stmt, (ast.For, ast.AsyncFor)):
+        # Handles bare Name (`for user in rows:`) and tuple / list /
+        # starred unpacking (`for user, _ in rows:`,
+        # `for first, *rest in rows:`) the same way -- every captured
+        # Name is rebound to an iter element, none of them sanctioned.
+        for bound in _names_bound_by_target(stmt.target):
+            body_t.discard(bound)
+            body_a.discard(bound)
     body_t, body_a = _apply_seq(stmt.body, body_t, body_a, models_shadowed)
     else_t, else_a = _apply_seq(stmt.orelse, body_t, body_a, models_shadowed)
     return set(trusted) & else_t, set(aliases) & else_a
