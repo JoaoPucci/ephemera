@@ -669,13 +669,17 @@ def _apply_with(
     models_shadowed: bool,
 ) -> tuple[set[str], set[str]]:
     """`with ctx as name:` binds `name` to the context manager's
-    `__enter__` return -- not sanctioned for our purposes. Body
-    statements thread through sequentially."""
+    `__enter__` return; tuple/list-unpacking forms (`with ctx as
+    (a, b):`) bind every captured Name. None are sanctioned for our
+    purposes. Body statements thread through sequentially after the
+    bindings revoke."""
     nt, na = set(trusted), set(aliases)
     for item in stmt.items:
-        if isinstance(item.optional_vars, ast.Name):
-            nt.discard(item.optional_vars.id)
-            na.discard(item.optional_vars.id)
+        if item.optional_vars is None:
+            continue
+        for bound in _names_bound_by_target(item.optional_vars):
+            nt.discard(bound)
+            na.discard(bound)
     return _apply_seq(stmt.body, nt, na, models_shadowed)
 
 
@@ -718,6 +722,38 @@ def _apply_import(
     return nt, na
 
 
+def _apply_match(
+    stmt: ast.Match,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+) -> tuple[set[str], set[str]]:
+    """`match X: case <pat>: <body>` (PEP 634, Python 3.10+). Each
+    case starts from pre-Match state minus the names bound by its
+    pattern (pattern captures are non-sanctioned: any MatchAs,
+    MatchStar, MatchMapping rest, etc.). The case body threads through
+    sequentially. Post-Match state is the intersection of every
+    case's end state PLUS the pre-Match state for the fall-through
+    path (no case matched at runtime), since static analysis can't
+    prove exhaustiveness in the general case (a wildcard arm can
+    have a guard, a class pattern's class can be malformed, etc.).
+    The conservative direction matches `_apply_if`'s missing-else
+    treatment."""
+    case_states: list[tuple[set[str], set[str]]] = [(set(trusted), set(aliases))]
+    for case in stmt.cases:
+        case_t, case_a = set(trusted), set(aliases)
+        for bound in _pattern_bound_names(case.pattern):
+            case_t.discard(bound)
+            case_a.discard(bound)
+        case_t, case_a = _apply_seq(case.body, case_t, case_a, models_shadowed)
+        case_states.append((case_t, case_a))
+    final_t, final_a = case_states[0]
+    for ct, ca in case_states[1:]:
+        final_t = final_t & ct
+        final_a = final_a & ca
+    return final_t, final_a
+
+
 def _apply_stmt(
     stmt: ast.AST,
     trusted: set[str],
@@ -746,6 +782,8 @@ def _apply_stmt(
         return _apply_if(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, ast.Try):
         return _apply_try(stmt, trusted, aliases, models_shadowed)
+    if isinstance(stmt, ast.Match):
+        return _apply_match(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
         return _apply_loop(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, (ast.With, ast.AsyncWith)):
@@ -816,6 +854,61 @@ def _import_binds_name_from_non_canonical_source(
     return False
 
 
+def _pattern_bound_names(pattern: ast.pattern | None) -> list[str]:
+    """Every name bound by a `match` pattern (PEP 634, Python 3.10+).
+
+    Pattern shapes:
+
+      MatchAs(pattern=p, name=n) -- `<p> as n`, `_` (n=None, p=None),
+                                    `n` (capture pattern when p=None
+                                    and n is set)
+      MatchStar(name=n)          -- `*n` in MatchSequence; n=None for
+                                    `*_`, captures the rest
+      MatchSequence              -- recurse on inner patterns
+      MatchMapping               -- recurse on inner patterns; `rest`
+                                    is a str if `**rest` is in pattern
+      MatchClass                 -- recurse on positional + keyword
+                                    nested patterns
+      MatchOr                    -- recurse on each branch (Python
+                                    requires every branch to bind the
+                                    same names)
+
+    MatchValue / MatchSingleton bind nothing. The body delegates to
+    per-shape helpers to keep each function under the complexity cap."""
+    if pattern is None:
+        return []
+    if isinstance(pattern, ast.MatchAs):
+        out: list[str] = []
+        if pattern.name is not None:
+            out.append(pattern.name)
+        out.extend(_pattern_bound_names(pattern.pattern))
+        return out
+    if isinstance(pattern, ast.MatchStar):
+        return [pattern.name] if pattern.name is not None else []
+    if isinstance(pattern, ast.MatchSequence):
+        return _names_in_pattern_list(pattern.patterns)
+    if isinstance(pattern, ast.MatchMapping):
+        names = _names_in_pattern_list(pattern.patterns)
+        if pattern.rest is not None:
+            names.append(pattern.rest)
+        return names
+    if isinstance(pattern, ast.MatchClass):
+        return _names_in_pattern_list(pattern.patterns) + _names_in_pattern_list(
+            pattern.kwd_patterns
+        )
+    if isinstance(pattern, ast.MatchOr):
+        return _names_in_pattern_list(pattern.patterns)
+    return []
+
+
+def _names_in_pattern_list(patterns: list[ast.pattern]) -> list[str]:
+    """Concatenate `_pattern_bound_names` across an iterable of patterns."""
+    out: list[str] = []
+    for p in patterns:
+        out.extend(_pattern_bound_names(p))
+    return out
+
+
 def _node_binds_name(node: ast.AST, name: str, file_path: pathlib.Path | None) -> bool:
     """True iff `node` is a single AST node (statement or expression
     inside one) that introduces a new local binding for `name`.
@@ -826,9 +919,21 @@ def _node_binds_name(node: ast.AST, name: str, file_path: pathlib.Path | None) -
       AnnAssign       `<name>: T = expr`
       For / AsyncFor  `for <name> in iter:`     (loop variable; tuple
                                                   unpacking too)
-      With / AsyncWith `with cm as <name>:`     (context-manager binding)
+      With / AsyncWith `with cm as <name>:`     (context-manager binding,
+                                                  including unpacking)
       ExceptHandler   `except E as <name>:`     (handler exception
                                                   binding)
+      FunctionDef /   `def <name>(...):`        (nested function rebinds
+      AsyncFunctionDef `async def <name>(...)`   the name in this scope;
+                                                 the body is a separate
+                                                 scope, but the *name*
+                                                 binding lands here)
+      ClassDef        `class <name>: ...`       (same pattern as def)
+      Match           `match X: case <pat>:`    (every case's pattern can
+                                                  bind names via MatchAs,
+                                                  MatchStar, MatchMapping
+                                                  rest, etc.; recurse via
+                                                  `_pattern_bound_names`)
       Import / ImportFrom from a NON-canonical source (delegates to
                       `_import_binds_name_from_non_canonical_source`).
     """
@@ -849,6 +954,10 @@ def _node_binds_name(node: ast.AST, name: str, file_path: pathlib.Path | None) -
         # `except E as <name>:` -- `node.name` is a plain str, not a
         # Name node.
         return node.name == name
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name == name
+    if isinstance(node, ast.Match):
+        return any(name in _pattern_bound_names(case.pattern) for case in node.cases)
     if isinstance(node, (ast.Import, ast.ImportFrom)):
         return _import_binds_name_from_non_canonical_source(node, name, file_path)
     return False
