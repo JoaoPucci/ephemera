@@ -528,7 +528,9 @@ def _apply_if(
     branch reassigns to an unsanctioned source -- the other branch's
     sanctioned reassignment can no longer "win" by visit order."""
     if_t, if_a = _apply_seq(stmt.body, set(trusted), set(aliases), models_shadowed)
-    else_t, else_a = _apply_seq(stmt.orelse, set(trusted), set(aliases), models_shadowed)
+    else_t, else_a = _apply_seq(
+        stmt.orelse, set(trusted), set(aliases), models_shadowed
+    )
     return if_t & else_t, if_a & else_a
 
 
