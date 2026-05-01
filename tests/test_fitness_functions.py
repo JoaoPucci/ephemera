@@ -127,23 +127,27 @@ def _autherror_local_names(tree: ast.AST) -> set[str]:
             for alias in node.names:
                 if alias.name == "AuthError":
                     names.add(alias.asname or "AuthError")
-    # Module-level alias assignments. Only top-level `body` is walked
-    # (not function-local rebinding) because the canonical-message
-    # rule applies to module-scope identity of the AuthError class;
-    # function-local shadowing would be a different bug class.
-    if isinstance(tree, ast.Module):
-        changed = True
-        while changed:
-            changed = False
-            for stmt in tree.body:
-                if not isinstance(stmt, ast.Assign):
-                    continue
-                if not (isinstance(stmt.value, ast.Name) and stmt.value.id in names):
-                    continue
-                for target in stmt.targets:
-                    if isinstance(target, ast.Name) and target.id not in names:
-                        names.add(target.id)
-                        changed = True
+    # Alias assignments at any scope. Walks `ast.walk(tree)` instead
+    # of `tree.body` so a function-local rebind like
+    # `def login_handler(): Local = AuthError; raise Local("wrong
+    # password")` also feeds the alias set. Iterated to fixed point
+    # so chains (`A1 = AuthError; A2 = A1`) propagate. Adding aliases
+    # only EXPANDS the recognised set; it never narrows it -- a
+    # `Local = Something_Unrelated` doesn't pull `Something_Unrelated`
+    # into `names` (LHS is added only when RHS is already in `names`),
+    # so the asymmetric expansion is safe even when scopes nest.
+    changed = True
+    while changed:
+        changed = False
+        for stmt in ast.walk(tree):
+            if not isinstance(stmt, ast.Assign):
+                continue
+            if not (isinstance(stmt.value, ast.Name) and stmt.value.id in names):
+                continue
+            for target in stmt.targets:
+                if isinstance(target, ast.Name) and target.id not in names:
+                    names.add(target.id)
+                    changed = True
     return names
 
 
@@ -465,81 +469,178 @@ def _stmt_reads_are_quarantined(
     return True
 
 
+def _apply_seq(
+    stmts: list[ast.stmt], trusted: set[str], aliases: set[str], models_shadowed: bool
+) -> tuple[set[str], set[str]]:
+    """Thread `(trusted, aliases)` through `stmts` in source order via
+    `_apply_stmt`. Used inside structural branch handlers to process
+    one branch's body sequentially before joining with siblings."""
+    t, a = trusted, aliases
+    for stmt in stmts:
+        t, a = _apply_stmt(stmt, t, a, models_shadowed)
+    return t, a
+
+
+def _apply_assign(
+    stmt: ast.Assign, trusted: set[str], aliases: set[str], models_shadowed: bool
+) -> tuple[set[str], set[str]]:
+    """Sanctioned RHS adds each Name target to `trusted`; non-sanctioned
+    RHS discards them. Discarding the target from `aliases` too revokes
+    a function-local rebind of an imported sanctioned-getter name --
+    `get_user_with_totp_by_id = other_thing` shadows the import in
+    this scope so downstream calls of that name no longer count."""
+    nt, na = set(trusted), set(aliases)
+    sanctioned = _is_sanctioned_or_none_source(stmt.value, na, models_shadowed)
+    for target in stmt.targets:
+        if not isinstance(target, ast.Name):
+            continue
+        if sanctioned:
+            nt.add(target.id)
+        else:
+            nt.discard(target.id)
+            na.discard(target.id)
+    return nt, na
+
+
+def _apply_annassign(
+    stmt: ast.AnnAssign, trusted: set[str], aliases: set[str], models_shadowed: bool
+) -> tuple[set[str], set[str]]:
+    """`user: dict = expr` -- behaves like Assign for trust purposes when
+    `value` is set. A bare `user: dict` with no `value` doesn't bind at
+    runtime, so we leave the sets unchanged."""
+    if stmt.value is None or not isinstance(stmt.target, ast.Name):
+        return set(trusted), set(aliases)
+    nt, na = set(trusted), set(aliases)
+    if _is_sanctioned_or_none_source(stmt.value, na, models_shadowed):
+        nt.add(stmt.target.id)
+    else:
+        nt.discard(stmt.target.id)
+        na.discard(stmt.target.id)
+    return nt, na
+
+
+def _apply_if(
+    stmt: ast.If, trusted: set[str], aliases: set[str], models_shadowed: bool
+) -> tuple[set[str], set[str]]:
+    """Thread the pre-If state through body and orelse separately, then
+    intersect the per-branch results: trust survives the construct only
+    if it survives on EVERY reachable path. Closes the bypass where one
+    branch reassigns to an unsanctioned source -- the other branch's
+    sanctioned reassignment can no longer "win" by visit order."""
+    if_t, if_a = _apply_seq(stmt.body, set(trusted), set(aliases), models_shadowed)
+    else_t, else_a = _apply_seq(stmt.orelse, set(trusted), set(aliases), models_shadowed)
+    return if_t & else_t, if_a & else_a
+
+
+def _apply_try(
+    stmt: ast.Try, trusted: set[str], aliases: set[str], models_shadowed: bool
+) -> tuple[set[str], set[str]]:
+    """Three reachable post-Try paths to merge: try-body completes (and
+    orelse runs); or any handler runs (from arbitrary point in try body
+    -- conservative pre-state is the original pre-Try state, with any
+    `as <name>` excluded from trust). `finally` always runs after the
+    merged state."""
+    try_t, try_a = _apply_seq(stmt.body, set(trusted), set(aliases), models_shadowed)
+    else_t, else_a = _apply_seq(stmt.orelse, try_t, try_a, models_shadowed)
+    merged_t, merged_a = else_t, else_a
+    for handler in stmt.handlers:
+        h_t, h_a = set(trusted), set(aliases)
+        if handler.name is not None:
+            h_t.discard(handler.name)
+            h_a.discard(handler.name)
+        h_t, h_a = _apply_seq(handler.body, h_t, h_a, models_shadowed)
+        merged_t = merged_t & h_t
+        merged_a = merged_a & h_a
+    return _apply_seq(stmt.finalbody, merged_t, merged_a, models_shadowed)
+
+
+def _apply_loop(
+    stmt: ast.While | ast.For | ast.AsyncFor,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+) -> tuple[set[str], set[str]]:
+    """Loop body might not execute at all (empty iter / initially false
+    cond) -- so the post-loop state is the intersection of pre-state
+    (body skipped) and the body-end state (body ran ≥ once and
+    completed). The For target is bound to elements of `iter`, not
+    sanctioned. The else clause runs only if the loop exits without a
+    break; thread it through the body-end state."""
+    body_t, body_a = set(trusted), set(aliases)
+    if isinstance(stmt, (ast.For, ast.AsyncFor)) and isinstance(stmt.target, ast.Name):
+        body_t.discard(stmt.target.id)
+        body_a.discard(stmt.target.id)
+    body_t, body_a = _apply_seq(stmt.body, body_t, body_a, models_shadowed)
+    else_t, else_a = _apply_seq(stmt.orelse, body_t, body_a, models_shadowed)
+    return set(trusted) & else_t, set(aliases) & else_a
+
+
+def _apply_with(
+    stmt: ast.With | ast.AsyncWith,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+) -> tuple[set[str], set[str]]:
+    """`with ctx as name:` binds `name` to the context manager's
+    `__enter__` return -- not sanctioned for our purposes. Body
+    statements thread through sequentially."""
+    nt, na = set(trusted), set(aliases)
+    for item in stmt.items:
+        if isinstance(item.optional_vars, ast.Name):
+            nt.discard(item.optional_vars.id)
+            na.discard(item.optional_vars.id)
+    return _apply_seq(stmt.body, nt, na, models_shadowed)
+
+
+def _apply_stmt(
+    stmt: ast.AST,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool = False,
+) -> tuple[set[str], set[str]]:
+    """Return the (trusted, aliases) state after `stmt` runs, computed
+    structurally: branching constructs process each reachable branch
+    with cloned state and intersect the per-branch results, so trust
+    survives the construct only on every reachable path. Sequential
+    within-branch threading happens by chaining state through the
+    branch's statements in source order via `_apply_seq`.
+
+    Returns fresh sets; the input sets are never mutated.
+
+    All shapes not handled below (Return, Raise, Pass, Break, Continue,
+    Expr, Import, ImportFrom, Global, Nonlocal, Delete, FunctionDef,
+    ClassDef, AugAssign) leave (trusted, aliases) unchanged. Nested
+    function / class bodies have their own scopes and are checked
+    independently by the caller."""
+    if isinstance(stmt, ast.Assign):
+        return _apply_assign(stmt, trusted, aliases, models_shadowed)
+    if isinstance(stmt, ast.AnnAssign):
+        return _apply_annassign(stmt, trusted, aliases, models_shadowed)
+    if isinstance(stmt, ast.If):
+        return _apply_if(stmt, trusted, aliases, models_shadowed)
+    if isinstance(stmt, ast.Try):
+        return _apply_try(stmt, trusted, aliases, models_shadowed)
+    if isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
+        return _apply_loop(stmt, trusted, aliases, models_shadowed)
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return _apply_with(stmt, trusted, aliases, models_shadowed)
+    return set(trusted), set(aliases)
+
+
 def _update_trust_from_stmt(
     stmt: ast.AST,
     trusted: set[str],
     sanctioned_aliases: set[str],
     models_shadowed: bool = False,
 ) -> None:
-    """Walk every binding-introducing node reachable in `stmt`
-    (including those inside `if` / `try` / loop branches) and update
-    `trusted` in place: a sanctioned-or-None RHS adds the target name;
-    any other RHS REVOKES the target name. Linear ordering inside the
-    function body is the caller's responsibility (process statements
-    in source order); this helper only handles the within-statement
-    update.
-
-    Two binding shapes count:
-
-      Assign:     `user = expr`              -- targets is a list
-                                                (chained `a = b = expr`
-                                                style); each target's
-                                                Name is bound.
-      AnnAssign:  `user: dict = expr`        -- annotated reassignment.
-                                                Single target; same
-                                                trust effect as Assign
-                                                when `value` is set.
-                                                A bare `user: dict`
-                                                with no value doesn't
-                                                actually bind at
-                                                runtime, so it's
-                                                ignored.
-
-    Catches reassignment-bypasses in either form:
-      `user = sanctioned(); user = other(); user["totp_secret"]`
-      `user = sanctioned(); user: dict = other(); user["totp_secret"]`
-
-    Branch-specific reassignment (`if cond: user = other()`) is also
-    caught because `_walk_local` descends into branch bodies when
-    collecting these nodes; this is intentionally aggressive (a
-    branch that REASSIGNS to something un-trusted revokes trust for
-    the rest of the function, even if at runtime the branch wouldn't
-    have run -- the conservative direction). AugAssign (`user += x`)
-    and walrus assignments don't appear in this codebase and are not
-    handled."""
-    for node in _walk_local(stmt):
-        if isinstance(node, ast.Assign):
-            sanctioned = _is_sanctioned_or_none_source(
-                node.value, sanctioned_aliases, models_shadowed
-            )
-            for target in node.targets:
-                if not isinstance(target, ast.Name):
-                    continue
-                if sanctioned:
-                    trusted.add(target.id)
-                else:
-                    trusted.discard(target.id)
-                    # Rebinding an imported sanctioned-getter NAME to a
-                    # non-sanctioned RHS shadows the import in this
-                    # function's scope, so subsequent `<name>(uid)` calls
-                    # no longer count as sanctioned. Mutates the caller's
-                    # local copy of the alias set; the module-level set
-                    # passed in by the test stays untouched.
-                    if target.id in sanctioned_aliases:
-                        sanctioned_aliases.discard(target.id)
-        elif isinstance(node, ast.AnnAssign):
-            if node.value is None:
-                continue
-            if not isinstance(node.target, ast.Name):
-                continue
-            if _is_sanctioned_or_none_source(
-                node.value, sanctioned_aliases, models_shadowed
-            ):
-                trusted.add(node.target.id)
-            else:
-                trusted.discard(node.target.id)
-                if node.target.id in sanctioned_aliases:
-                    sanctioned_aliases.discard(node.target.id)
+    """In-place wrapper around `_apply_stmt` for the legacy call shape.
+    Mutates `trusted` and `sanctioned_aliases` to reflect the post-
+    statement state."""
+    nt, na = _apply_stmt(stmt, trusted, sanctioned_aliases, models_shadowed)
+    trusted.clear()
+    trusted.update(nt)
+    sanctioned_aliases.clear()
+    sanctioned_aliases.update(na)
 
 
 def _name_is_bound_in_scope(name: str, scope: ast.AST) -> bool:
