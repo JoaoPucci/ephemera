@@ -116,14 +116,20 @@ function synthesizeMember(object, propertyName) {
 
 // Read the property name from one ObjectPattern property, or null
 // if it isn't statically resolvable (computed keys with a non-string
-// expression). Handles both bare-identifier keys (`{ fetch: ... }`)
-// and computed-string keys (`{ ["fetch"]: ... }` / `{ [`fetch`]: ... }`)
-// for the same template-literal-key support `memberPropertyName` has.
+// expression). Handles four key shapes:
+//
+//   { fetch: f }     bare identifier        -- prop.computed=false
+//                                              prop.key=Identifier
+//   { 'fetch': f }   quoted property name   -- prop.computed=false
+//                                              prop.key=Literal
+//   { ["fetch"]: f } computed string        -- prop.computed=true
+//                                              prop.key=Literal
+//   { [`fetch`]: f } computed template      -- prop.computed=true
+//                                              prop.key=TemplateLiteral
+//                                              (single quasi, no expr)
 function patternPropertyName(prop) {
   if (!prop.computed && prop.key.type === 'Identifier') return prop.key.name;
-  if (prop.computed && prop.key.type === 'Literal' && typeof prop.key.value === 'string') {
-    return prop.key.value;
-  }
+  if (prop.key.type === 'Literal' && typeof prop.key.value === 'string') return prop.key.value;
   if (
     prop.computed &&
     prop.key.type === 'TemplateLiteral' &&
@@ -143,14 +149,28 @@ function buildAliasMap(ast) {
   const map = new Map();
 
   function addAlias(name, init) {
-    if (
-      !init ||
-      (init.type !== 'Identifier' &&
-        init.type !== 'MemberExpression' &&
-        init.type !== 'ChainExpression')
-    ) {
-      return;
-    }
+    if (!init) return;
+    // Two value-shape families recorded:
+    //   - Chains: Identifier / MemberExpression / ChainExpression --
+    //     resolve through to a global identifier for the URL / RCE /
+    //     console / storage guards.
+    //   - Strings: Literal (string) / TemplateLiteral -- exposed to
+    //     `isStringShapedArg` and `staticStringPrefix` so a `const
+    //     code = "alert(1)"; setTimeout(code, 0)` indirection still
+    //     reaches the timer guard, and an aliased URL string still
+    //     reaches the absolute-URL fetch guard.
+    // The chain-iterating predicates (chainEndsWithName,
+    // resolvesToGlobalObject, isMethodCallOn) skip non-Identifier/
+    // -Member candidates, so adding string-shaped values here doesn't
+    // perturb their results.
+    const isChain =
+      init.type === 'Identifier' ||
+      init.type === 'MemberExpression' ||
+      init.type === 'ChainExpression';
+    const isStringShape =
+      (init.type === 'Literal' && typeof init.value === 'string') ||
+      init.type === 'TemplateLiteral';
+    if (!isChain && !isStringShape) return;
     const list = map.get(name);
     if (list) list.push(init);
     else map.set(name, [init]);
@@ -648,33 +668,62 @@ function isBareCallOf(node, name, aliasMap) {
 
 const ABSOLUTE_URL_RE = /^(?:https?:)?\/\//;
 
-// True iff `node` is a static string-shaped expression -- either a
-// regular string `Literal` or a `TemplateLiteral`. Both compile to a
-// string at runtime and both are dangerous as arguments to the
-// timer-string overloads (`setTimeout(\`code\`, n)` runs the cooked
-// template through eval just like `setTimeout("code", n)` does).
-function isStringShapedArg(node) {
-  if (!node) return false;
-  if (node.type === 'Literal' && typeof node.value === 'string') return true;
-  return node.type === 'TemplateLiteral';
+// Yield each string-shaped value `node` can resolve to under the
+// alias map: the input itself when `node` is already a Literal /
+// TemplateLiteral, plus every string-shaped binding reached by
+// walking aliased Identifiers. `buildAliasMap` records `const code
+// = "alert(1)"` and `const url = \`https://x\`` alongside chain
+// aliases, so this iterates the candidate set once.
+function* stringShapedCandidates(node, aliasMap) {
+  if (!node) return;
+  if (node.type === 'Literal' && typeof node.value === 'string') {
+    yield node;
+    return;
+  }
+  if (node.type === 'TemplateLiteral') {
+    yield node;
+    return;
+  }
+  if (node.type === 'Identifier' && aliasMap) {
+    for (const candidate of resolveAlias(node, aliasMap)) {
+      if (candidate === node) continue;
+      yield* stringShapedCandidates(candidate, aliasMap);
+    }
+  }
 }
 
-// Read the static prefix of a string-shaped argument. For a regular
-// string literal, returns its value. For a template literal, returns
-// the cooked text of the FIRST quasi -- the part before any `${...}`
-// interpolation. Returns null if the node isn't string-shaped.
+// True iff `node` resolves (directly or through a Literal-valued
+// alias) to a static string-shaped expression. Both Literal strings
+// and TemplateLiterals are dangerous as the first argument to the
+// timer-string overloads (`setTimeout("code", n)` and
+// `setTimeout(\`code\`, n)` both run their first arg through eval),
+// and the indirection `const code = "..."; setTimeout(code, 0)`
+// produces the same RCE shape -- the alias-aware lookup catches
+// that case.
+function isStringShapedArg(node, aliasMap) {
+  for (const _ of stringShapedCandidates(node, aliasMap)) return true;
+  return false;
+}
+
+// Static prefix of any string-shaped value `node` can resolve to.
+// For a regular string Literal, returns the value. For a
+// TemplateLiteral, returns the cooked text of the FIRST quasi (the
+// span before any `${...}` interpolation). Iterates aliased
+// candidates and returns the first non-null prefix; an aliased URL
+// string `const url = "https://evil"; fetch(url)` reaches the
+// absolute-URL guard the same way an inline `fetch("https://evil")`
+// would.
 //
-// The fetch URL guard uses this on argument 0: a template like
-// `\`https://evil.example/x\`` has no interpolation, so the cooked
-// prefix IS the full URL and matches the absolute-URL regex.
-// `\`/api/${id}\`` starts with `/api/`, doesn't match, correctly
-// stays out. `\`${HOST}/path\`` has an empty first quasi and falls
-// through (not a literal absolute URL we can statically prove).
-function staticStringPrefix(node) {
-  if (!node) return null;
-  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
-  if (node.type === 'TemplateLiteral' && node.quasis.length > 0) {
-    return node.quasis[0].value.cooked;
+// `\`https://evil.example/x\`` -- no interpolation, full URL is
+// the cooked prefix, matches the absolute-URL regex.
+// `\`/api/${id}\``             -- prefix `/api/`, doesn't match.
+// `\`${HOST}/path\``           -- empty first quasi, no prefix.
+function staticStringPrefix(node, aliasMap) {
+  for (const candidate of stringShapedCandidates(node, aliasMap)) {
+    if (candidate.type === 'Literal') return candidate.value;
+    if (candidate.type === 'TemplateLiteral' && candidate.quasis.length > 0) {
+      return candidate.quasis[0].value.cooked;
+    }
   }
   return null;
 }
@@ -714,7 +763,7 @@ describe('JS architectural fitness functions', () => {
           // [0] === Identifier("window")` but the actual first arg
           // the function receives is "code".
           const eff = effectiveCall(node, 0, aliasMap);
-          if (eff?.args && isStringShapedArg(eff.args[0])) {
+          if (eff?.args && isStringShapedArg(eff.args[0], aliasMap)) {
             offenders.push(
               `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
             );
@@ -855,7 +904,7 @@ describe('JS architectural fitness functions', () => {
         // thisArg/etc. that .call/.apply/.bind interpose.
         const eff = effectiveCall(node, 0, aliasMap);
         if (!eff?.args) return;
-        const prefix = staticStringPrefix(eff.args[0]);
+        const prefix = staticStringPrefix(eff.args[0], aliasMap);
         if (prefix == null) return;
         if (ABSOLUTE_URL_RE.test(prefix)) {
           offenders.push(
