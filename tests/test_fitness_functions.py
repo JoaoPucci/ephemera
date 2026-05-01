@@ -286,6 +286,12 @@ _DATA_LAYER_ABSOLUTE_MODULES = frozenset({"app.models", "app.models.users"})
 _CANONICAL_IMPORT_SOURCES: dict[str, frozenset[str]] = {
     "models": frozenset({"app", "app.models"}),
     "verify_same_origin": frozenset({"app.dependencies"}),
+    # FastAPI's `Depends` is the only callable that wires a
+    # FastAPI dependency in our codebase. A rebind of `Depends`
+    # (Assign / AnnAssign at module level) or an import from a
+    # non-FastAPI source shadows the real one, so a literal
+    # `Depends(verify_same_origin)` would no longer wire the gate.
+    "Depends": frozenset({"fastapi"}),
 }
 
 
@@ -613,6 +619,45 @@ def _apply_with(
     return _apply_seq(stmt.body, nt, na, models_shadowed)
 
 
+def _apply_import(
+    stmt: ast.Import | ast.ImportFrom,
+    trusted: set[str],
+    aliases: set[str],
+) -> tuple[set[str], set[str]]:
+    """A function-local `import` / `from ... import` rebinds the
+    imported names in this scope, shadowing any module-level binding
+    of the same name. Revoke each bound name from the local trust
+    and alias sets:
+
+      - From `aliases`: a function-local re-import of a sanctioned-
+        getter name (e.g. `from attacker import get_user_with_totp_
+        by_id`) shadows the module-level canonical alias for the
+        body of this function. Subsequent `<name>(uid)` calls must
+        no longer count as sanctioned, even if the module-level set
+        still records the canonical import.
+      - From `trusted`: a local import that uses a name previously
+        bound from a sanctioned call shadows the variable too. Rare
+        in practice, but it's the symmetric move and costs nothing
+        to keep consistent.
+
+    Conservative direction: even a local re-import from the
+    canonical data-layer (`from app.models import get_user_with_
+    totp_by_id` inside a function body) is treated as a fresh local
+    binding and revoked. Re-sanctioning would require scope-aware
+    canonical-source resolution at every read site, and the
+    realistic codebase's sanctioned getters live at module scope --
+    the over-revoke direction matches the rest of the test posture."""
+    nt, na = set(trusted), set(aliases)
+    for alias in stmt.names:
+        if isinstance(stmt, ast.ImportFrom):
+            bound = alias.asname or alias.name
+        else:
+            bound = alias.asname or alias.name.partition(".")[0]
+        nt.discard(bound)
+        na.discard(bound)
+    return nt, na
+
+
 def _apply_stmt(
     stmt: ast.AST,
     trusted: set[str],
@@ -629,10 +674,10 @@ def _apply_stmt(
     Returns fresh sets; the input sets are never mutated.
 
     All shapes not handled below (Return, Raise, Pass, Break, Continue,
-    Expr, Import, ImportFrom, Global, Nonlocal, Delete, FunctionDef,
-    ClassDef, AugAssign) leave (trusted, aliases) unchanged. Nested
-    function / class bodies have their own scopes and are checked
-    independently by the caller."""
+    Expr, Global, Nonlocal, Delete, FunctionDef, ClassDef, AugAssign)
+    leave (trusted, aliases) unchanged. Nested function / class
+    bodies have their own scopes and are checked independently by
+    the caller."""
     if isinstance(stmt, ast.Assign):
         return _apply_assign(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, ast.AnnAssign):
@@ -645,6 +690,8 @@ def _apply_stmt(
         return _apply_loop(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, (ast.With, ast.AsyncWith)):
         return _apply_with(stmt, trusted, aliases, models_shadowed)
+    if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+        return _apply_import(stmt, trusted, aliases)
     return set(trusted), set(aliases)
 
 
@@ -1070,7 +1117,11 @@ def _is_imperative_mutating_registration(node: ast.AST) -> bool:
     return _kwargs_contain_mutating_method(node.keywords)
 
 
-def _is_origin_dependency(node: ast.AST, vso_shadowed: bool = False) -> bool:
+def _is_origin_dependency(
+    node: ast.AST,
+    vso_shadowed: bool = False,
+    depends_shadowed: bool = False,
+) -> bool:
     """True iff `node` is a real `Depends(verify_same_origin)` call --
     a Call whose function is the bare name `Depends` and whose
     `verify_same_origin` argument is supplied either as the first
@@ -1086,12 +1137,21 @@ def _is_origin_dependency(node: ast.AST, vso_shadowed: bool = False) -> bool:
     `verify_same_origin`, an annotation referencing the symbol, or a
     docstring/comment containing the token are all not the dependency.
 
-    `vso_shadowed=True` rejects every match: a module-level rebind of
-    `verify_same_origin` to a different callable shadows the imported
-    symbol for every downstream `Depends(verify_same_origin)`
-    reference, so the gate isn't actually wired even though the AST
-    still contains the Name."""
-    if vso_shadowed:
+    Two shadowing flags reject every match independently:
+
+      `vso_shadowed=True`     -- `verify_same_origin` rebound at
+                                 module scope or imported from a
+                                 non-canonical source. The Name in
+                                 the call resolves to something
+                                 other than the real CSRF check.
+      `depends_shadowed=True` -- `Depends` itself rebound or imported
+                                 from a non-FastAPI source. A literal
+                                 `Depends(...)` call no longer wires
+                                 a FastAPI dependency, so the gate
+                                 isn't actually installed even
+                                 though the AST still spells the
+                                 token."""
+    if vso_shadowed or depends_shadowed:
         return False
     if not isinstance(node, ast.Call):
         return False
@@ -1136,7 +1196,15 @@ def test_state_mutating_routes_all_carry_origin_gate():
         # imported symbol for every downstream Depends(...) reference
         # in this file -- the decorator runs at definition time using
         # the lexical binding then-in-scope. Compute once per file.
-        vso_shadowed = "verify_same_origin" in _module_level_rebound_names(tree, py)
+        # `verify_same_origin` and `Depends` must each resolve to their
+        # canonical FastAPI binding for the gate to actually wire. A
+        # rebind or a non-canonical import of either shadows the literal
+        # `Depends(verify_same_origin)` shape (the decorator runs at
+        # definition time using the lexical binding then-in-scope).
+        # Compute once per file.
+        rebound = _module_level_rebound_names(tree, py)
+        vso_shadowed = "verify_same_origin" in rebound
+        depends_shadowed = "Depends" in rebound
         # Pass 1: decorator-style registrations on FunctionDef /
         # AsyncFunctionDef. Both sync `def` and `async def` shapes
         # are valid FastAPI handlers (e.g. app/routes/sender.py::
@@ -1160,12 +1228,12 @@ def test_state_mutating_routes_all_carry_origin_gate():
             # (the parameter-default form) inherits to every decorator
             # since it applies to the handler's own call.
             sig_has_dep = any(
-                _is_origin_dependency(inner, vso_shadowed)
+                _is_origin_dependency(inner, vso_shadowed, depends_shadowed)
                 for inner in ast.walk(node.args)
             )
             for deco in mutating_decos:
                 deco_has_dep = any(
-                    _is_origin_dependency(inner, vso_shadowed)
+                    _is_origin_dependency(inner, vso_shadowed, depends_shadowed)
                     for inner in ast.walk(deco)
                 )
                 if not (deco_has_dep or sig_has_dep):
@@ -1186,7 +1254,8 @@ def test_state_mutating_routes_all_carry_origin_gate():
             if not _is_imperative_mutating_registration(node):
                 continue
             ok = any(
-                _is_origin_dependency(inner, vso_shadowed) for inner in ast.walk(node)
+                _is_origin_dependency(inner, vso_shadowed, depends_shadowed)
+                for inner in ast.walk(node)
             )
             if not ok:
                 rel = py.relative_to(REPO_ROOT)
