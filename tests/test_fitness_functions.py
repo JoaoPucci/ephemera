@@ -230,44 +230,58 @@ _WITH_TOTP_GETTERS = frozenset(
 
 
 # Module specs that resolve to the data-layer source of the sanctioned
-# getters. Absolute paths cover `from app.models import ...` (re-export
-# via the package __init__) and `from app.models.users import ...`.
-# Relative paths cover `from ..models[.users] import ...` from files in
-# app/auth/ + app/admin/, plus `from .users import ...` from inside
-# app/models/. A future re-export through a different module would need
-# adding here explicitly -- the closed list keeps the trust surface
-# small.
+# getters. Both absolute and relative imports are checked against this
+# set after relative paths are resolved against the importing file's
+# own package (see `_resolve_import_module`). `app.models` is included
+# to cover a re-export through the package `__init__`; the closed list
+# keeps the trust surface small.
 _DATA_LAYER_ABSOLUTE_MODULES = frozenset({"app.models", "app.models.users"})
-_DATA_LAYER_RELATIVE_MODULES = frozenset({"models", "models.users", "users"})
 
 
-def _import_resolves_to_data_layer(node: ast.ImportFrom) -> bool:
-    """True iff `node` is a `from ... import ...` statement whose source
-    module is the data layer (app.models or app.models.users), via
-    either an absolute import or a relative one whose terminal segments
-    match. Without this, `from helpers import get_user_with_totp_by_id`
-    would silently accept a same-named helper from an unrelated module
-    and bypass the quarantine."""
+def _resolve_import_module(node: ast.ImportFrom, file_path: pathlib.Path) -> str | None:
+    """Return the absolute dotted module path for `node` (a `from ...
+    import ...` statement) inside `file_path`. Resolves relative
+    imports against the importing file's package: `from .users import
+    X` in `app/auth/login.py` resolves to `app.auth.users`, NOT
+    `app.models.users`. Returns None if `node.level` walks past the
+    repo root, or if the import has no module name and no level (a
+    syntactic impossibility for ImportFrom).
+
+    Without proper resolution, the trust check would accept any
+    relative `from .users ...` regardless of where the importing file
+    lives, so an unrelated `app/auth/users.py` shipping a same-named
+    helper could satisfy the quarantine."""
     mod = node.module or ""
     if node.level == 0:
-        return mod in _DATA_LAYER_ABSOLUTE_MODULES
-    return mod in _DATA_LAYER_RELATIVE_MODULES
+        return mod or None
+    rel = file_path.relative_to(REPO_ROOT) if file_path.is_absolute() else file_path
+    package_parts = list(rel.with_suffix("").parts)[:-1]
+    drop = node.level - 1
+    if drop > len(package_parts):
+        return None
+    base_parts = package_parts[: len(package_parts) - drop]
+    if not base_parts:
+        return None
+    base = ".".join(base_parts)
+    return f"{base}.{mod}" if mod else base
 
 
-def _sanctioned_totp_getter_aliases(tree: ast.AST) -> set[str]:
+def _sanctioned_totp_getter_aliases(tree: ast.AST, file_path: pathlib.Path) -> set[str]:
     """Local names that resolve to a sanctioned getter via direct
     import FROM THE DATA LAYER. Walks the module's `from <X> import
-    <getter>` / `from <X> import <getter> as <alias>` statements and
-    accepts only those whose source module passes
-    `_import_resolves_to_data_layer`. Used so `<name>(uid)` calls are
+    <getter>` / `from <X> import <getter> as <alias>` statements,
+    resolves relative imports against `file_path`'s package, and
+    accepts only those whose absolute module is in
+    `_DATA_LAYER_ABSOLUTE_MODULES`. Used so `<name>(uid)` calls are
     accepted only when `<name>` was actually imported from the data
-    layer, not when an unrelated module happens to export the same
-    symbol name."""
+    layer, not when an unrelated module (sibling `users.py`, third-
+    party helper) happens to export the same symbol name."""
     names: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
             continue
-        if not _import_resolves_to_data_layer(node):
+        resolved = _resolve_import_module(node, file_path)
+        if resolved not in _DATA_LAYER_ABSOLUTE_MODULES:
             continue
         for alias in node.names:
             if alias.name in _WITH_TOTP_GETTERS:
@@ -336,7 +350,7 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
         if rel in allowlist:
             continue
         tree = ast.parse(py.read_text())
-        sanctioned = _sanctioned_totp_getter_aliases(tree)
+        sanctioned = _sanctioned_totp_getter_aliases(tree, py)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
