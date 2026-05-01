@@ -55,16 +55,65 @@ function relPath(file) {
 }
 
 // Pre-parse every JS file once, share the resulting ASTs across tests.
-const PARSED = findJsFiles(STATIC_DIR).map((file) => ({
-  file,
-  rel: relPath(file),
-  ast: acornParse(readFileSync(file, 'utf8'), {
+const PARSED = findJsFiles(STATIC_DIR).map((file) => {
+  const ast = acornParse(readFileSync(file, 'utf8'), {
     ecmaVersion: 'latest',
     sourceType: 'module',
     allowHashBang: true,
     locations: true,
-  }),
-}));
+  });
+  return { file, rel: relPath(file), ast, aliasMap: moduleLevelAliasMap(ast) };
+});
+
+// Walk the top-level statements of a module and build a Name -> chain
+// map for every `const|let|var <name> = <chain>` declaration where
+// `<chain>` is either an Identifier or a MemberExpression (the kinds
+// we statically recognize as references to globals or methods on
+// them). This catches the basic alias-bypass pattern:
+//
+//   const f = fetch;          aliasMap.set('f', Identifier('fetch'))
+//   const log = console.log;  aliasMap.set('log', Member(console, log))
+//   const cl = console;       aliasMap.set('cl', Identifier('console'))
+//
+// Module-level only: aliasing inside a function body would need
+// scope-aware tracking (rebinding, parameter shadowing, etc.). The
+// realistic bypass surface here is the top-of-file convenience alias
+// pattern, which is what this map covers. Function-local aliases
+// remain a documented limitation.
+function moduleLevelAliasMap(ast) {
+  const map = new Map();
+  if (!ast?.body || !Array.isArray(ast.body)) return map;
+  for (const stmt of ast.body) {
+    if (stmt.type !== 'VariableDeclaration') continue;
+    for (const decl of stmt.declarations) {
+      if (decl.id?.type !== 'Identifier' || !decl.init) continue;
+      const init = decl.init;
+      if (
+        init.type === 'Identifier' ||
+        init.type === 'MemberExpression' ||
+        init.type === 'ChainExpression'
+      ) {
+        map.set(decl.id.name, init);
+      }
+    }
+  }
+  return map;
+}
+
+// If `node` is (eventually) a Name in `aliasMap`, return the mapped
+// chain. Iterates through alias-of-alias chains up to a small depth
+// to bail on cycles. Returns the original node if no aliasing
+// applies, so callers can use the result as a drop-in replacement.
+function resolveAlias(node, aliasMap) {
+  if (!aliasMap) return node;
+  let cur = node;
+  for (let i = 0; i < 8; i++) {
+    const u = cur && cur.type === 'ChainExpression' ? cur.expression : cur;
+    if (!u || u.type !== 'Identifier' || !aliasMap.has(u.name)) return cur;
+    cur = aliasMap.get(u.name);
+  }
+  return cur;
+}
 
 // Generic AST walker. `visit(node, parent)` is called for every node;
 // to skip a subtree, return `false` from the visitor. Recurses on every
@@ -178,17 +227,19 @@ function unwrapSequence(node) {
 //   - bare `window` / `globalThis` / `self`
 //   - any chain of those, e.g. `window.window`, `self.window.self`,
 //     `globalThis.self.globalThis`
+//   - aliases at module scope: `const w = window; w.fetch(...)` -- the
+//     `w` resolves through `aliasMap` back to `window`
 // All the listed globals point at the same object on the browser side
 // (`window === window.window === window.self === globalThis`), so any
 // chain of them is equivalent to bare access for fitness purposes.
-function resolvesToGlobalObject(node) {
-  let cur = unwrapSequence(unwrapChain(node));
+function resolvesToGlobalObject(node, aliasMap) {
+  let cur = unwrapSequence(unwrapChain(resolveAlias(node, aliasMap)));
   while (cur) {
     if (cur.type === 'Identifier') return GLOBAL_OBJECTS.has(cur.name);
     if (cur.type !== 'MemberExpression') return false;
     const prop = memberPropertyName(cur);
     if (prop === null || !GLOBAL_OBJECTS.has(prop)) return false;
-    cur = unwrapSequence(unwrapChain(cur.object));
+    cur = unwrapSequence(unwrapChain(resolveAlias(cur.object, aliasMap)));
   }
   return false;
 }
@@ -204,15 +255,19 @@ function resolvesToGlobalObject(node) {
 //   - `(side, effect, <one of the above>)` -- the indirect-call /
 //     comma-operator wrapper that's used to call globals without a
 //     binding context
+// Module-level aliases also resolve through `aliasMap`: `const f =
+// fetch; f(...)` and `const log = console.log; log(...)` reduce
+// to the underlying chain via `resolveAlias`.
+//
 // Optional chaining at any layer is handled by `unwrapChain`; comma
 // wrapping is handled by `unwrapSequence`.
-function chainEndsWithName(node, targetName) {
-  const u = unwrapSequence(unwrapChain(node));
+function chainEndsWithName(node, targetName, aliasMap) {
+  const u = unwrapSequence(unwrapChain(resolveAlias(node, aliasMap)));
   if (!u) return false;
   if (u.type === 'Identifier') return u.name === targetName;
   if (u.type !== 'MemberExpression') return false;
   if (memberPropertyName(u) !== targetName) return false;
-  return resolvesToGlobalObject(u.object);
+  return resolvesToGlobalObject(u.object, aliasMap);
 }
 
 // Peel `Function.prototype.{call, apply, bind}` wrappers off a Call
@@ -239,8 +294,41 @@ function chainEndsWithName(node, targetName) {
 // `<fn>.{call, apply}` (a MemberExpression with the wrong final
 // property name) or the entire bind() invocation result.
 function effectiveCall(node) {
-  if (!node || node.type !== 'CallExpression') return null;
+  if (!node) return null;
+  // NewExpression: `new fn(args...)`. No .call/.apply/.bind wrappers
+  // (you can't `new fn.call(...)`), so just pass the callee + args
+  // through. This lets the URL guard inspect arguments to a
+  // hypothetical `new fetch("https://...")`.
+  if (node.type === 'NewExpression') {
+    return { callee: node.callee, args: node.arguments };
+  }
+  if (node.type !== 'CallExpression') return null;
   const callee = unwrapSequence(unwrapChain(node.callee));
+
+  // Shape: Reflect.apply(fn, thisArg, argsArray) -- ES6 Reflect API
+  // wrapper that's equivalent to fn.apply(thisArg, argsArray).
+  // Reflect.construct(fn, argsArray, newTarget?) -- equivalent to
+  // `new fn(...argsArray)`. Both stay-dangerous; recognize them so
+  // `Reflect.apply(fetch, window, ["https://evil"])` reaches the URL
+  // guard.
+  if (
+    callee &&
+    callee.type === 'MemberExpression' &&
+    memberPropertyName(callee) &&
+    callee.object.type === 'Identifier' &&
+    callee.object.name === 'Reflect'
+  ) {
+    const which = memberPropertyName(callee);
+    if (which === 'apply' || which === 'construct') {
+      const innerFn = node.arguments[0];
+      const argsArrayIdx = which === 'apply' ? 2 : 1;
+      const argsArray = node.arguments[argsArrayIdx];
+      if (argsArray && argsArray.type === 'ArrayExpression') {
+        return { callee: innerFn, args: argsArray.elements };
+      }
+      return { callee: innerFn, args: null };
+    }
+  }
 
   // Shape: fn.bind(thisArg, ...partials)(args...) -- outer callee is
   // itself a CallExpression whose callee is `<fn>.bind`. The bound
@@ -284,13 +372,18 @@ function effectiveCall(node) {
 // `console?.log(...)`, `console["log"](...)`, `console?.["log"]?.(...)`,
 // `window.console.log(...)`, `console.log.call(console, x)`,
 // `console.log.bind(console)(x)`, and their optional/bracket variants.
-function isMethodCallOn(node, objectName) {
+function isMethodCallOn(node, objectName, aliasMap) {
   if (node.type !== 'CallExpression') return false;
   const eff = effectiveCall(node);
   if (!eff) return false;
-  const callee = unwrapSequence(unwrapChain(eff.callee));
+  // Resolve aliasing on the eff callee BEFORE expecting a Member.
+  // `const log = console.log; log(secret)` -- `eff.callee` is
+  // Identifier('log'), but resolveAlias substitutes the original
+  // `console.log` MemberExpression so the receiver-chain check
+  // still fires.
+  const callee = unwrapSequence(unwrapChain(resolveAlias(eff.callee, aliasMap)));
   if (!callee || callee.type !== 'MemberExpression') return false;
-  return chainEndsWithName(callee.object, objectName);
+  return chainEndsWithName(callee.object, objectName, aliasMap);
 }
 
 // Predicate: `node` is a Call (or NewExpression) whose LOGICAL callee
@@ -300,11 +393,11 @@ function isMethodCallOn(node, objectName) {
 // [...])`, `fn.bind(thisArg)(...)`. NewExpression doesn't go through
 // `effectiveCall` because `new fn.call(...)` etc. aren't meaningful
 // JS shapes.
-function isBareCallOf(node, name) {
-  if (node.type === 'NewExpression') return chainEndsWithName(node.callee, name);
+function isBareCallOf(node, name, aliasMap) {
+  if (node.type === 'NewExpression') return chainEndsWithName(node.callee, name, aliasMap);
   if (node.type !== 'CallExpression') return false;
   const eff = effectiveCall(node);
-  return Boolean(eff && chainEndsWithName(eff.callee, name));
+  return Boolean(eff && chainEndsWithName(eff.callee, name, aliasMap));
 }
 
 const ABSOLUTE_URL_RE = /^(?:https?:)?\/\//;
@@ -357,15 +450,18 @@ describe('JS architectural fitness functions', () => {
     //    string overload delegates to eval too. Function references
     //    are fine; only the string-typed first argument is forbidden.
     const offenders = [];
-    for (const { rel, ast } of PARSED) {
+    for (const { rel, ast, aliasMap } of PARSED) {
       walkAST(ast, (node) => {
-        if (isBareCallOf(node, 'eval') || isBareCallOf(node, 'Function')) {
+        if (isBareCallOf(node, 'eval', aliasMap) || isBareCallOf(node, 'Function', aliasMap)) {
           offenders.push(
             `${rel}:${node.loc.start.line}: ${node.type} of ${rootIdentifierName(node.callee)}`
           );
           return;
         }
-        if (isBareCallOf(node, 'setTimeout') || isBareCallOf(node, 'setInterval')) {
+        if (
+          isBareCallOf(node, 'setTimeout', aliasMap) ||
+          isBareCallOf(node, 'setInterval', aliasMap)
+        ) {
           // The "first argument" check must use the LOGICAL arg list
           // -- after .call/.apply/.bind wrappers strip the thisArg.
           // `setTimeout.call(window, "code", 0)` has `node.arguments
@@ -408,10 +504,10 @@ describe('JS architectural fitness functions', () => {
     // unwraps to a method call on the `console` identifier.
     const expectedConsoleCalls = new Map([['app/static/two-click.js', 1]]);
     const offenders = [];
-    for (const { rel, ast } of PARSED) {
+    for (const { rel, ast, aliasMap } of PARSED) {
       let count = 0;
       walkAST(ast, (node) => {
-        if (isMethodCallOn(node, 'console')) count++;
+        if (isMethodCallOn(node, 'console', aliasMap)) count++;
       });
       const expected = expectedConsoleCalls.get(rel) ?? 0;
       if (count !== expected) {
@@ -450,10 +546,13 @@ describe('JS architectural fitness functions', () => {
       'app/static/sender/url-cache.js',
     ]);
     const offenders = [];
-    for (const { rel, ast } of PARSED) {
+    for (const { rel, ast, aliasMap } of PARSED) {
       if (allowlist.has(rel)) continue;
       walkAST(ast, (node) => {
-        if (isMethodCallOn(node, 'localStorage') || isMethodCallOn(node, 'sessionStorage')) {
+        if (
+          isMethodCallOn(node, 'localStorage', aliasMap) ||
+          isMethodCallOn(node, 'sessionStorage', aliasMap)
+        ) {
           const root = rootIdentifierName(unwrapChain(node.callee));
           offenders.push(`${rel}:${node.loc.start.line}: ${root}`);
         }
@@ -493,9 +592,9 @@ describe('JS architectural fitness functions', () => {
     // holding an absolute URL slips through. Catching every literal
     // is the high-leverage win; runtime CSP catches the rest.
     const offenders = [];
-    for (const { rel, ast } of PARSED) {
+    for (const { rel, ast, aliasMap } of PARSED) {
       walkAST(ast, (node) => {
-        if (!isBareCallOf(node, 'fetch')) return;
+        if (!isBareCallOf(node, 'fetch', aliasMap)) return;
         // Match both regular string literals and template literals;
         // for templates, the static prefix is the cooked text of the
         // first quasi (the part before any `${...}`). A template
