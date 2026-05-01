@@ -295,17 +295,28 @@ def _resolve_import_module(node: ast.ImportFrom, file_path: pathlib.Path) -> str
 
 
 def _sanctioned_totp_getter_aliases(tree: ast.AST, file_path: pathlib.Path) -> set[str]:
-    """Local names that resolve to a sanctioned getter via direct
-    import FROM THE DATA LAYER. Walks the module's `from <X> import
-    <getter>` / `from <X> import <getter> as <alias>` statements,
-    resolves relative imports against `file_path`'s package, and
+    """Module-scope names that resolve to a sanctioned getter via direct
+    import FROM THE DATA LAYER. Walks ONLY the module's top-level
+    `from <X> import <getter>` / `... as <alias>` statements --
+    function-local imports are scope-bound and would polluteon other
+    functions' alias sets if collected here.
+
+    Resolves relative imports against `file_path`'s package and
     accepts only those whose absolute module is in
     `_DATA_LAYER_ABSOLUTE_MODULES`. Used so `<name>(uid)` calls are
-    accepted only when `<name>` was actually imported from the data
-    layer, not when an unrelated module (sibling `users.py`, third-
-    party helper) happens to export the same symbol name."""
+    accepted only when `<name>` was actually imported at module scope
+    from the data layer, not when an unrelated module (sibling
+    `users.py`, third-party helper) happens to export the same name.
+
+    Module-level `try: from ... import X except ImportError:` blocks
+    are not specifically supported -- we only walk `tree.body` directly.
+    Such blocks would need a small extension that descends through
+    top-level `Try` / `If` containers; the codebase doesn't use them
+    for the data-layer imports we care about."""
     names: set[str] = set()
-    for node in ast.walk(tree):
+    if not isinstance(tree, ast.Module):
+        return names
+    for node in tree.body:
         if not isinstance(node, ast.ImportFrom):
             continue
         resolved = _resolve_import_module(node, file_path)
@@ -531,6 +542,20 @@ def _scope_totp_reads_are_quarantined(
     # bypass -- the Name still appears in the (immutable) module-level
     # alias set even though the local name resolves elsewhere.
     local_sanctioned = set(sanctioned_aliases)
+    # Function parameters shadow module-level imports of the same name
+    # for the body of this function. `def f(get_user_with_totp_by_id):
+    # ...` makes the parameter resolve to whatever the caller passed,
+    # not to the data-layer getter, so calls like
+    # `get_user_with_totp_by_id(uid)` inside `f` are NOT sanctioned.
+    # Revoke every parameter name from the local copy upfront. Covers
+    # positional-only, regular, kw-only, *args, and **kwargs.
+    args = scope.args
+    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+        local_sanctioned.discard(arg.arg)
+    if args.vararg is not None:
+        local_sanctioned.discard(args.vararg.arg)
+    if args.kwarg is not None:
+        local_sanctioned.discard(args.kwarg.arg)
     for stmt in scope.body:
         if not _stmt_reads_are_quarantined(stmt, trusted, local_sanctioned):
             return False
