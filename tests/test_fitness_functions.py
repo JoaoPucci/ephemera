@@ -51,11 +51,26 @@ def _walk_local(node: ast.AST):
             queue.append((child, False))
 
 
-def _string_constants_outside_docstrings(tree: ast.AST):
-    """Yield every ast.Constant string node that is NOT a module / function
-    / class docstring. Comments are already stripped by ast.parse, so the
-    remaining set is the strings that show up in real expressions -- SQL
-    queries, error messages, format templates, etc."""
+def _string_text_outside_docstrings(tree: ast.AST):
+    """Yield `(text, lineno)` for every string-shaped expression that is
+    NOT a module / function / class docstring. Covers two AST shapes:
+
+      - `ast.Constant` str values: regular `"..."` / `'...'` literals.
+      - `ast.JoinedStr`: f-strings. The yielded text is the concatenation
+        of the f-string's literal segments (`Constant` parts of the
+        `JoinedStr.values` list); interpolated `{expr}` parts are
+        skipped, since static checks like the SQL-keyword scan only
+        need to see the literal SQL skeleton, not whatever a runtime
+        expression might substitute.
+
+    Without the JoinedStr arm, SQL written as
+    `f"INSERT INTO analytics_events ({cols}) VALUES (...)"` would skip
+    the analytics-table guard entirely (the table name lives inside
+    the literal portion of an f-string, not in any plain ast.Constant
+    string).
+
+    Comments are already stripped by ast.parse, so the remaining set
+    is the strings that appear in real expressions."""
     docstring_ids: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(
@@ -75,7 +90,15 @@ def _string_constants_outside_docstrings(tree: ast.AST):
             and isinstance(node.value, str)
             and id(node) not in docstring_ids
         ):
-            yield node
+            yield (node.value, node.lineno)
+        elif isinstance(node, ast.JoinedStr):
+            parts = [
+                v.value
+                for v in node.values
+                if isinstance(v, ast.Constant) and isinstance(v.value, str)
+            ]
+            if parts:
+                yield ("".join(parts), node.lineno)
 
 
 # ---------------------------------------------------------------------------
@@ -206,17 +229,45 @@ _WITH_TOTP_GETTERS = frozenset(
 )
 
 
+# Module specs that resolve to the data-layer source of the sanctioned
+# getters. Absolute paths cover `from app.models import ...` (re-export
+# via the package __init__) and `from app.models.users import ...`.
+# Relative paths cover `from ..models[.users] import ...` from files in
+# app/auth/ + app/admin/, plus `from .users import ...` from inside
+# app/models/. A future re-export through a different module would need
+# adding here explicitly -- the closed list keeps the trust surface
+# small.
+_DATA_LAYER_ABSOLUTE_MODULES = frozenset({"app.models", "app.models.users"})
+_DATA_LAYER_RELATIVE_MODULES = frozenset({"models", "models.users", "users"})
+
+
+def _import_resolves_to_data_layer(node: ast.ImportFrom) -> bool:
+    """True iff `node` is a `from ... import ...` statement whose source
+    module is the data layer (app.models or app.models.users), via
+    either an absolute import or a relative one whose terminal segments
+    match. Without this, `from helpers import get_user_with_totp_by_id`
+    would silently accept a same-named helper from an unrelated module
+    and bypass the quarantine."""
+    mod = node.module or ""
+    if node.level == 0:
+        return mod in _DATA_LAYER_ABSOLUTE_MODULES
+    return mod in _DATA_LAYER_RELATIVE_MODULES
+
+
 def _sanctioned_totp_getter_aliases(tree: ast.AST) -> set[str]:
     """Local names that resolve to a sanctioned getter via direct
-    import. Walks the module's `from <X> import <getter>` /
-    `from <X> import <getter> as <alias>` statements (and the
-    matching plain `import` shapes are exotic enough to ignore).
-    Used so `<name>(uid)` calls are accepted only when `<name>` was
-    actually imported from the data layer, not when an unrelated
-    function happens to share the symbol's text."""
+    import FROM THE DATA LAYER. Walks the module's `from <X> import
+    <getter>` / `from <X> import <getter> as <alias>` statements and
+    accepts only those whose source module passes
+    `_import_resolves_to_data_layer`. Used so `<name>(uid)` calls are
+    accepted only when `<name>` was actually imported from the data
+    layer, not when an unrelated module happens to export the same
+    symbol name."""
     names: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
+            continue
+        if not _import_resolves_to_data_layer(node):
             continue
         for alias in node.names:
             if alias.name in _WITH_TOTP_GETTERS:
@@ -367,9 +418,9 @@ def test_analytics_events_table_has_a_single_writer():
         if rel in allowlist:
             continue
         tree = ast.parse(py.read_text())
-        for node in _string_constants_outside_docstrings(tree):
-            if sql_ref.search(node.value):
-                offenders.append(f"{rel}:{node.lineno}")
+        for text, lineno in _string_text_outside_docstrings(tree):
+            if sql_ref.search(text):
+                offenders.append(f"{rel}:{lineno}")
                 break
     assert not offenders, (
         "SQL operations on `analytics_events` must live inside the data-"
