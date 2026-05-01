@@ -521,8 +521,31 @@ function unwrapBindValue(node) {
 // If `newCallee` is itself a wrapped CallExpression, recurse into it
 // to keep peeling. Returns the deepest underlying function, after
 // also collapsing any trailing `.bind(...)` chain on the value.
+//
+// Two distinct shapes a Call here can take:
+//
+//   - Bind value: `fetch.bind(window)` -- a Call whose callee is
+//     `<fn>.bind`. As a value, this evaluates to the bound function.
+//     `effectiveCall` would describe this Call as a call TO the bind
+//     method, returning `<fn>.bind` Member as the callee, which is
+//     not what we want. `peelBindChain` already iterates
+//     `unwrapBindValue` and reduces it to the underlying `<fn>`, so
+//     try that first when the Call is a bind value.
+//   - Wrapped Call: `Reflect.apply(...)`, `<fn>.call(...)`,
+//     `<fn>.apply(...)`, `<fn>.bind(...)(args)` -- recurse via
+//     `effectiveCall` to recover the logical callee, then collapse
+//     any trailing bind chain.
+//
+// Without the bind-value branch, composed wrappers like
+// `fetch.bind(window).call(window, "https://evil")` slip through:
+// `peelCallOrApply` hands `fetch.bind(window)` (Call) to this
+// helper, the recursive `effectiveCall` returns the `fetch.bind`
+// Member, `peelBindChain` on a Member is a no-op, and
+// `chainEndsWithName(..., 'fetch')` fails downstream.
 function resolveWrappedCallee(newCallee, depth, aliasMap) {
   if (newCallee?.type === 'CallExpression') {
+    const bindPeeled = peelBindChain(newCallee);
+    if (bindPeeled !== newCallee) return bindPeeled;
     const inner = effectiveCall(newCallee, depth + 1, aliasMap);
     if (inner) return peelBindChain(inner.callee);
   }
