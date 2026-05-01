@@ -406,33 +406,61 @@ def _stmt_reads_are_quarantined(
 def _update_trust_from_stmt(
     stmt: ast.AST, trusted: set[str], sanctioned_aliases: set[str]
 ) -> None:
-    """Walk every `Assign` reachable in `stmt` (including those inside
-    `if` / `try` / loop branches) and update `trusted` in place: a
-    sanctioned-or-None RHS adds the target name; any other RHS REVOKES
-    the target name. Linear ordering inside the function body is the
-    caller's responsibility (process statements in source order); this
-    helper only handles the within-statement update.
+    """Walk every binding-introducing node reachable in `stmt`
+    (including those inside `if` / `try` / loop branches) and update
+    `trusted` in place: a sanctioned-or-None RHS adds the target name;
+    any other RHS REVOKES the target name. Linear ordering inside the
+    function body is the caller's responsibility (process statements
+    in source order); this helper only handles the within-statement
+    update.
 
-    Catches the basic reassignment-bypass `user = sanctioned();
-    user = other(); user["totp_secret"]` -- the second assign revokes
-    `user` from `trusted`, so the subsequent read fails the receiver
-    check. Branch-specific reassignment (`if cond: user = other()`)
-    is also caught because `_walk_local` descends into branch bodies
-    when collecting Assigns; this is intentionally aggressive (a
+    Two binding shapes count:
+
+      Assign:     `user = expr`              -- targets is a list
+                                                (chained `a = b = expr`
+                                                style); each target's
+                                                Name is bound.
+      AnnAssign:  `user: dict = expr`        -- annotated reassignment.
+                                                Single target; same
+                                                trust effect as Assign
+                                                when `value` is set.
+                                                A bare `user: dict`
+                                                with no value doesn't
+                                                actually bind at
+                                                runtime, so it's
+                                                ignored.
+
+    Catches reassignment-bypasses in either form:
+      `user = sanctioned(); user = other(); user["totp_secret"]`
+      `user = sanctioned(); user: dict = other(); user["totp_secret"]`
+
+    Branch-specific reassignment (`if cond: user = other()`) is also
+    caught because `_walk_local` descends into branch bodies when
+    collecting these nodes; this is intentionally aggressive (a
     branch that REASSIGNS to something un-trusted revokes trust for
     the rest of the function, even if at runtime the branch wouldn't
-    have run -- the conservative direction)."""
+    have run -- the conservative direction). AugAssign (`user += x`)
+    and walrus assignments don't appear in this codebase and are not
+    handled."""
     for node in _walk_local(stmt):
-        if not isinstance(node, ast.Assign):
-            continue
-        sanctioned = _is_sanctioned_or_none_source(node.value, sanctioned_aliases)
-        for target in node.targets:
-            if not isinstance(target, ast.Name):
+        if isinstance(node, ast.Assign):
+            sanctioned = _is_sanctioned_or_none_source(node.value, sanctioned_aliases)
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                if sanctioned:
+                    trusted.add(target.id)
+                else:
+                    trusted.discard(target.id)
+        elif isinstance(node, ast.AnnAssign):
+            if node.value is None:
                 continue
-            if sanctioned:
-                trusted.add(target.id)
+            if not isinstance(node.target, ast.Name):
+                continue
+            if _is_sanctioned_or_none_source(node.value, sanctioned_aliases):
+                trusted.add(node.target.id)
             else:
-                trusted.discard(target.id)
+                trusted.discard(node.target.id)
 
 
 def _scope_totp_reads_are_quarantined(
