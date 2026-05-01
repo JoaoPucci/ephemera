@@ -1,6 +1,8 @@
 """Tests for security headers, rate limiting, origin validation."""
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 SEC_HEADERS = {
     "content-security-policy",
@@ -733,4 +735,115 @@ def test_routes_do_not_log_tracebacks_or_grab_raw_body():
         "Banned logging/body-capture patterns in app/routes/:\n  "
         + "\n  ".join(offenders)
         + "\n(See tests/test_security.py for the rationale.)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Property-based tests on the session cookie + Origin check
+#
+# Session cookies are signed via itsdangerous.TimestampSigner over a
+# `<user_id>:<session_generation>` payload. The contract is:
+#   - any (uid, gen) integer pair round-trips: reading parses back to
+#     the same pair
+#   - any non-trivially-tampered cookie reads as None
+#   - a cookie issued with one secret_key cannot be read with another
+# These properties are independent of HTTP integration -- they pin the
+# behaviour of the bare helper functions, the layer cosmic-ray's
+# mutation runs target. Cheap (HMAC, microseconds per run); higher
+# example counts are fine.
+# ---------------------------------------------------------------------------
+
+
+@given(
+    user_id=st.integers(min_value=0, max_value=2**31 - 1),
+    generation=st.integers(min_value=0, max_value=2**31 - 1),
+)
+@settings(
+    max_examples=200,
+    # tmp_db_path is function-scoped; hypothesis would otherwise warn
+    # that the fixture isn't re-run per example. Stable per-test
+    # secret_key across examples is exactly what we want for a
+    # round-trip property -- we sign and verify with the same key.
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_property_session_cookie_roundtrips_any_id_pair(
+    tmp_db_path, user_id: int, generation: int
+):
+    """For any pair of non-negative integers fitting in 32 bits, the cookie
+    minted by make_session_cookie reads back as the exact same pair via
+    read_session_cookie. Pins that the payload encoding doesn't truncate,
+    re-order, or coerce values."""
+    from app import dependencies
+
+    raw = dependencies.make_session_cookie(user_id, generation)
+    parsed = dependencies.read_session_cookie(raw)
+    assert parsed == (user_id, generation)
+
+
+@given(
+    user_id=st.integers(min_value=1, max_value=10_000),
+    generation=st.integers(min_value=0, max_value=10_000),
+    flip_index=st.integers(min_value=0, max_value=63),
+)
+@settings(
+    max_examples=50,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_property_session_cookie_rejects_byte_flip(
+    tmp_db_path, user_id: int, generation: int, flip_index: int
+):
+    """For any cookie, flipping a single character somewhere in its body
+    causes read_session_cookie to return None (signature verification
+    fails). Pins the integrity guarantee of TimestampSigner: an attacker
+    who alters even one byte cannot make the cookie pass."""
+    from app import dependencies
+
+    raw = dependencies.make_session_cookie(user_id, generation)
+    if flip_index >= len(raw):
+        return  # generated index past the cookie length; skip cleanly
+    # XOR one character to perturb the cookie. Choose a printable swap
+    # so the result stays string-coercible even though it's no longer
+    # a valid signature.
+    chars = list(raw)
+    chars[flip_index] = chr(ord(chars[flip_index]) ^ 0x01)
+    tampered = "".join(chars)
+    if tampered == raw:
+        return  # XOR happened to land on a non-character; skip
+    assert dependencies.read_session_cookie(tampered) is None
+
+
+@given(
+    raw=st.text(
+        alphabet=st.characters(min_codepoint=0x21, max_codepoint=0x7E),
+        max_size=200,
+    ),
+)
+@settings(
+    max_examples=500,
+    # tmp_db_path is function-scoped; hypothesis would otherwise warn
+    # that the fixture isn't re-run per example. Stable per-test
+    # secret_key across examples is exactly what we want for a
+    # round-trip property -- we sign and verify with the same key.
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_property_session_cookie_rejects_arbitrary_strings(tmp_db_path, raw: str):
+    """For any random printable-ASCII string that we did NOT mint, the
+    cookie reader returns None. Catches edge cases: empty string,
+    string with colons but no signature, signed-looking string with
+    garbage HMAC. Random strings have astronomically-low odds of
+    happening to forge a valid HMAC against the test's secret key
+    (the signature space is 2^256 wide); a non-None return means
+    EITHER hypothesis hit such a 1-in-2^N collision (effectively
+    never) OR a regression dropped signature verification entirely
+    -- which is exactly what we want this property to catch.
+    Asserting None strictly is the load-bearing check; a tuple-of-
+    ints assertion would be vacuous because read_session_cookie
+    constructs the tuple via int() casts unconditionally."""
+    from app import dependencies
+
+    parsed = dependencies.read_session_cookie(raw)
+    assert parsed is None, (
+        f"non-minted string {raw!r} parsed as {parsed!r} -- "
+        "either signature verification dropped, or hypothesis hit a "
+        "1-in-2^N HMAC collision (file an issue if reproducible)"
     )

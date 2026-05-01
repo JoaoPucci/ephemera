@@ -5,6 +5,8 @@ import time
 from datetime import UTC
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app import auth, models
 
@@ -790,3 +792,76 @@ def test_recovery_code_lookup_is_constant_time_across_consumption_state(
         f"consumption-state leak at k=10: baseline {baseline_checkpws} vs "
         f"all-used {all_used_checkpws} -- must match."
     )
+
+
+# ---------------------------------------------------------------------------
+# Property-based tests
+#
+# Bcrypt at cost 12 is ~250ms per hash, so these run with low example
+# counts (5-15) to keep the bcrypt-bound tests under a few seconds total.
+# The hypothesis value is shape coverage -- empty strings, NUL bytes,
+# unicode passwords, max-length inputs -- not statistical density.
+# ---------------------------------------------------------------------------
+
+
+# Bcrypt's input limit is 72 BYTES, not characters. Hypothesis's
+# st.text(max_size=N) caps characters, so a single 4-byte UTF-8
+# character (emoji, rare CJK extension) can put the encoded length
+# past 72 bytes -- bcrypt's behaviour past that point varies by
+# binding (silent truncation, ValueError, etc.), and the property
+# would intermittently fail on a bcrypt artefact rather than an
+# auth regression. Filter to keep encoded length within bcrypt's
+# documented cap.
+_password_strategy = st.text(min_size=1, max_size=72).filter(
+    lambda s: 0 < len(s.encode("utf-8")) <= 72
+)
+
+
+@given(password=_password_strategy)
+@settings(max_examples=10, deadline=None)
+def test_property_password_roundtrips_for_any_string(password: str):
+    """For any non-empty string whose UTF-8 encoding fits in bcrypt's
+    72-byte input cap, hash_password followed by verify_password with
+    the same value returns True. Catches edge cases bcrypt's own
+    input handling has historically had: NUL bytes (truncates the
+    password silently in some bindings), unicode (encoding round-
+    trip), trailing whitespace. Cap at 10 examples because each
+    round-trip is one bcrypt-cost-12 hash + one bcrypt verify
+    (~500ms total)."""
+    h = auth.hash_password(password)
+    assert auth.verify_password(password, h) is True
+
+
+@given(password=_password_strategy, other=_password_strategy)
+@settings(max_examples=10, deadline=None)
+def test_property_password_rejects_anything_but_the_original(password: str, other: str):
+    """For any pair where `password != other` (both within bcrypt's
+    72-byte input cap), verify_password(other, hash_password(password))
+    is False. Pins that bcrypt isn't silently accepting common-prefix
+    collisions or unicode-equivalence variants that the spec doesn't
+    grant. Skips cleanly when hypothesis happens to generate equal
+    values (the property doesn't apply)."""
+    if password == other:
+        return
+    h = auth.hash_password(password)
+    assert auth.verify_password(other, h) is False
+
+
+@given(_=st.integers(min_value=0, max_value=2**31 - 1))
+@settings(max_examples=20, deadline=None)
+def test_property_totp_secret_is_uniformly_base32(_: int):
+    """For any call (the integer input is just hypothesis's generator
+    handle -- the function takes no args), generate_totp_secret returns
+    a 32-character base32-decodable string. Pins that the secret can
+    always be ingested by an authenticator app and never silently
+    contains characters outside the base32 alphabet (which would be a
+    crash on the user's phone, not a server-side error)."""
+    import base64
+
+    secret = auth.generate_totp_secret()
+    assert isinstance(secret, str)
+    assert len(secret) == 32
+    # base32 decodes cleanly. Any character outside [A-Z2-7=] would
+    # raise binascii.Error here.
+    decoded = base64.b32decode(secret)
+    assert len(decoded) == 20  # 32 base32 chars -> 20 bytes
