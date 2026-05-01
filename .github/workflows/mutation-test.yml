@@ -82,6 +82,18 @@ jobs:
         # is just the candidate enumeration. Fast (seconds).
         run: cosmic-ray init cosmic-ray.toml session.sqlite
 
+      - name: Baseline (unmutated test suite must be green)
+        # Cosmic-ray's `baseline` runs the configured test-command
+        # against the un-mutated codebase and exits non-zero if it
+        # fails. Without this gate, a transient or flaky pre-
+        # existing failure would make every mutant get reported as
+        # "killed" because the suite is already failing for an
+        # unrelated reason -- the weekly report would look healthy
+        # while being meaningless. Failing here is the right
+        # answer: better a red baseline than a green-looking
+        # report with no mutation signal.
+        run: cosmic-ray baseline cosmic-ray.toml
+
       - name: Run cosmic-ray (mutate + test)
         # Walks the candidate set in `session.sqlite`, applies each
         # mutation in turn, runs the configured test-command in a
