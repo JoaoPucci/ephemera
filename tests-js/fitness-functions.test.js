@@ -126,23 +126,41 @@ describe('JS architectural fitness functions', () => {
   // -------------------------------------------------------------------
   // 2. No console.* outside the narrow operator-debug allowlist
   // -------------------------------------------------------------------
-  it('forbids console.* outside the operator-debug allowlist', () => {
+  it('caps console.* calls per file at the documented count', () => {
     // `console.log` / `console.error` / etc. land in browser devtools
     // and, depending on the user's setup, in any extension that taps
     // the console. The sender / reveal flow handles plaintext
     // (passphrase, content); a stray `console.log` there pours
     // secrets into a surface the user can't audit.
     //
-    // Allowlist: app/static/two-click.js carries one legitimate
-    // `console.error` for a programming error inside the
-    // two-click-confirm helper's onConfirm callback -- the kind of
-    // bug a developer needs to see, not a runtime user-facing signal.
-    // Any other file adding a `console.*` call should explain why and
-    // add itself to the allowlist below, rather than landing the call
-    // by reflex.
-    const allowlist = new Set(['app/static/two-click.js']);
-    const offenders = findOffenders(/\bconsole\s*\.\s*\w+\s*\(/g, allowlist);
-    expect(offenders, `Non-allowlisted console.* calls:\n  ${offenders.join('\n  ')}`).toEqual([]);
+    // Default per-file budget is zero. The single documented
+    // exception is app/static/two-click.js, which carries one
+    // legitimate `console.error` for a programming error inside the
+    // two-click-confirm helper's onConfirm callback -- a developer
+    // signal, not user-facing. The check pins that file's budget at
+    // EXACTLY 1: a future second `console.log(secret)` added in the
+    // same file would push the count to 2 and trip this test, even
+    // though the file is "allowlisted." Adjusting the budget is a
+    // deliberate decision with diff-visibility, not a free pass.
+    //
+    // Adding a console.* anywhere else, or adding a second one in
+    // two-click.js, fails this test. The fix is either (a) remove
+    // the call, or (b) update the budget here with a one-line
+    // rationale for the new allowance.
+    const expectedConsoleCalls = new Map([['app/static/two-click.js', 1]]);
+    const offenders = [];
+    for (const file of JS_FILES) {
+      const rel = relPath(file);
+      const text = stripBlockComments(readFileSync(file, 'utf8'));
+      const count = [...text.matchAll(/\bconsole\s*\.\s*\w+\s*\(/g)].length;
+      const expected = expectedConsoleCalls.get(rel) ?? 0;
+      if (count !== expected) {
+        offenders.push(`${rel}: ${count} console.* call(s), expected ${expected}`);
+      }
+    }
+    expect(offenders, `console.* per-file budget mismatch:\n  ${offenders.join('\n  ')}`).toEqual(
+      []
+    );
   });
 
   // -------------------------------------------------------------------
@@ -227,10 +245,16 @@ describe('JS architectural fitness functions', () => {
     // textContent / DOM construction doesn't fit, not assume
     // innerHTML is the fast path.
     //
-    // The pattern `[+\-*/%&|^]?=(?!=)` matches `=`, `+=`, `-=`, etc.
-    // but excludes equality comparisons (`==`, `===`).
+    // The operator group covers every JS compound-assignment shape so
+    // modern logical-assignment forms (`||=`, `&&=`, `??=`) and shift /
+    // exponent compounds (`**=`, `<<=`, `>>=`, `>>>=`) can't bypass the
+    // gate. The trailing `=(?!=)` still rejects equality comparisons
+    // (`==`, `===`).
     const allowlist = new Set(['app/static/sender/tracked-list.js']);
-    const offenders = findOffenders(/\.(?:inner|outer)HTML\b\s*[+\-*/%&|^]?=(?!=)/g, allowlist);
+    const offenders = findOffenders(
+      /\.(?:inner|outer)HTML\b\s*(?:\*\*|<<|>>>?|&&|\|\||\?\?|[+\-*/%&|^])?=(?!=)/g,
+      allowlist
+    );
     expect(
       offenders,
       `Non-allowlisted innerHTML/outerHTML assignments:\n  ${offenders.join('\n  ')}`
