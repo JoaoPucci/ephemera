@@ -456,29 +456,35 @@ def _kwargs_contain_mutating_method(keywords: list[ast.keyword]) -> bool:
     """True iff `keywords` (a Call's `.keywords` list) carries
     `methods=...` that we can't statically prove is purely read-only.
 
-    FastAPI accepts `methods` as any `Sequence[str]`. We can introspect
-    iterable literals (`["POST"]`, `("PUT",)`, `{"PATCH"}`) and decide
-    based on what's inside, but variable references (`methods=
-    MUTATING_METHODS`) and computed expressions can't be resolved
-    statically. Treating those as mutating is the conservative default:
-    a future variable-driven registration site that turns out to be
-    read-only can be allowlisted explicitly; the alternative -- silently
-    skipping anything non-literal -- leaves a real CSRF-gate bypass.
+    FastAPI accepts `methods` as any `Sequence[str]`. The conservative
+    posture is "if I can't see all the verbs, treat it as mutating":
+
+      methods=["GET"]                  -- pure-literal read-only -> False
+      methods=["POST"]                 -- literal mutating verb -> True
+      methods=("PATCH",)               -- True (literal mutating)
+      methods=MUTATING_METHODS         -- non-literal container -> True
+      methods=[*MUTATING_METHODS]      -- literal container, non-literal
+                                          element (Starred) -> True
+      methods=[method_name]            -- Name element -> True
+      methods=["GET", *MUTATING]       -- partially literal -> True
+                                          (the spread could contain POST)
+
+    A future literal-only `methods=[READ_ONLY_LIST]` constant that
+    legitimately hides a read-only set can be allowlisted explicitly;
+    silently skipping any unresolvable element leaves a CSRF bypass.
 
     Used by both the `api_route(...)` decorator detector and the
     imperative `add_api_route(...)` registration scan."""
     for kw in keywords:
         if kw.arg != "methods":
             continue
-        # Non-literal expression -- assume mutating.
         if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
             return True
         for elt in kw.value.elts:
-            if (
-                isinstance(elt, ast.Constant)
-                and isinstance(elt.value, str)
-                and elt.value.lower() in _MUTATING_VERBS
-            ):
+            if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+                # Starred, Name, computed expression -- can't introspect.
+                return True
+            if elt.value.lower() in _MUTATING_VERBS:
                 return True
     return False
 
