@@ -216,10 +216,14 @@ def test_state_mutating_routes_all_carry_origin_gate():
     handler regardless of whether anyone wrote a request-level test.
     """
     offenders: list[str] = []
+    # Both sync `def` and `async def` route handlers are valid FastAPI
+    # shapes -- e.g. app/routes/sender.py::create_secret is async. Walk
+    # both AST node kinds so a future async handler can't slip past the
+    # gate by virtue of its definition style.
     for py in _py_files(APP_DIR):
         tree = ast.parse(py.read_text())
         for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             mutating_decos = [
                 d for d in node.decorator_list if _is_state_mutating_route_decorator(d)
