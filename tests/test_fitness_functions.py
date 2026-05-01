@@ -285,10 +285,34 @@ def test_no_print_calls_in_request_path_or_data_layer():
 # ---------------------------------------------------------------------------
 
 
+def _read_module_int_constants(path: pathlib.Path) -> dict[str, int]:
+    """Parse `path` as Python and return module-level `NAME = <int_literal>`
+    bindings. Pure source read -- never imports the module, so this stays
+    a true static check that doesn't run app/__init__.py or pull in
+    FastAPI / auth submodules just to read four integers."""
+    tree = ast.parse(path.read_text())
+    out: dict[str, int] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, int):
+            out[target.id] = node.value.value
+    return out
+
+
 def test_security_constants_are_not_silently_weakened():
     """Pin the deliberate tuning knobs in app/auth/_core.py so a future
     "tests are too slow, drop bcrypt cost" or "let's accept 4-digit TOTP"
     diff fails in source rather than at release.
+
+    Source-level read (no import): the source-of-truth is the assignment
+    in `_core.py`, not the runtime-resolved value. Importing the module
+    would also execute `app/__init__.py` and the auth package, so
+    unrelated wiring failures could trip a check whose contract is
+    "are these four integer constants still at their pinned values."
 
     - BCRYPT_ROUNDS = 12: ~250ms/hash, deliberate (see cosmic-ray.toml
       timeout note + app/auth/password.py). Lower rounds ship a weaker
@@ -301,22 +325,23 @@ def test_security_constants_are_not_silently_weakened():
       authenticate()'s timing-equalization; changing it without updating
       that loop reintroduces the unknown-user timing oracle.
     """
-    from app.auth import _core as auth_core
+    constants = _read_module_int_constants(APP_DIR / "auth" / "_core.py")
 
-    assert auth_core.BCRYPT_ROUNDS >= 12, (
-        f"BCRYPT_ROUNDS dropped to {auth_core.BCRYPT_ROUNDS}; "
+    bcrypt_rounds = constants.get("BCRYPT_ROUNDS")
+    assert bcrypt_rounds is not None and bcrypt_rounds >= 12, (
+        f"BCRYPT_ROUNDS dropped to {bcrypt_rounds}; "
         "12 is the floor -- weakening this ships a worse hash to every user"
     )
-    assert auth_core.TOTP_DIGITS == 6, (
-        f"TOTP_DIGITS changed to {auth_core.TOTP_DIGITS}; RFC 6238 default "
-        "is 6 and every provisioned authenticator app expects it"
+    assert constants.get("TOTP_DIGITS") == 6, (
+        f"TOTP_DIGITS changed to {constants.get('TOTP_DIGITS')}; RFC 6238 "
+        "default is 6 and every provisioned authenticator app expects it"
     )
-    assert auth_core.TOTP_INTERVAL == 30, (
-        f"TOTP_INTERVAL changed to {auth_core.TOTP_INTERVAL}s; RFC 6238 "
+    assert constants.get("TOTP_INTERVAL") == 30, (
+        f"TOTP_INTERVAL changed to {constants.get('TOTP_INTERVAL')}s; RFC 6238 "
         "default is 30s and every provisioned authenticator app expects it"
     )
-    assert auth_core.RECOVERY_CODE_COUNT == 10, (
-        f"RECOVERY_CODE_COUNT changed to {auth_core.RECOVERY_CODE_COUNT}; "
+    assert constants.get("RECOVERY_CODE_COUNT") == 10, (
+        f"RECOVERY_CODE_COUNT changed to {constants.get('RECOVERY_CODE_COUNT')}; "
         "the timing-equalization loop in app/auth/login.py is sized to 10. "
         "Changing one without the other reintroduces a username-existence "
         "timing oracle."
