@@ -131,24 +131,49 @@ def _autherror_local_names(tree: ast.AST) -> set[str]:
     # of `tree.body` so a function-local rebind like
     # `def login_handler(): Local = AuthError; raise Local("wrong
     # password")` also feeds the alias set. Iterated to fixed point
-    # so chains (`A1 = AuthError; A2 = A1`) propagate. Adding aliases
-    # only EXPANDS the recognised set; it never narrows it -- a
-    # `Local = Something_Unrelated` doesn't pull `Something_Unrelated`
-    # into `names` (LHS is added only when RHS is already in `names`),
-    # so the asymmetric expansion is safe even when scopes nest.
+    # so chains (`A1 = AuthError; A2 = A1`) propagate. Two RHS shapes
+    # propagate the alias:
+    #
+    #   Name:      `Local = AuthError`              -- bare reference
+    #   Attribute: `Local = auth_core.AuthError`    -- module-qualified
+    #              reference; recognise any `<X>.<attr>` whose final
+    #              attr is already in `names`. Conservative direction:
+    #              we don't verify what `<X>` resolves to, so a
+    #              `Local = unrelated.AuthError` would also propagate
+    #              (the canonical-message check would then over-flag
+    #              an unrelated `Local("...")`). The realistic
+    #              codebase doesn't have such a rebind, and over-
+    #              flagging matches the rest of the test posture.
+    #
+    # Adding aliases only EXPANDS the recognised set; it never
+    # narrows it -- `Local = Something_Unrelated` (Name with id not
+    # in `names`) doesn't pull `Something_Unrelated` into the set.
     changed = True
     while changed:
         changed = False
         for stmt in ast.walk(tree):
             if not isinstance(stmt, ast.Assign):
                 continue
-            if not (isinstance(stmt.value, ast.Name) and stmt.value.id in names):
+            if not _value_resolves_to_known_name(stmt.value, names):
                 continue
             for target in stmt.targets:
                 if isinstance(target, ast.Name) and target.id not in names:
                     names.add(target.id)
                     changed = True
     return names
+
+
+def _value_resolves_to_known_name(value: ast.expr, names: set[str]) -> bool:
+    """True iff `value` is a Name or Attribute whose terminal label is
+    already in `names`. Used by the AuthError alias propagator: a
+    `Local = AuthError` and a `Local = auth_core.AuthError` both
+    bind `Local` to the AuthError class; either RHS shape should
+    feed the alias set."""
+    if isinstance(value, ast.Name):
+        return value.id in names
+    if isinstance(value, ast.Attribute):
+        return value.attr in names
+    return False
 
 
 def _is_autherror_construction(call: ast.Call, autherror_names: set[str]) -> bool:
@@ -506,24 +531,54 @@ def _apply_seq(
     return t, a
 
 
+def _names_bound_by_target(target: ast.expr) -> list[str]:
+    """Yield every Name id bound by `target`. Walks Tuple / List
+    unpacking patterns and Starred elements (`*rest`) recursively;
+    returns Identifier-bound names only. Subscript and Attribute
+    targets (`obj[key] = ...`, `obj.attr = ...`) bind no local
+    names and are skipped."""
+    out: list[str] = []
+    if isinstance(target, ast.Name):
+        out.append(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            out.extend(_names_bound_by_target(element))
+    elif isinstance(target, ast.Starred):
+        out.extend(_names_bound_by_target(target.value))
+    return out
+
+
 def _apply_assign(
     stmt: ast.Assign, trusted: set[str], aliases: set[str], models_shadowed: bool
 ) -> tuple[set[str], set[str]]:
-    """Sanctioned RHS adds each Name target to `trusted`; non-sanctioned
-    RHS discards them. Discarding the target from `aliases` too revokes
-    a function-local rebind of an imported sanctioned-getter name --
-    `get_user_with_totp_by_id = other_thing` shadows the import in
-    this scope so downstream calls of that name no longer count."""
+    """Sanctioned RHS adds each top-level Name target to `trusted`;
+    non-sanctioned RHS discards every name bound by the assignment.
+    Discarding from `aliases` too revokes a function-local rebind of
+    an imported sanctioned-getter name -- `get_user_with_totp_by_id =
+    other_thing` shadows the import in this scope so downstream calls
+    of that name no longer count.
+
+    Tuple / list unpacking (`user, _ = call(), None`) revokes trust
+    for every Name in the unpacking pattern. Conservative direction:
+    we don't try to pair pattern slots to RHS-tuple elements, since
+    the RHS can be any iterable (function call, generator, etc.) the
+    static check can't follow. Even when the unpacking RHS happens
+    to be a static Tuple of sanctioned-or-None values, the unpacked
+    names lose trust -- the realistic codebase uses tuple unpacking
+    only for non-sanctioned RHS shapes."""
     nt, na = set(trusted), set(aliases)
     sanctioned = _is_sanctioned_or_none_source(stmt.value, na, models_shadowed)
     for target in stmt.targets:
-        if not isinstance(target, ast.Name):
-            continue
-        if sanctioned:
+        # Top-level Name target: sanctioned RHS adds to trusted.
+        # Tuple / list / starred unpacking: revoke every captured
+        # name regardless of RHS, since static analysis can't pair
+        # slots to RHS tuple elements.
+        if isinstance(target, ast.Name) and sanctioned:
             nt.add(target.id)
-        else:
-            nt.discard(target.id)
-            na.discard(target.id)
+            continue
+        for name in _names_bound_by_target(target):
+            nt.discard(name)
+            na.discard(name)
     return nt, na
 
 
@@ -792,14 +847,17 @@ def _module_level_rebound_names(
     file_path: pathlib.Path | None = None,
 ) -> set[str]:
     """Names that have been rebound at module scope so they no longer
-    resolve to their canonical implementation. Three shadowing channels:
+    resolve to their canonical implementation. Four shadowing channels:
 
-      Assign:     `<name> = <something>`              -- module-level
-      AnnAssign:  `<name>: T = <something>`           -- module-level
-      Import:     `import <name>` / `from <m> import <name>` from a
-                  source module that is NOT one of the canonical
-                  sources for that name (per
-                  `_CANONICAL_IMPORT_SOURCES`).
+      Assign:           `<name> = <something>`             -- module-level
+      AnnAssign:        `<name>: T = <something>`          -- module-level
+      FunctionDef /
+      AsyncFunctionDef: `def <name>(...): ...`             -- module-level
+      ClassDef:         `class <name>: ...`                -- module-level
+      Import:           `import <name>` / `from <m> import <name>`
+                        from a source module that is NOT one of the
+                        canonical sources for that name (per
+                        `_CANONICAL_IMPORT_SOURCES`).
 
     Imports of names NOT tracked in `_CANONICAL_IMPORT_SOURCES`
     aren't added -- a stray `from urllib import parse` at module
@@ -809,7 +867,11 @@ def _module_level_rebound_names(
     `from attacker import models` / `from attacker import
     verify_same_origin` would still satisfy the TOTP-quarantine and
     origin-gate checks even though the symbol resolves to a
-    non-canonical implementation."""
+    non-canonical implementation. Without the def/class channel, a
+    file that defines `def verify_same_origin(...)` locally and
+    then writes `Depends(verify_same_origin)` would pass the
+    origin-gate check even though no FastAPI dependency is actually
+    being installed."""
     names: set[str] = set()
     if not isinstance(tree, ast.Module):
         return names
@@ -820,6 +882,8 @@ def _module_level_rebound_names(
                     names.add(target.id)
         elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
             names.add(stmt.target.id)
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(stmt.name)
         elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
             for tracked_name in _CANONICAL_IMPORT_SOURCES:
                 if _import_binds_name_from_non_canonical_source(
