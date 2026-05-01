@@ -9,45 +9,54 @@
 # tests tend to mirror the implementation rather than describe the
 # spec.
 #
-# Scheduled rather than per-PR because a single full mutmut run on a
+# Scheduled rather than per-PR because a full mutation run on a
 # bcrypt-cost-12 test suite isn't going to fit in an acceptable PR
-# round-trip. Sunday 03:17 UTC is off-peak (avoids GitHub's :00 cron
-# congestion) and far enough from the human business day that an
-# accidentally-noisy run doesn't compete for attention.
+# round-trip. Sunday 03:17 UTC is off-peak (avoids GitHub's :00
+# cron congestion) and far enough from the human business day that
+# an accidentally-noisy run doesn't compete for attention.
 #
-# Configuration lives in pyproject.toml [tool.mutmut]; this workflow
-# only orchestrates execution.
+# Configuration lives in cosmic-ray.toml at the repo root; this
+# workflow only orchestrates execution. Cosmic-ray's session-based
+# model writes mutation results into a SQLite file (the second
+# argument to init / exec) which the report step then dumps to
+# markdown. Migrated from mutmut after a hard interaction between
+# mutmut's stats-phase pytest invocation and cryptography's PyO3
+# Rust bindings -- see the migration note at the top of
+# cosmic-ray.toml.
 
-name: Mutation testing (mutmut)
+name: Mutation testing (cosmic-ray)
 
 on:
   schedule:
-    # Sunday 03:17 UTC. Odd minute deliberately -- GitHub's scheduler
-    # can delay or skip runs that fall on busy minutes (the docs warn
-    # about :00 specifically). Adjust the cron once we have data on
-    # actual run duration; if it consistently bumps against the 6h
-    # job ceiling, split the codebase across two scheduled runs on
-    # different days.
+    # Sunday 03:17 UTC. Odd minute deliberately -- GitHub's
+    # scheduler can delay or skip runs that fall on busy minutes
+    # (the docs warn about :00 specifically). Adjust the cron once
+    # we have data on actual run duration; if it consistently bumps
+    # against the 6h job ceiling, split the codebase across two
+    # scheduled runs on different days by introducing a second
+    # cosmic-ray.toml with a narrower module-path.
     - cron: '17 3 * * 0'
-  # Manual trigger so the operator can fire the job on-demand without
-  # waiting for the next Sunday. Useful when validating a config
-  # change to [tool.mutmut] or after a major refactor where it makes
-  # sense to re-baseline test strength.
+  # Manual trigger so the operator can fire the job on-demand
+  # without waiting for the next Sunday. Useful when validating a
+  # config change to cosmic-ray.toml or after a major refactor where
+  # it makes sense to re-baseline test strength.
   workflow_dispatch:
 
-# Workflow-level permissions: read-only. The job uploads an artifact
-# but doesn't push commits, comment on issues, or call any write API.
+# Workflow-level permissions: read-only. The job uploads artifacts
+# but doesn't push commits, comment on issues, or call any write
+# API.
 permissions:
   contents: read
 
 jobs:
-  mutmut:
-    name: Mutmut full run
+  cosmic-ray:
+    name: Cosmic-ray full run
     runs-on: ubuntu-latest
-    # GitHub-hosted runner per-job cap is 6 hours. Mutmut's runtime
-    # scales with mutant count * single-test-run time; for the
-    # currently-scoped paths_to_mutate this is well within the
-    # ceiling. If a future expansion of paths starts pushing close,
+    # GitHub-hosted runner per-job cap is 6 hours. Cosmic-ray's
+    # runtime scales with mutant count * single-test-run time;
+    # for the currently-scoped modules (crypto + auth + validation
+    # + dependencies) this is well within the ceiling. If a future
+    # expansion of cosmic-ray.toml's scope starts pushing close,
     # raise this floor and split scope across multiple jobs.
     timeout-minutes: 330  # 5h30m -- 30m headroom before the hard limit
     steps:
@@ -61,64 +70,83 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install deps
-        # --require-hashes verifies every package against the lockfile
-        # hashes. Same posture as the main test-suite workflow.
+        # --require-hashes verifies every package against the
+        # lockfile hashes. Same posture as the main test-suite
+        # workflow.
         run: pip install --require-hashes -r requirements-dev.txt
 
-      - name: Run mutmut
-        # `--max-children` parallelises the test runs. ubuntu-latest
-        # GitHub-hosted runners ship with 4 vCPU as of 2026; tracking
-        # that as a safe default. Capped via timeout-minutes above so
-        # a runaway run doesn't consume the full 6-hour ceiling.
-        #
-        # No continue-on-error: in mutmut 3.5, `run` exits 0 on a
-        # normal completion REGARDLESS of how many mutants survived
-        # (surviving counts are reported in `mutmut results` /
-        # the cache, not the exit code). Non-zero exit means a real
-        # failure -- pre-mutation clean tests failed, the test suite
-        # doesn't cover any mutated code, mutmut crashed -- all of
-        # which should fail the workflow so the noise gets noticed
-        # rather than producing a misleading "succeeded with empty
-        # report" run. Surviving-mutant accounting is the report
-        # step's job, below.
-        run: python -m mutmut run --max-children 4
+      - name: Initialise cosmic-ray session
+        # `init` walks `module-path` from cosmic-ray.toml, generates
+        # the mutation candidate set, and stores it as a SQLite
+        # session at the second argument. No tests run yet -- this
+        # is just the candidate enumeration. Fast (seconds).
+        run: cosmic-ray init cosmic-ray.toml session.sqlite
 
-      - name: Generate mutmut report
+      - name: Baseline (unmutated test suite must be green)
+        # Cosmic-ray's `baseline` runs the configured test-command
+        # against the un-mutated codebase and exits non-zero if it
+        # fails. Without this gate, a transient or flaky pre-
+        # existing failure would make every mutant get reported as
+        # "killed" because the suite is already failing for an
+        # unrelated reason -- the weekly report would look healthy
+        # while being meaningless. Failing here is the right
+        # answer: better a red baseline than a green-looking
+        # report with no mutation signal.
+        run: cosmic-ray baseline cosmic-ray.toml
+
+      - name: Run cosmic-ray (mutate + test)
+        # Walks the candidate set in `session.sqlite`, applies each
+        # mutation in turn, runs the configured test-command in a
+        # fresh subprocess, records the outcome, restores the file,
+        # repeats. Persists progress as it goes -- a re-run with
+        # the same session.sqlite would resume where this left off
+        # if interrupted.
+        run: cosmic-ray exec cosmic-ray.toml session.sqlite
+
+      - name: Generate cosmic-ray report
+        # `dump` emits the per-mutant outcomes as JSONL on stdout;
+        # pipe to `cr-report` for the human-readable summary +
+        # killed/survived/error counts. Both forms get written --
+        # JSONL for machines (artifact below), markdown summary
+        # for the GitHub run UI.
         if: always()
-        # `mutmut results` lists each mutant with its kill/survive
-        # status. Pipe to a markdown file for upload + step-summary
-        # rendering. `|| true` shields against mutmut returning
-        # non-zero (same reasoning as above).
         run: |
-          python -m mutmut results > mutmut-report.txt 2>&1 || true
+          cosmic-ray dump session.sqlite > mutation-report.jsonl
+          cr-report session.sqlite > mutation-report.txt
           {
-            echo "## Mutation testing report"
+            echo "## Mutation testing report (cosmic-ray)"
             echo ""
             echo "Run: \`$(date -u +%Y-%m-%d) $(date -u +%H:%MZ)\`"
             echo ""
             echo '```'
-            cat mutmut-report.txt
+            cat mutation-report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload mutmut report artifact
+      - name: Upload mutation report artifact
+        # Markdown summary + JSONL detail. JSONL is the source of
+        # truth (one line per mutant, full mutation diff + outcome
+        # per record); markdown is the human-friendly view.
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: mutmut-report
-          path: mutmut-report.txt
+          name: mutation-report
+          path: |
+            mutation-report.txt
+            mutation-report.jsonl
           retention-days: 60
 
-      - name: Upload mutmut sandbox artifact
-        # The mutants/ directory is the full sandbox mutmut copied the
-        # code into, including each mutant's mutated source. Useful
-        # for digging into a specific surviving mutant locally
-        # (`python -m mutmut show <mutant_name>`); not load-bearing
-        # for the report itself, which is why retention is short.
+      - name: Upload cosmic-ray session DB
+        # The session SQLite is the authoritative state -- contains
+        # mutation diff, test stdout/stderr per mutant, timing.
+        # Useful for `cr-html session.sqlite` locally to dig into
+        # specific surviving mutants. Shorter retention because
+        # the JSONL artifact above carries the same information in
+        # a more portable form.
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: mutmut-sandbox
-          path: mutants/
+          name: mutation-session-db
+          path: session.sqlite
           retention-days: 14
           if-no-files-found: warn

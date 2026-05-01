@@ -1,0 +1,97 @@
+# Cosmic-ray mutation testing configuration.
+#
+# Read by .github/workflows/mutation-test.yml's weekly run and by
+# operators triggering manual runs via `cosmic-ray init / exec /
+# dump`. Each `cosmic-ray exec` invocation mutates the source
+# in-place, runs the configured `test-command`, restores, and
+# records the outcome (killed / survived / etc.) into the SQLite
+# session file passed as the second argument.
+#
+# Migrated from mutmut after a hard interaction between mutmut's
+# stats-phase pytest invocation and cryptography's PyO3 Rust
+# bindings: mutmut's reuse of a single Python process across all
+# mutants made cryptography's HKDF binding fail an internal
+# isinstance check ("Expected instance of hashes.HashAlgorithm.")
+# on a hashes.SHA256() value the same binding accepts in plain
+# pytest runs. Cosmic-ray's session model spawns a fresh
+# subprocess per mutant via `test-command` so cryptography re-
+# initialises cleanly each time. Confirmed via local spike: 96/106
+# mutants killed on crypto.py and 71/85 on validation.py in 90
+# seconds each. Mutmut's previous runs reported 20/20 survived on
+# validation.py because the stats-phase failure prevented tests
+# from running -- cosmic-ray's report is honest about what it ran.
+#
+# Scope is the security-leverage set: encrypt/decrypt + key
+# derivation in app/crypto.py, the auth flow under app/auth/,
+# input validation in app/validation.py, and the dependency
+# helpers (session-cookie HMAC, origin check, API-token verify)
+# in app/dependencies.py. The rest of app/ is untouched for v1 --
+# expand once we know what one full run costs in CI minutes.
+
+[cosmic-ray]
+# `module-path` is the directory cosmic-ray walks looking for
+# files to mutate. We point it at app/ and rely on
+# `excluded-modules` below to drop everything that isn't in the
+# security-leverage set. The alternative -- multiple cosmic-ray
+# invocations with module-path narrowed per-target -- would
+# fragment the report across multiple session DBs.
+module-path = "app/"
+# Per-test timeout in seconds. ephemera's test suite uses bcrypt
+# at cost 12 (deliberate, see app/auth/password.py) so a single
+# auth-touching test is in the hundreds of milliseconds; 30s is
+# generous headroom even for the heaviest mutant test runs.
+timeout = 30.0
+# Each entry is a filesystem glob (passed to `glob.glob(p,
+# recursive=True)` by cosmic-ray's modules.filter_paths) -- NOT a
+# dotted module path. Patterns like `app.admin.*` would silently
+# match nothing and cosmic-ray would mutate the whole module-path
+# instead. Use file-path globs: directory-recursive patterns end
+# with `/**/*.py`; single-file patterns are the plain path.
+#
+# Everything outside the security-leverage set is excluded so
+# cosmic-ray doesn't waste mutation cycles on routes / models /
+# templates / etc. Listed long-form rather than wildcard to make
+# the in-scope set explicit -- a future contributor adding a
+# top-level module gets a chance to decide whether to pull it
+# into mutation testing or leave it out, and the diff in this
+# file makes the choice visible.
+excluded-modules = [
+  "app/__init__.py",
+  "app/admin/**/*.py",
+  "app/analytics.py",
+  "app/cleanup.py",
+  "app/config.py",
+  "app/errors.py",
+  "app/i18n.py",
+  "app/limiter.py",
+  "app/models/**/*.py",
+  "app/routes/**/*.py",
+  "app/schemas.py",
+  "app/security_headers.py",
+  "app/security_log.py",
+  "app/version.py",
+]
+# `test-command` runs once per mutant. Cosmic-ray spawns it as a
+# fresh subprocess so the codebase is re-imported each time --
+# crucial for cryptography's PyO3 class-identity check, which is
+# why this configuration works where the mutmut equivalent did
+# not (see the migration note at the top of this file).
+#
+# `-x` stops on the first failure: as soon as one test catches
+# the mutant, the whole subprocess can exit and cosmic-ray records
+# the kill. Faster than running every test against every mutant.
+# `--no-header -q` keeps cosmic-ray's per-mutant log noise low
+# without losing the line that names the failing test on a kill.
+#
+# `python` (no venv path prefix) resolves to whatever interpreter
+# is on PATH when cosmic-ray runs. CI's setup-python action puts
+# the right one there; for local runs, activate the venv first
+# (`source venv/bin/activate`) or invoke cosmic-ray through it
+# (`./venv/bin/cosmic-ray ...`).
+test-command = "python -m pytest -x --no-header -q tests/"
+
+[cosmic-ray.distributor]
+# Run mutants serially in the local process tree. Cosmic-ray also
+# supports an HTTP distributor for fan-out across worker hosts;
+# unnecessary for a single GitHub-hosted runner with 4 vCPU.
+name = "local"

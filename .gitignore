@@ -41,12 +41,16 @@ coverage.xml
 coverage.json
 htmlcov/
 
-# Mutmut. `mutants/` is the sandbox mutmut copies the codebase into for
-# mutation runs; `mutmut-stats.json` is its progress cache. Both are
-# generated artifacts of the weekly mutation-test workflow (and any
-# local smoke runs); never committed.
-mutants/
-mutmut-stats.json
+# Cosmic-ray. SQLite session files produced by `cosmic-ray init` (one
+# per mutation run, named whatever the workflow / local invocation
+# passes as the second argument). The CI workflow uses the bare
+# `session.sqlite`; local invocations may pick anything. Cover the
+# common shapes -- `session.sqlite` (workflow + the cosmic-ray docs'
+# default), and the longer-form variants developers tend to use.
+# Generated artifact; never committed.
+session.sqlite
+*.cosmic-ray.sqlite
+cosmic-ray-session*.sqlite
 
 # Node (Vitest + Playwright)
 node_modules/
