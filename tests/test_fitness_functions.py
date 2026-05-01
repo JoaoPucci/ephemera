@@ -105,15 +105,58 @@ def test_authentication_only_raises_canonical_credential_error():
 # ---------------------------------------------------------------------------
 
 
+def _file_reads_totp_secret(tree: ast.AST) -> bool:
+    """True iff `tree` contains a real `something["totp_secret"]` subscript
+    or `something.pop("totp_secret", ...)` call -- i.e., an executable
+    read of the field, not just the literal string showing up in a comment
+    or unrelated string."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript):
+            sl = node.slice
+            if isinstance(sl, ast.Constant) and sl.value == "totp_secret":
+                return True
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"pop", "get"}
+            and node.args
+        ):
+            first = node.args[0]
+            if isinstance(first, ast.Constant) and first.value == "totp_secret":
+                return True
+    return False
+
+
+def _file_calls_with_totp_getter(tree: ast.AST) -> bool:
+    """True iff `tree` actually CALLS a `get_user_with_totp_*` function --
+    a real `Call` node, not just a comment, import, or string mentioning
+    the name. The substring fallback in an earlier draft could be tricked
+    by an import line or docstring containing the token."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if name and name.startswith("get_user_with_totp_"):
+            return True
+    return False
+
+
 def test_totp_secret_reads_only_in_files_that_use_with_totp_getters():
     """app/models/users.py module docstring pins the convention: the
     plaintext TOTP seed is exposed only via `get_user_with_totp_*`
     getters; every other read path returns a dict that omits the column.
 
-    Static check: any file that contains a quoted "totp_secret" literal
-    (i.e., reads the field from a row dict) must also call one of the
-    `get_user_with_totp_*` getters in the same file. Files in the data
-    layer itself (app/models/users.py, app/models/_core.py for the
+    Static check: any file that performs a real `["totp_secret"]` /
+    `.pop("totp_secret", ...)` read must also CALL one of the
+    `get_user_with_totp_*` getters in the same module. Both halves are
+    AST-grounded (not text/substring) so a comment, import, or unrelated
+    string mentioning either name can't satisfy the guard. Files in the
+    data layer itself (app/models/users.py, app/models/_core.py for the
     plaintext-encryption migration) are exempt -- they are the source
     of the secret, not consumers of it.
     """
@@ -123,14 +166,14 @@ def test_totp_secret_reads_only_in_files_that_use_with_totp_getters():
         rel = str(py.relative_to(REPO_ROOT))
         if rel in allowlist:
             continue
-        text = py.read_text()
-        if '"totp_secret"' not in text and "'totp_secret'" not in text:
+        tree = ast.parse(py.read_text())
+        if not _file_reads_totp_secret(tree):
             continue
-        if "get_user_with_totp_" not in text:
+        if not _file_calls_with_totp_getter(tree):
             offenders.append(rel)
     assert not offenders, (
-        "Files reading `totp_secret` must obtain it via a "
-        "`get_user_with_totp_*` getter call in the same module "
+        "Files reading `totp_secret` must obtain it via a real "
+        "`get_user_with_totp_*` call in the same module "
         "(see app/models/users.py module docstring).\n  " + "\n  ".join(offenders)
     )
 
@@ -190,15 +233,14 @@ def test_analytics_events_table_has_a_single_writer():
 
 
 def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
-    """True iff `deco` is `@<name>.<verb>(...)` where verb is one of
-    POST / PUT / PATCH / DELETE -- the verbs that change server state.
-    Matches both `@router.post(...)` (in app/routes/) and `@app.post(...)`
-    (an inline route in the FastAPI factory)."""
+    """True iff `deco` is `@<expr>.<verb>(...)` where verb is one of
+    POST / PUT / PATCH / DELETE. The owner expression is allowed to be
+    a Name (`@router.post(...)`, `@app.post(...)`) OR an attribute chain
+    (`@api.router.post(...)`, `@app.state.router.post(...)`) -- whatever
+    the call target is, what matters for the CSRF gate is the verb."""
     if not isinstance(deco, ast.Call):
         return False
     if not isinstance(deco.func, ast.Attribute):
-        return False
-    if not isinstance(deco.func.value, ast.Name):
         return False
     return deco.func.attr in {"post", "put", "patch", "delete"}
 
