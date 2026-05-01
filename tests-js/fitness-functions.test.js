@@ -8,9 +8,19 @@
 // `console.log(secret)` or `localStorage.setItem("plaintext", ...)`
 // fails this suite at source rather than slipping into a release.
 //
-// Static-walk semantics: these tests don't load any production JS;
-// they read it. The jsdom environment Vitest provides is unused here
-// but cheap to inherit, so we don't override it for this file.
+// Static-walk semantics, AST-grounded:
+//   Each fitness check parses every app/static/**/*.js file with
+//   `acorn` (ESTree 2020) and walks the resulting AST for the shape
+//   it forbids. The earlier regex-based approach kept losing ground
+//   to syntactic variants -- optional chaining (`console?.log`),
+//   bracket access (`localStorage["setItem"]`), bare `Function(...)`
+//   without `new`, optional call (`fetch?.(...)`), bracket-property
+//   assignment (`el["innerHTML"] = ...`). All of those reduce to
+//   well-typed nodes in the AST; the regex treadmill is replaced by
+//   a single visitor pass per invariant.
+//
+// The jsdom environment Vitest provides is unused here but cheap to
+// inherit, so we don't override it for this file.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -40,114 +50,152 @@ function findJsFiles(dir) {
   return out.sort();
 }
 
-const JS_FILES = findJsFiles(STATIC_DIR);
-
-// Strip `/* ... */` block comments while preserving every original
-// character position: comment chars become spaces, newlines stay.
-// Length-preserving keeps `path:line` offender reports accurate when
-// a regex match crosses lines.
-//
-// Uses acorn's parser to identify comment ranges precisely. This
-// handles every JS lexical context correctly -- string literals,
-// template literals, template `${...}` interpolations, regex literals
-// (including character classes and flags), and proper regex-vs-
-// division disambiguation. The earlier hand-rolled tokenizer kept
-// accreting bypass classes (string-content `/*`, regex-literal
-// escapes, etc.); switching to a real parser closes that whole
-// surface in one shot.
-//
-// Line comments are intentionally still NOT stripped -- the earlier
-// `(^|[^:])` regex stripper ate `//` in protocol-relative URL
-// strings (`fetch('//evil.example/x')`), which is exactly the
-// pattern the same-origin test wants to flag. Letting line comments
-// reach the regex check is the right call for this codebase: the
-// only line comment in production JS that mentions a banned pattern
-// is two-click.js:115's "Log to console.error..." prose, which our
-// regex correctly ignores (no `(` after the method name).
-//
-// On a parse failure (a syntactically invalid source file), fall
-// back to the unstripped source. Any banned pattern in commented-out
-// code would then trip the regex -- but a syntax error in app/static/
-// would also trip biome's lint job and the rest of the test suite,
-// so the failure is loud regardless.
-function stripBlockComments(source) {
-  const blockRanges = [];
-  try {
-    acornParse(source, {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-      allowHashBang: true,
-      onComment(isBlock, _text, start, end) {
-        if (isBlock) blockRanges.push([start, end]);
-      },
-    });
-  } catch {
-    return source;
-  }
-  if (blockRanges.length === 0) return source;
-  const chars = source.split('');
-  for (const [start, end] of blockRanges) {
-    for (let i = start; i < end; i++) {
-      if (chars[i] !== '\n') chars[i] = ' ';
-    }
-  }
-  return chars.join('');
-}
-
 function relPath(file) {
   return relative(REPO_ROOT, file);
 }
 
-// Walk JS_FILES (optionally minus an allowlist of relative paths), apply
-// `regex` (which MUST have the global flag) to the comment-stripped
-// source AS A WHOLE -- not line-by-line -- so a banned pattern split
-// across lines (`fetch(\n  "https://...")`, `localStorage\n.setItem`,
-// chained `console\n  .log(...)`) still matches. For each match, report
-// the file path, the line number where the match starts, and the text
-// of that starting line trimmed.
-function findOffenders(regex, allowlist = new Set()) {
-  if (!regex.global) {
-    throw new Error('findOffenders: regex must have the global flag');
-  }
-  const offenders = [];
-  for (const file of JS_FILES) {
-    const rel = relPath(file);
-    if (allowlist.has(rel)) continue;
-    const text = stripBlockComments(readFileSync(file, 'utf8'));
-    for (const match of text.matchAll(regex)) {
-      const before = text.slice(0, match.index);
-      const lineNumber = before.split('\n').length;
-      const lineStart = before.lastIndexOf('\n') + 1;
-      const lineEndIdx = text.indexOf('\n', match.index);
-      const lineEnd = lineEndIdx === -1 ? text.length : lineEndIdx;
-      const lineText = text.slice(lineStart, lineEnd).trim();
-      offenders.push(`${rel}:${lineNumber}: ${lineText}`);
+// Pre-parse every JS file once, share the resulting ASTs across tests.
+const PARSED = findJsFiles(STATIC_DIR).map((file) => ({
+  file,
+  rel: relPath(file),
+  ast: acornParse(readFileSync(file, 'utf8'), {
+    ecmaVersion: 'latest',
+    sourceType: 'module',
+    allowHashBang: true,
+    locations: true,
+  }),
+}));
+
+// Generic AST walker. `visit(node, parent)` is called for every node;
+// to skip a subtree, return `false` from the visitor. Recurses on every
+// child that's either an array of nodes or a node-shaped object (one
+// with a string `type`); skips position metadata keys (`loc`, `start`,
+// `end`, `range`).
+const META_KEYS = new Set(['type', 'loc', 'start', 'end', 'range']);
+function walkAST(node, visit, parent = null) {
+  if (!node || typeof node !== 'object') return;
+  if (visit(node, parent) === false) return;
+  for (const key of Object.keys(node)) {
+    if (META_KEYS.has(key)) continue;
+    const child = node[key];
+    if (Array.isArray(child)) {
+      for (const c of child) walkAST(c, visit, node);
+    } else if (child && typeof child === 'object' && typeof child.type === 'string') {
+      walkAST(child, visit, node);
     }
   }
-  return offenders;
 }
+
+// Unwrap a `ChainExpression` (the ESTree 2020 wrapper for optional-chain
+// expressions like `a?.b()`) so callers can match on the inner shape
+// uniformly. Returns the input unchanged if it isn't a ChainExpression.
+function unwrapChain(node) {
+  return node && node.type === 'ChainExpression' ? node.expression : node;
+}
+
+// Walk a member-or-call chain back to the leftmost identifier and
+// return its name. Handles `console.log`, `console?.log`,
+// `console["log"]`, `localStorage?.setItem(...)`, etc. Returns null if
+// the chain doesn't bottom out at a bare Identifier (e.g., `(svc).x`,
+// `obj[expr].y`).
+function rootIdentifierName(node) {
+  let cur = unwrapChain(node);
+  while (cur) {
+    if (cur.type === 'Identifier') return cur.name;
+    if (cur.type === 'MemberExpression') {
+      cur = cur.object;
+      continue;
+    }
+    if (cur.type === 'CallExpression' || cur.type === 'NewExpression') {
+      cur = cur.callee;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+// Read the property name of a `MemberExpression` regardless of whether
+// it's `obj.prop` (computed=false, property is Identifier) or
+// `obj["prop"]` (computed=true, property is a string Literal). Returns
+// null for computed accesses with non-literal indexes (`obj[expr]`),
+// which can't be statically pinned to a single name.
+function memberPropertyName(node) {
+  if (!node || node.type !== 'MemberExpression') return null;
+  if (!node.computed) {
+    return node.property.type === 'Identifier' ? node.property.name : null;
+  }
+  if (node.property.type === 'Literal' && typeof node.property.value === 'string') {
+    return node.property.value;
+  }
+  return null;
+}
+
+// Predicate: `node` is a CallExpression whose callee resolves (through
+// any combination of optional chaining and bracket access) to a member
+// access rooted on `objectName`. Catches `console.log`,
+// `console?.log`, `console["log"]`, `console?.["log"]?.(...)`, etc.
+function isMethodCallOn(node, objectName) {
+  if (node.type !== 'CallExpression') return false;
+  const callee = unwrapChain(node.callee);
+  if (!callee || callee.type !== 'MemberExpression') return false;
+  return rootIdentifierName(callee) === objectName;
+}
+
+// Predicate: `node` is a Call (or NewExpression) whose callee resolves
+// to the bare identifier `name`. Catches `fn(...)`, `fn?.(...)`,
+// `new fn(...)`. Member-access calls (`obj.fn(...)`) are NOT a match;
+// see `isMethodCallOn` for that.
+function isBareCallOf(node, name) {
+  if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return false;
+  const callee = unwrapChain(node.callee);
+  return callee && callee.type === 'Identifier' && callee.name === name;
+}
+
+const ABSOLUTE_URL_RE = /^(?:https?:)?\/\//;
 
 describe('JS architectural fitness functions', () => {
   // -------------------------------------------------------------------
-  // 1. Anti-RCE: no eval, no new Function, no string-arg setTimeout/setInterval
+  // 1. Anti-RCE: no eval, no Function/new Function, no string-arg
+  //    setTimeout/setInterval
   // -------------------------------------------------------------------
-  it('forbids eval, new Function, and string-arg setTimeout/setInterval', () => {
-    // Why: each of these takes a string and runs it as code.
-    //  - `eval(s)` / `new Function(s)`: arbitrary code from any string
-    //    value reachable at the call site, bypassing the CSP's
-    //    `script-src 'self'` (the policy applies to <script> tags, not
-    //    to JS calling its own runtime).
+  it('forbids eval, Function/new Function, and string-arg setTimeout/setInterval', () => {
+    // Why each is forbidden:
+    //  - `eval(s)` / `Function(s)` / `new Function(s)`: every shape
+    //    compiles and runs a string as code, bypassing the CSP's
+    //    `script-src 'self'` (the policy applies to <script> tags,
+    //    not to JS calling its own runtime). Bare `Function(...)` is
+    //    just as dangerous as `new Function(...)`; both end up at
+    //    the same constructor.
     //  - `setTimeout("foo()", n)` / `setInterval("foo()", n)`: the
     //    string overload delegates to eval too. Function references
     //    are fine; only the string-typed first argument is forbidden.
-    const banned =
-      /\beval\s*\(|\bnew\s+Function\s*\(|\bsetTimeout\s*\(\s*['"`]|\bsetInterval\s*\(\s*['"`]/g;
-    const offenders = findOffenders(banned);
+    const offenders = [];
+    for (const { rel, ast } of PARSED) {
+      walkAST(ast, (node) => {
+        if (isBareCallOf(node, 'eval') || isBareCallOf(node, 'Function')) {
+          offenders.push(
+            `${rel}:${node.loc.start.line}: ${node.type} of ${rootIdentifierName(node.callee)}`
+          );
+          return;
+        }
+        if (
+          (isBareCallOf(node, 'setTimeout') || isBareCallOf(node, 'setInterval')) &&
+          node.arguments.length > 0 &&
+          node.arguments[0].type === 'Literal' &&
+          typeof node.arguments[0].value === 'string'
+        ) {
+          offenders.push(
+            `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
+          );
+        }
+      });
+    }
     expect(offenders, `Anti-RCE violations:\n  ${offenders.join('\n  ')}`).toEqual([]);
   });
 
   // -------------------------------------------------------------------
-  // 2. No console.* outside the narrow operator-debug allowlist
+  // 2. console.* per-file budget
   // -------------------------------------------------------------------
   it('caps console.* calls per file at the documented count', () => {
     // `console.log` / `console.error` / etc. land in browser devtools
@@ -162,20 +210,20 @@ describe('JS architectural fitness functions', () => {
     // two-click-confirm helper's onConfirm callback -- a developer
     // signal, not user-facing. The check pins that file's budget at
     // EXACTLY 1: a future second `console.log(secret)` added in the
-    // same file would push the count to 2 and trip this test, even
-    // though the file is "allowlisted." Adjusting the budget is a
-    // deliberate decision with diff-visibility, not a free pass.
+    // same file would push the count to 2 and trip this test.
+    // Adjusting the budget is a deliberate decision with diff-
+    // visibility, not a free pass.
     //
-    // Adding a console.* anywhere else, or adding a second one in
-    // two-click.js, fails this test. The fix is either (a) remove
-    // the call, or (b) update the budget here with a one-line
-    // rationale for the new allowance.
+    // Counts every shape: `console.log(...)`, `console?.log(...)`,
+    // `console["log"](...)`, `console?.["log"]?.(...)` -- whatever
+    // unwraps to a method call on the `console` identifier.
     const expectedConsoleCalls = new Map([['app/static/two-click.js', 1]]);
     const offenders = [];
-    for (const file of JS_FILES) {
-      const rel = relPath(file);
-      const text = stripBlockComments(readFileSync(file, 'utf8'));
-      const count = [...text.matchAll(/\bconsole\s*\.\s*\w+\s*\(/g)].length;
+    for (const { rel, ast } of PARSED) {
+      let count = 0;
+      walkAST(ast, (node) => {
+        if (isMethodCallOn(node, 'console')) count++;
+      });
       const expected = expectedConsoleCalls.get(rel) ?? 0;
       if (count !== expected) {
         offenders.push(`${rel}: ${count} console.* call(s), expected ${expected}`);
@@ -187,7 +235,7 @@ describe('JS architectural fitness functions', () => {
   });
 
   // -------------------------------------------------------------------
-  // 3. localStorage / sessionStorage only in documented persistence files
+  // 3. (local|session)Storage allowlist
   // -------------------------------------------------------------------
   it('restricts (local|session)Storage calls to the persistence allowlist', () => {
     // localStorage is the only way a one-time-secret URL with the
@@ -204,15 +252,24 @@ describe('JS architectural fitness functions', () => {
     // makes that decision visible.
     //
     // sessionStorage is stricter (cleared on tab close) but enforced
-    // identically here: same allowlist, same rationale. If a file
-    // genuinely needs ambient persistence, add it to the allowlist
-    // with a one-line note for the next reader.
+    // identically here. Catches `storage.foo(...)`, `storage?.foo(...)`,
+    // `storage["foo"](...)` -- every shape that resolves to a method
+    // call on either identifier.
     const allowlist = new Set([
       'app/static/theme.js',
       'app/static/i18n.js',
       'app/static/sender/url-cache.js',
     ]);
-    const offenders = findOffenders(/\b(?:local|session)Storage\s*\.\s*\w+\s*\(/g, allowlist);
+    const offenders = [];
+    for (const { rel, ast } of PARSED) {
+      if (allowlist.has(rel)) continue;
+      walkAST(ast, (node) => {
+        if (isMethodCallOn(node, 'localStorage') || isMethodCallOn(node, 'sessionStorage')) {
+          const root = rootIdentifierName(unwrapChain(node.callee));
+          offenders.push(`${rel}:${node.loc.start.line}: ${root}`);
+        }
+      });
+    }
     expect(
       offenders,
       `Non-allowlisted (local|session)Storage calls:\n  ${offenders.join('\n  ')}`
@@ -230,21 +287,35 @@ describe('JS architectural fitness functions', () => {
     // production hostname) or a cross-origin call that could leak
     // the user's session cookie or the secret URL fragment.
     //
-    // Three shapes are forbidden:
-    //   fetch("https://...")    explicit https
-    //   fetch("http://...")     explicit http (also a downgrade smell)
-    //   fetch("//host/path")    protocol-relative -- inherits the
-    //                            page's scheme but goes to a different
-    //                            host, still cross-origin
+    // Three URL shapes are forbidden:
+    //   "https://..."        explicit https
+    //   "http://..."         explicit http (also a downgrade smell)
+    //   "//host/path"        protocol-relative -- inherits the page's
+    //                         scheme but goes to a different host,
+    //                         still cross-origin
     //
-    // The CSP `connect-src 'self'` would block all three at runtime;
-    // this test catches them at source so the regression doesn't
-    // ship and the browser doesn't silently drop the call.
+    // Catches every call shape that performs a fetch: `fetch(...)`,
+    // `fetch?.(...)` (optional call), and `new fetch(...)` (rare but
+    // valid). The CSP `connect-src 'self'` would block these at
+    // runtime; this test catches the regression at source so the
+    // browser doesn't silently drop the request.
     //
     // Limitation: only literal URL arguments are detected. A variable
     // holding an absolute URL slips through. Catching every literal
     // is the high-leverage win; runtime CSP catches the rest.
-    const offenders = findOffenders(/\bfetch\s*\(\s*['"`](?:https?:)?\/\//g);
+    const offenders = [];
+    for (const { rel, ast } of PARSED) {
+      walkAST(ast, (node) => {
+        if (!isBareCallOf(node, 'fetch')) return;
+        const first = node.arguments[0];
+        if (!first || first.type !== 'Literal' || typeof first.value !== 'string') return;
+        if (ABSOLUTE_URL_RE.test(first.value)) {
+          offenders.push(
+            `${rel}:${node.loc.start.line}: fetch(${JSON.stringify(first.value).slice(0, 80)})`
+          );
+        }
+      });
+    }
     expect(
       offenders,
       `Absolute / protocol-relative fetch calls (should be relative paths):\n  ${offenders.join('\n  ')}`
@@ -252,7 +323,7 @@ describe('JS architectural fitness functions', () => {
   });
 
   // -------------------------------------------------------------------
-  // 5. innerHTML / outerHTML only in the documented clear-and-rebuild surface
+  // 5. innerHTML / outerHTML assignment allowlist
   // -------------------------------------------------------------------
   it('restricts innerHTML / outerHTML assignment to the rebuild allowlist', () => {
     // `textContent` vs `innerHTML` is the canonical XSS-safe
@@ -268,16 +339,28 @@ describe('JS architectural fitness functions', () => {
     // textContent / DOM construction doesn't fit, not assume
     // innerHTML is the fast path.
     //
-    // The operator group covers every JS compound-assignment shape so
-    // modern logical-assignment forms (`||=`, `&&=`, `??=`) and shift /
-    // exponent compounds (`**=`, `<<=`, `>>=`, `>>>=`) can't bypass the
-    // gate. The trailing `=(?!=)` still rejects equality comparisons
-    // (`==`, `===`).
+    // Catches every assignment shape: dot (`el.innerHTML = x`),
+    // bracket (`el["innerHTML"] = x`), and every JS compound
+    // operator (`+=`, `||=`, `&&=`, `??=`, `**=`, `<<=`, etc. -- all
+    // surface as `AssignmentExpression` with the corresponding
+    // `operator` field). Equality comparisons (`==`, `===`) are
+    // `BinaryExpression` nodes, not `AssignmentExpression`, so they
+    // don't trip the gate.
     const allowlist = new Set(['app/static/sender/tracked-list.js']);
-    const offenders = findOffenders(
-      /\.(?:inner|outer)HTML\b\s*(?:\*\*|<<|>>>?|&&|\|\||\?\?|[+\-*/%&|^])?=(?!=)/g,
-      allowlist
-    );
+    const offenders = [];
+    for (const { rel, ast } of PARSED) {
+      if (allowlist.has(rel)) continue;
+      walkAST(ast, (node) => {
+        if (node.type !== 'AssignmentExpression') return;
+        if (!node.left || node.left.type !== 'MemberExpression') return;
+        const prop = memberPropertyName(node.left);
+        if (prop === 'innerHTML' || prop === 'outerHTML') {
+          offenders.push(
+            `${rel}:${node.loc.start.line}: ${prop} ${node.operator} (${node.left.computed ? 'bracket' : 'dot'})`
+          );
+        }
+      });
+    }
     expect(
       offenders,
       `Non-allowlisted innerHTML/outerHTML assignments:\n  ${offenders.join('\n  ')}`
