@@ -173,12 +173,34 @@ function unwrapSequence(node) {
   return cur;
 }
 
+// Resolve whether `node` ultimately refers to the global object
+// itself (not a property of it). True for:
+//   - bare `window` / `globalThis` / `self`
+//   - any chain of those, e.g. `window.window`, `self.window.self`,
+//     `globalThis.self.globalThis`
+// All the listed globals point at the same object on the browser side
+// (`window === window.window === window.self === globalThis`), so any
+// chain of them is equivalent to bare access for fitness purposes.
+function resolvesToGlobalObject(node) {
+  let cur = unwrapSequence(unwrapChain(node));
+  while (cur) {
+    if (cur.type === 'Identifier') return GLOBAL_OBJECTS.has(cur.name);
+    if (cur.type !== 'MemberExpression') return false;
+    const prop = memberPropertyName(cur);
+    if (prop === null || !GLOBAL_OBJECTS.has(prop)) return false;
+    cur = unwrapSequence(unwrapChain(cur.object));
+  }
+  return false;
+}
+
 // Resolve whether `node` (a callee chain or a member-access object)
 // ultimately refers to the global named `targetName`. True for:
 //   - bare `targetName` -- Identifier(targetName)
-//   - `window.<targetName>` / `globalThis.<targetName>` / `self.<...>`
-//     -- a single Member step from a global root, with the property
-//     name (dot or bracket-string form) matching `targetName`
+//   - `<global-chain>.<targetName>` -- one Member step from anything
+//     that resolves to the global object, with the property name
+//     (dot or bracket-string form) matching `targetName`. The global
+//     chain can be any depth: `window.fetch`, `self.fetch`,
+//     `window.window.fetch`, `self.window.globalThis.fetch`, etc.
 //   - `(side, effect, <one of the above>)` -- the indirect-call /
 //     comma-operator wrapper that's used to call globals without a
 //     binding context
@@ -190,8 +212,7 @@ function chainEndsWithName(node, targetName) {
   if (u.type === 'Identifier') return u.name === targetName;
   if (u.type !== 'MemberExpression') return false;
   if (memberPropertyName(u) !== targetName) return false;
-  const obj = unwrapSequence(unwrapChain(u.object));
-  return Boolean(obj && obj.type === 'Identifier' && GLOBAL_OBJECTS.has(obj.name));
+  return resolvesToGlobalObject(u.object);
 }
 
 // Predicate: `node` is a CallExpression whose callee, after unwrapping
