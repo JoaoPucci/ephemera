@@ -328,24 +328,37 @@ def _sanctioned_totp_getter_aliases(tree: ast.AST, file_path: pathlib.Path) -> s
     return names
 
 
-def _is_sanctioned_getter_call(call: ast.Call, sanctioned_aliases: set[str]) -> bool:
+def _is_sanctioned_getter_call(
+    call: ast.Call,
+    sanctioned_aliases: set[str],
+    models_shadowed: bool = False,
+) -> bool:
     """True iff `call` is a sanctioned-getter invocation, in either
     convention shape:
 
       models.<getter>(...)  -- Attribute call on the bare Name `models`
                                (the receiver must be `models`, not
                                `svc.<getter>` or `obj.<getter>` on an
-                               unrelated class).
+                               unrelated class). Rejected when
+                               `models_shadowed` is True -- a function
+                               parameter, a local Assign / AnnAssign,
+                               or a module-level rebind has shadowed
+                               the imported `models` name.
       <getter>(...)         -- Name call where `<getter>` was imported
                                directly into this module via
                                `from app.models[.users] import ...`,
                                recorded in `sanctioned_aliases`.
+                               (Function-local rebinding of those
+                               names is handled separately by the
+                               flow-sensitive walker, which removes
+                               them from `local_sanctioned`.)
     """
     func = call.func
     if isinstance(func, ast.Name) and func.id in sanctioned_aliases:
         return True
     return (
-        isinstance(func, ast.Attribute)
+        not models_shadowed
+        and isinstance(func, ast.Attribute)
         and func.attr in _WITH_TOTP_GETTERS
         and isinstance(func.value, ast.Name)
         and func.value.id == "models"
@@ -353,7 +366,9 @@ def _is_sanctioned_getter_call(call: ast.Call, sanctioned_aliases: set[str]) -> 
 
 
 def _is_sanctioned_or_none_source(
-    expr: ast.AST | None, sanctioned_aliases: set[str]
+    expr: ast.AST | None,
+    sanctioned_aliases: set[str],
+    models_shadowed: bool = False,
 ) -> bool:
     """True iff every reachable value of `expr` is either the result
     of a sanctioned getter call OR `None`. Handles two real patterns:
@@ -381,16 +396,21 @@ def _is_sanctioned_or_none_source(
     if isinstance(expr, ast.Constant) and expr.value is None:
         return True
     if isinstance(expr, ast.Call):
-        return _is_sanctioned_getter_call(expr, sanctioned_aliases)
+        return _is_sanctioned_getter_call(expr, sanctioned_aliases, models_shadowed)
     if isinstance(expr, ast.IfExp):
         return _is_sanctioned_or_none_source(
-            expr.body, sanctioned_aliases
-        ) and _is_sanctioned_or_none_source(expr.orelse, sanctioned_aliases)
+            expr.body, sanctioned_aliases, models_shadowed
+        ) and _is_sanctioned_or_none_source(
+            expr.orelse, sanctioned_aliases, models_shadowed
+        )
     return False
 
 
 def _is_trusted_totp_receiver(
-    recv: ast.AST, trusted_locals: set[str], sanctioned_aliases: set[str]
+    recv: ast.AST,
+    trusted_locals: set[str],
+    sanctioned_aliases: set[str],
+    models_shadowed: bool = False,
 ) -> bool:
     """True iff `recv` (the expression on which `["totp_secret"]` or
     `.pop("totp_secret", ...)` is performed) is sourced from a
@@ -399,17 +419,22 @@ def _is_trusted_totp_receiver(
       - A `Name` that's in `trusted_locals` (bound earlier in the
         scope from a sanctioned-getter call).
       - A direct sanctioned-getter `Call` (for the inline pattern
-        `models.get_user_with_totp_by_id(uid)["totp_secret"]`).
+        `models.get_user_with_totp_by_id(uid)["totp_secret"]`),
+        passing `models_shadowed` through so a shadowed-models
+        receiver doesn't slip past.
     """
     if isinstance(recv, ast.Name):
         return recv.id in trusted_locals
     if isinstance(recv, ast.Call):
-        return _is_sanctioned_getter_call(recv, sanctioned_aliases)
+        return _is_sanctioned_getter_call(recv, sanctioned_aliases, models_shadowed)
     return False
 
 
 def _stmt_reads_are_quarantined(
-    stmt: ast.AST, trusted: set[str], sanctioned_aliases: set[str]
+    stmt: ast.AST,
+    trusted: set[str],
+    sanctioned_aliases: set[str],
+    models_shadowed: bool = False,
 ) -> bool:
     """Check every `totp_secret` read inside `stmt` against the
     `trusted` set as it stands BEFORE the statement runs. Returns
@@ -420,7 +445,9 @@ def _stmt_reads_are_quarantined(
             and isinstance(node.ctx, ast.Load)
             and isinstance(node.slice, ast.Constant)
             and node.slice.value == "totp_secret"
-            and not _is_trusted_totp_receiver(node.value, trusted, sanctioned_aliases)
+            and not _is_trusted_totp_receiver(
+                node.value, trusted, sanctioned_aliases, models_shadowed
+            )
         ):
             return False
         if (
@@ -431,7 +458,7 @@ def _stmt_reads_are_quarantined(
             and isinstance(node.args[0], ast.Constant)
             and node.args[0].value == "totp_secret"
             and not _is_trusted_totp_receiver(
-                node.func.value, trusted, sanctioned_aliases
+                node.func.value, trusted, sanctioned_aliases, models_shadowed
             )
         ):
             return False
@@ -439,7 +466,10 @@ def _stmt_reads_are_quarantined(
 
 
 def _update_trust_from_stmt(
-    stmt: ast.AST, trusted: set[str], sanctioned_aliases: set[str]
+    stmt: ast.AST,
+    trusted: set[str],
+    sanctioned_aliases: set[str],
+    models_shadowed: bool = False,
 ) -> None:
     """Walk every binding-introducing node reachable in `stmt`
     (including those inside `if` / `try` / loop branches) and update
@@ -479,7 +509,9 @@ def _update_trust_from_stmt(
     handled."""
     for node in _walk_local(stmt):
         if isinstance(node, ast.Assign):
-            sanctioned = _is_sanctioned_or_none_source(node.value, sanctioned_aliases)
+            sanctioned = _is_sanctioned_or_none_source(
+                node.value, sanctioned_aliases, models_shadowed
+            )
             for target in node.targets:
                 if not isinstance(target, ast.Name):
                     continue
@@ -500,7 +532,9 @@ def _update_trust_from_stmt(
                 continue
             if not isinstance(node.target, ast.Name):
                 continue
-            if _is_sanctioned_or_none_source(node.value, sanctioned_aliases):
+            if _is_sanctioned_or_none_source(
+                node.value, sanctioned_aliases, models_shadowed
+            ):
                 trusted.add(node.target.id)
             else:
                 trusted.discard(node.target.id)
@@ -508,8 +542,61 @@ def _update_trust_from_stmt(
                     sanctioned_aliases.discard(node.target.id)
 
 
+def _name_is_bound_in_scope(name: str, scope: ast.AST) -> bool:
+    """True iff `name` is bound somewhere in `scope` (function
+    parameters or local Assign / AnnAssign in the body), and would
+    therefore SHADOW any same-named module-level import for the
+    duration of this function. Used to detect when `models` no longer
+    resolves to the data-layer package because of a parameter named
+    `models` or a local rebind."""
+    if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    args = scope.args
+    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+        if arg.arg == name:
+            return True
+    if args.vararg is not None and args.vararg.arg == name:
+        return True
+    if args.kwarg is not None and args.kwarg.arg == name:
+        return True
+    for node in _walk_local(scope):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    return True
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+        ):
+            return True
+    return False
+
+
+def _module_level_rebound_names(tree: ast.AST) -> set[str]:
+    """Names that have been rebound at module scope via top-level
+    Assign / AnnAssign. Treat any subsequent Name reference in this
+    module as resolving to the rebound value, not to whatever was
+    imported under the same name. Used so a `models = something` or
+    `verify_same_origin = something` at module level shadows the
+    import for every downstream use."""
+    names: set[str] = set()
+    if not isinstance(tree, ast.Module):
+        return names
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            names.add(stmt.target.id)
+    return names
+
+
 def _scope_totp_reads_are_quarantined(
-    scope: ast.AST, sanctioned_aliases: set[str]
+    scope: ast.AST,
+    sanctioned_aliases: set[str],
+    module_rebound: set[str] | None = None,
 ) -> bool:
     """True iff every `totp_secret` read in `scope` is on a receiver
     that's trusted at the point of the read. Walks the function body
@@ -556,10 +643,19 @@ def _scope_totp_reads_are_quarantined(
         local_sanctioned.discard(args.vararg.arg)
     if args.kwarg is not None:
         local_sanctioned.discard(args.kwarg.arg)
+    # Compute models-shadowing once per scope. The `models.<getter>`
+    # Attribute path is trusted only when `models` resolves to the
+    # imported package -- i.e., NOT shadowed by a parameter, local
+    # rebind, or module-level reassignment.
+    models_shadowed = (
+        "models" in (module_rebound or set())
+    ) or _name_is_bound_in_scope("models", scope)
     for stmt in scope.body:
-        if not _stmt_reads_are_quarantined(stmt, trusted, local_sanctioned):
+        if not _stmt_reads_are_quarantined(
+            stmt, trusted, local_sanctioned, models_shadowed
+        ):
             return False
-        _update_trust_from_stmt(stmt, trusted, local_sanctioned)
+        _update_trust_from_stmt(stmt, trusted, local_sanctioned, models_shadowed)
     return True
 
 
@@ -596,12 +692,13 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
             continue
         tree = ast.parse(py.read_text())
         sanctioned = _sanctioned_totp_getter_aliases(tree, py)
+        module_rebound = _module_level_rebound_names(tree)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if not _scope_reads_totp_secret(fn):
                 continue
-            if not _scope_totp_reads_are_quarantined(fn, sanctioned):
+            if not _scope_totp_reads_are_quarantined(fn, sanctioned, module_rebound):
                 offenders.append(f"{rel}:{fn.lineno} {fn.name}")
     assert not offenders, (
         "Every `totp_secret` read must be on a receiver sourced from a "
@@ -781,7 +878,7 @@ def _is_imperative_mutating_registration(node: ast.AST) -> bool:
     return _kwargs_contain_mutating_method(node.keywords)
 
 
-def _is_origin_dependency(node: ast.AST) -> bool:
+def _is_origin_dependency(node: ast.AST, vso_shadowed: bool = False) -> bool:
     """True iff `node` is a real `Depends(verify_same_origin)` call --
     a Call whose function is the bare name `Depends` and whose
     `verify_same_origin` argument is supplied either as the first
@@ -795,7 +892,15 @@ def _is_origin_dependency(node: ast.AST) -> bool:
 
     Rejects substring-only matches: a parameter literally NAMED
     `verify_same_origin`, an annotation referencing the symbol, or a
-    docstring/comment containing the token are all not the dependency."""
+    docstring/comment containing the token are all not the dependency.
+
+    `vso_shadowed=True` rejects every match: a module-level rebind of
+    `verify_same_origin` to a different callable shadows the imported
+    symbol for every downstream `Depends(verify_same_origin)`
+    reference, so the gate isn't actually wired even though the AST
+    still contains the Name."""
+    if vso_shadowed:
+        return False
     if not isinstance(node, ast.Call):
         return False
     if not isinstance(node.func, ast.Name) or node.func.id != "Depends":
@@ -835,6 +940,11 @@ def test_state_mutating_routes_all_carry_origin_gate():
     offenders: list[str] = []
     for py in _py_files(APP_DIR):
         tree = ast.parse(py.read_text())
+        # `verify_same_origin` rebound at module scope shadows the
+        # imported symbol for every downstream Depends(...) reference
+        # in this file -- the decorator runs at definition time using
+        # the lexical binding then-in-scope. Compute once per file.
+        vso_shadowed = "verify_same_origin" in _module_level_rebound_names(tree)
         # Pass 1: decorator-style registrations on FunctionDef /
         # AsyncFunctionDef. Both sync `def` and `async def` shapes
         # are valid FastAPI handlers (e.g. app/routes/sender.py::
@@ -858,11 +968,13 @@ def test_state_mutating_routes_all_carry_origin_gate():
             # (the parameter-default form) inherits to every decorator
             # since it applies to the handler's own call.
             sig_has_dep = any(
-                _is_origin_dependency(inner) for inner in ast.walk(node.args)
+                _is_origin_dependency(inner, vso_shadowed)
+                for inner in ast.walk(node.args)
             )
             for deco in mutating_decos:
                 deco_has_dep = any(
-                    _is_origin_dependency(inner) for inner in ast.walk(deco)
+                    _is_origin_dependency(inner, vso_shadowed)
+                    for inner in ast.walk(deco)
                 )
                 if not (deco_has_dep or sig_has_dep):
                     rel = py.relative_to(REPO_ROOT)
@@ -881,7 +993,9 @@ def test_state_mutating_routes_all_carry_origin_gate():
         for node in ast.walk(tree):
             if not _is_imperative_mutating_registration(node):
                 continue
-            ok = any(_is_origin_dependency(inner) for inner in ast.walk(node))
+            ok = any(
+                _is_origin_dependency(inner, vso_shadowed) for inner in ast.walk(node)
+            )
             if not ok:
                 rel = py.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}:{node.lineno} add_api_route(...)")
