@@ -777,7 +777,14 @@ def _import_binds_name_from_non_canonical_source(
     return False unconditionally -- importing `urllib` shouldn't make
     `urllib` a shadowed name. Returns False if `name` is in the dict
     but the import comes from a canonical source -- that's the legit
-    binding."""
+    binding.
+
+    `from X import *` is treated conservatively: since we can't
+    statically know which names X exposes, the wildcard could pull
+    `name` in. Return True iff X is NOT a canonical source for
+    `name`. Wildcard from a canonical source is fine (the legit
+    binding could still be reached this way), wildcard from
+    elsewhere shadows."""
     allowed = _CANONICAL_IMPORT_SOURCES.get(name)
     if allowed is None:
         return False
@@ -786,6 +793,10 @@ def _import_binds_name_from_non_canonical_source(
             _resolve_import_module(stmt, file_path) if file_path is not None else None
         )
         for alias in stmt.names:
+            if alias.name == "*":
+                if resolved not in allowed:
+                    return True
+                continue
             bound = alias.asname or alias.name
             if bound == name and resolved not in allowed:
                 return True
@@ -800,21 +811,64 @@ def _import_binds_name_from_non_canonical_source(
     return False
 
 
+def _node_binds_name(node: ast.AST, name: str, file_path: pathlib.Path | None) -> bool:
+    """True iff `node` is a single AST node (statement or expression
+    inside one) that introduces a new local binding for `name`.
+    Covers every name-binding shape Python supports inside a function
+    body that we care about for shadowing checks:
+
+      Assign          `<name> = expr`           (also tuple/list unpack)
+      AnnAssign       `<name>: T = expr`
+      For / AsyncFor  `for <name> in iter:`     (loop variable; tuple
+                                                  unpacking too)
+      With / AsyncWith `with cm as <name>:`     (context-manager binding)
+      ExceptHandler   `except E as <name>:`     (handler exception
+                                                  binding)
+      Import / ImportFrom from a NON-canonical source (delegates to
+                      `_import_binds_name_from_non_canonical_source`).
+    """
+    if isinstance(node, ast.Assign):
+        return any(name in _names_bound_by_target(t) for t in node.targets)
+    if isinstance(node, ast.AnnAssign):
+        return name in _names_bound_by_target(node.target)
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        return name in _names_bound_by_target(node.target)
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        for item in node.items:
+            if item.optional_vars is not None and name in _names_bound_by_target(
+                item.optional_vars
+            ):
+                return True
+        return False
+    if isinstance(node, ast.ExceptHandler):
+        # `except E as <name>:` -- `node.name` is a plain str, not a
+        # Name node.
+        return node.name == name
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return _import_binds_name_from_non_canonical_source(node, name, file_path)
+    return False
+
+
 def _name_is_bound_in_scope(
     name: str,
     scope: ast.AST,
     file_path: pathlib.Path | None = None,
 ) -> bool:
     """True iff `name` is bound somewhere in `scope` (function
-    parameters, local Assign / AnnAssign, or a non-canonical
-    function-local `import` / `from ... import`) and would therefore
-    SHADOW the module-level binding for the duration of this function.
+    parameters, local Assign / AnnAssign, For-loop / With-as /
+    Except-as bindings, or a non-canonical function-local `import` /
+    `from ... import`) and would therefore SHADOW the module-level
+    binding for the duration of this function.
 
     Function-local `import attacker as models` rebinds `models` to a
     non-data-layer package; subsequent `models.<getter>(...)` calls
-    inside this function must NOT count as sanctioned. Imports from
-    a canonical source for `name` (per `_CANONICAL_IMPORT_SOURCES`)
-    don't shadow -- they're how the legit symbol can be brought in."""
+    inside this function must NOT count as sanctioned. Loop / with /
+    except bindings are equally rebinding -- `for models in ...`
+    captures each iter element, `with cm() as models` captures the
+    context manager's `__enter__` return, `except E as models` binds
+    the caught exception. None of these resolve to the data-layer
+    package. Imports from a canonical source for `name` (per
+    `_CANONICAL_IMPORT_SOURCES`) don't shadow."""
     if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return False
     args = scope.args
@@ -825,21 +879,7 @@ def _name_is_bound_in_scope(
         return True
     if args.kwarg is not None and args.kwarg.arg == name:
         return True
-    for node in _walk_local(scope):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    return True
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.target.id == name
-        ) or (
-            isinstance(node, (ast.Import, ast.ImportFrom))
-            and _import_binds_name_from_non_canonical_source(node, name, file_path)
-        ):
-            return True
-    return False
+    return any(_node_binds_name(node, name, file_path) for node in _walk_local(scope))
 
 
 def _module_level_rebound_names(
