@@ -215,28 +215,96 @@ function chainEndsWithName(node, targetName) {
   return resolvesToGlobalObject(u.object);
 }
 
-// Predicate: `node` is a CallExpression whose callee, after unwrapping
-// optional chains, is a MemberExpression whose RECEIVER chain ends at
-// `objectName` (possibly through `window.` / `globalThis.`). Catches
-// `console.log(...)`, `console?.log(...)`, `console["log"](...)`,
-// `console?.["log"]?.(...)`, AND `window.console.log(...)` /
-// `globalThis.console.log(...)` and their optional/bracket variants.
+// Peel `Function.prototype.{call, apply, bind}` wrappers off a Call
+// node and return the LOGICAL callee + arguments -- i.e., the
+// function actually being invoked and the arguments it actually
+// receives once `thisArg`-and-friends are stripped. Returns null if
+// the input isn't a CallExpression.
+//
+// The four shapes peeled (each becomes equivalent to bare `fn(args)`
+// for our predicates' purposes):
+//
+//   fn.call(thisArg, a, b)     -> callee=fn, args=[a, b]
+//   fn.apply(thisArg, [a, b])  -> callee=fn, args=[a, b] (literal Array
+//                                 only; non-literal `apply` args can't
+//                                 be statically resolved -- args is
+//                                 returned as null in that case)
+//   fn.bind(thisArg, p1)(a)    -> callee=fn, args=[p1, a]
+//   fn(a)                      -> callee=fn, args=[a]   (no wrapper)
+//
+// Without this peel, `fetch.call(window, "https://evil")`,
+// `console.log.bind(console)(secret)`, `setTimeout.apply(window,
+// ["code", 0])`, etc. all execute the same dangerous APIs but slip
+// past the chain-ends-with predicates because the outer callee is
+// `<fn>.{call, apply}` (a MemberExpression with the wrong final
+// property name) or the entire bind() invocation result.
+function effectiveCall(node) {
+  if (!node || node.type !== 'CallExpression') return null;
+  const callee = unwrapSequence(unwrapChain(node.callee));
+
+  // Shape: fn.bind(thisArg, ...partials)(args...) -- outer callee is
+  // itself a CallExpression whose callee is `<fn>.bind`. The bound
+  // function is `<fn>`; the logical args are `[...partials,
+  // ...outerArgs]`.
+  if (callee && callee.type === 'CallExpression') {
+    const innerCallee = unwrapSequence(unwrapChain(callee.callee));
+    if (
+      innerCallee &&
+      innerCallee.type === 'MemberExpression' &&
+      memberPropertyName(innerCallee) === 'bind'
+    ) {
+      const partials = callee.arguments.slice(1);
+      return { callee: innerCallee.object, args: [...partials, ...node.arguments] };
+    }
+  }
+
+  // Shape: fn.call(thisArg, ...args) or fn.apply(thisArg, argsArray)
+  if (callee && callee.type === 'MemberExpression') {
+    const prop = memberPropertyName(callee);
+    if (prop === 'call') {
+      return { callee: callee.object, args: node.arguments.slice(1) };
+    }
+    if (prop === 'apply') {
+      const argsArray = node.arguments[1];
+      if (argsArray && argsArray.type === 'ArrayExpression') {
+        return { callee: callee.object, args: argsArray.elements };
+      }
+      // Non-literal apply args -- callee identified, args unknown.
+      return { callee: callee.object, args: null };
+    }
+  }
+
+  return { callee: node.callee, args: node.arguments };
+}
+
+// Predicate: `node` is a CallExpression whose LOGICAL callee (after
+// peeling .call/.apply/.bind wrappers) is a MemberExpression whose
+// RECEIVER chain ends at `objectName` (possibly through `window.` /
+// `globalThis.` / `self.` of any depth). Catches `console.log(...)`,
+// `console?.log(...)`, `console["log"](...)`, `console?.["log"]?.(...)`,
+// `window.console.log(...)`, `console.log.call(console, x)`,
+// `console.log.bind(console)(x)`, and their optional/bracket variants.
 function isMethodCallOn(node, objectName) {
   if (node.type !== 'CallExpression') return false;
-  const callee = unwrapChain(node.callee);
+  const eff = effectiveCall(node);
+  if (!eff) return false;
+  const callee = unwrapSequence(unwrapChain(eff.callee));
   if (!callee || callee.type !== 'MemberExpression') return false;
   return chainEndsWithName(callee.object, objectName);
 }
 
-// Predicate: `node` is a Call (or NewExpression) whose callee resolves
-// to the global identifier `name`. Catches `fn(...)`, `fn?.(...)`,
-// `new fn(...)`, AND `window.fn(...)` / `globalThis.fn(...)` and their
-// optional/bracket variants. The latter forms execute the same global
-// API as the bare call, so they're treated identically by the anti-RCE
-// and fetch checks.
+// Predicate: `node` is a Call (or NewExpression) whose LOGICAL callee
+// resolves to the global identifier `name`. Catches `fn(...)`,
+// `fn?.(...)`, `new fn(...)`, `window.fn(...)` / `self.fn(...)` etc.,
+// AND the wrapped forms `fn.call(thisArg, ...)`, `fn.apply(thisArg,
+// [...])`, `fn.bind(thisArg)(...)`. NewExpression doesn't go through
+// `effectiveCall` because `new fn.call(...)` etc. aren't meaningful
+// JS shapes.
 function isBareCallOf(node, name) {
-  if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return false;
-  return chainEndsWithName(node.callee, name);
+  if (node.type === 'NewExpression') return chainEndsWithName(node.callee, name);
+  if (node.type !== 'CallExpression') return false;
+  const eff = effectiveCall(node);
+  return Boolean(eff && chainEndsWithName(eff.callee, name));
 }
 
 const ABSOLUTE_URL_RE = /^(?:https?:)?\/\//;
@@ -297,13 +365,18 @@ describe('JS architectural fitness functions', () => {
           );
           return;
         }
-        if (
-          (isBareCallOf(node, 'setTimeout') || isBareCallOf(node, 'setInterval')) &&
-          isStringShapedArg(node.arguments[0])
-        ) {
-          offenders.push(
-            `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
-          );
+        if (isBareCallOf(node, 'setTimeout') || isBareCallOf(node, 'setInterval')) {
+          // The "first argument" check must use the LOGICAL arg list
+          // -- after .call/.apply/.bind wrappers strip the thisArg.
+          // `setTimeout.call(window, "code", 0)` has `node.arguments
+          // [0] === Identifier("window")` but the actual first arg
+          // the function receives is "code".
+          const eff = effectiveCall(node);
+          if (eff?.args && isStringShapedArg(eff.args[0])) {
+            offenders.push(
+              `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
+            );
+          }
         }
       });
     }
@@ -429,7 +502,15 @@ describe('JS architectural fitness functions', () => {
         // whose first quasi starts with `https?://` or `//` is a
         // hard-coded absolute URL regardless of any later
         // interpolation, and gets flagged.
-        const prefix = staticStringPrefix(node.arguments[0]);
+        //
+        // Use the LOGICAL first arg via `effectiveCall` so wrapped
+        // forms like `fetch.call(window, "https://evil")` and
+        // `fetch.bind(window)("https://evil")` are checked against
+        // the URL the function actually receives, not against the
+        // thisArg/etc. that .call/.apply/.bind interpose.
+        const eff = effectiveCall(node);
+        if (!eff?.args) return;
+        const prefix = staticStringPrefix(eff.args[0]);
         if (prefix == null) return;
         if (ABSOLUTE_URL_RE.test(prefix)) {
           offenders.push(
