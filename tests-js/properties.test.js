@@ -240,3 +240,141 @@ describe('property: i18n.t() interpolation', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// sender/hints.js -- threshold transitions
+// ---------------------------------------------------------------------------
+
+describe('property: sender/hints.js threshold transitions', () => {
+  // bindCounterHint has four bands keyed off `input.value.length`:
+  //   len < counterAt*max         -- idle (hidden, OR shows the static
+  //                                  idleText captured at init time)
+  //   counterAt*max <= len < warningAt*max
+  //                                -- counter visible, no modifier
+  //   warningAt*max <= len < max  -- counter visible with .is-warning
+  //   len >= max                  -- counter frozen with .is-error
+  //
+  // Properties test the boundary semantics across the full input
+  // length range. Because bindCounterHint installs DOM listeners on
+  // first call, each property mounts a fresh DOM + reload and drives
+  // the binder via dispatched `input` events.
+
+  const MAX = 100;
+  const COUNTER_AT = Math.floor(0.75 * MAX);
+  const WARNING_AT = Math.floor(0.95 * MAX);
+  let bindCounterHint;
+  let bindPassphraseHint;
+
+  beforeEach(async () => {
+    document.body.innerHTML = `
+      <textarea id="content" maxlength="${MAX}"></textarea>
+      <p id="content-hint" hidden></p>
+      <input id="passphrase" maxlength="200" />
+      <p id="passphrase-hint" hidden></p>
+    `;
+    const mod = await loadModule('sender/hints');
+    bindCounterHint = mod.bindCounterHint;
+    bindPassphraseHint = mod.bindPassphraseHint;
+  });
+
+  function setLenAndFire(input, len) {
+    input.value = 'x'.repeat(len);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
+
+  it('counter hint stays idle when length is under counterAt', () => {
+    const input = document.getElementById('content');
+    const hint = document.getElementById('content-hint');
+    bindCounterHint(input, hint, MAX);
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: COUNTER_AT - 1 }), (len) => {
+        setLenAndFire(input, len);
+        // No modifier classes; the hint is either hidden (no idle text
+        // captured) or showing the idle text. The textarea here has no
+        // pre-existing static text, so it stays hidden.
+        expect(hint.classList.contains('is-warning')).toBe(false);
+        expect(hint.classList.contains('is-error')).toBe(false);
+        expect(hint.hidden).toBe(true);
+      }),
+      { numRuns: PROP_RUNS }
+    );
+  });
+
+  it('counter hint shows counter (no modifier) in [counterAt, warningAt)', () => {
+    const input = document.getElementById('content');
+    const hint = document.getElementById('content-hint');
+    bindCounterHint(input, hint, MAX);
+    fc.assert(
+      fc.property(fc.integer({ min: COUNTER_AT, max: WARNING_AT - 1 }), (len) => {
+        setLenAndFire(input, len);
+        expect(hint.hidden).toBe(false);
+        expect(hint.classList.contains('is-warning')).toBe(false);
+        expect(hint.classList.contains('is-error')).toBe(false);
+      }),
+      { numRuns: PROP_RUNS }
+    );
+  });
+
+  it('counter hint adds is-warning in [warningAt, max)', () => {
+    const input = document.getElementById('content');
+    const hint = document.getElementById('content-hint');
+    bindCounterHint(input, hint, MAX);
+    fc.assert(
+      fc.property(fc.integer({ min: WARNING_AT, max: MAX - 1 }), (len) => {
+        setLenAndFire(input, len);
+        expect(hint.hidden).toBe(false);
+        expect(hint.classList.contains('is-warning')).toBe(true);
+        expect(hint.classList.contains('is-error')).toBe(false);
+      }),
+      { numRuns: PROP_RUNS }
+    );
+  });
+
+  it('counter hint flips to is-error at the ceiling and stays there', () => {
+    const input = document.getElementById('content');
+    const hint = document.getElementById('content-hint');
+    bindCounterHint(input, hint, MAX);
+    // The browser-side maxlength would truncate input above MAX, but
+    // the binder's logic treats `len >= max` as the frozen-error band
+    // regardless of truncation -- so we only test up to MAX itself.
+    fc.assert(
+      fc.property(fc.integer({ min: MAX, max: MAX + 50 }), (len) => {
+        // Bypass maxlength by setting value directly (jsdom doesn't
+        // enforce it; production would, but the binder reacts to the
+        // value the input actually carries at the time of the input
+        // event).
+        input.value = 'x'.repeat(len);
+        input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        expect(hint.hidden).toBe(false);
+        expect(hint.classList.contains('is-error')).toBe(true);
+        expect(hint.classList.contains('is-warning')).toBe(false);
+      }),
+      { numRuns: PROP_RUNS }
+    );
+  });
+
+  it('passphrase hint stays hidden below threshold and warns at/above', () => {
+    // bindPassphraseHint(input, hintEl, max, threshold = 0.9). One
+    // band: hidden below threshold*max, .is-warning at-or-above.
+    // Verify monotonicity: any len < threshold-cap is hidden; any
+    // len >= threshold-cap is visible with the warning class.
+    const PMAX = 200;
+    const PTHRESHOLD = Math.floor(0.9 * PMAX);
+    const input = document.getElementById('passphrase');
+    const hint = document.getElementById('passphrase-hint');
+    bindPassphraseHint(input, hint, PMAX);
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: PMAX + 20 }), (len) => {
+        input.value = 'x'.repeat(len);
+        input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        if (len >= PTHRESHOLD) {
+          expect(hint.hidden).toBe(false);
+          expect(hint.classList.contains('is-warning')).toBe(true);
+        } else {
+          expect(hint.hidden).toBe(true);
+        }
+      }),
+      { numRuns: PROP_RUNS }
+    );
+  });
+});
