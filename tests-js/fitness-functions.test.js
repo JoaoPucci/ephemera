@@ -41,34 +41,120 @@ function findJsFiles(dir) {
 
 const JS_FILES = findJsFiles(STATIC_DIR);
 
-// Strip block comments (`/* ... */`) before regex matching, while
-// preserving every original character position: comment characters
-// become spaces, newlines inside the block are kept. This means the
-// stripped text has the same length and the same line numbers as the
-// source -- crucial for accurate `path:line` offender reports when
-// the regex match crosses lines.
+// Strip `/* ... */` block comments while preserving every original
+// character position: comment chars become spaces, newlines stay.
+// Length-preserving keeps `path:line` offender reports accurate when
+// a regex match crosses lines.
 //
-// Line comments (`// ...`) are intentionally NOT stripped. The
-// "obvious" stripper would treat `'//evil.example/x'` inside a string
-// as a comment (because the `//` is preceded by `'`, not `:`) and erase
-// it -- which is exactly the protocol-relative URL the same-origin
-// fitness check is supposed to catch. Robust line-comment detection
-// would need a real JS lexer; the pragmatic alternative is to leave
-// line comments in. Verified against the current source: the only
-// line comment in production JS that mentions a risky pattern is
-// two-click.js:115 ("Log to console.error..."), and the regex
-// requires `console.<method>(` with an open paren, which the comment
-// doesn't have. New comments that DO contain full call expressions
-// would be flagged -- which is arguably correct: a comment saying
-// "we removed `console.log(secret)` here" should ideally not survive
-// in source.
+// Walks character-by-character with simple state-tracking so the
+// stripper doesn't mistake `/*` / `*/` sequences inside string or
+// template literals for real comment delimiters. Without this, code
+// like `const x = "/*"; console.log("secret"); const y = "*/";` would
+// have the middle line erased (the regex sees one giant block comment
+// from the first `/*` literal to the trailing `*/` literal), letting
+// banned patterns evade every fitness check via valid JavaScript.
 //
-// JS string and template literals are also not stripped, but the
-// patterns this file matches don't appear inside string literals in
-// production code today; if a future change puts one inside a string,
-// the right move is to refactor that string rather than relax the test.
+// Tracked contexts:
+//   - Code: block comments stripped here.
+//   - Line comments (`// ...` to newline): preserved as-is so a
+//     comment containing `/*` or `*/` doesn't trip the stripper.
+//     (Line comments themselves are not stripped -- the earlier
+//     `(^|[^:])` line-comment stripper ate `//` in protocol-relative
+//     URL strings, which we now intentionally allow to reach the
+//     fetch-test regex.)
+//   - String literals (`'...'`, `"..."`): contents preserved, walked
+//     with backslash-escape handling. Unterminated strings end at
+//     newline (matches JS's actual behavior; protects against runaway
+//     consumption on a malformed file).
+//   - Template literals (`` `...` ``): contents preserved, with simple
+//     `${...}` depth tracking. Code inside `${}` interpolations is
+//     NOT recursively scanned for block comments -- a documented
+//     limitation, since recursing would require a real parser.
+//   - Regex literals (`/.../flags`): NOT explicitly tracked. The
+//     realistic shapes in this codebase (i18n placeholder, alphanum
+//     filter, fragment anchor) don't contain `/*` or `*/`. A future
+//     regex literal embedding those delimiters would be mis-handled;
+//     if one is added, this scanner needs a regex-state branch.
 function stripBlockComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '));
+  const out = [];
+  const n = source.length;
+  let i = 0;
+  while (i < n) {
+    const ch = source[i];
+    const nx = i + 1 < n ? source[i + 1] : '';
+
+    if (ch === '/' && nx === '*') {
+      const end = source.indexOf('*/', i + 2);
+      if (end === -1) {
+        // Unterminated -- pad the tail with spaces, keep newlines.
+        for (let j = i; j < n; j++) out.push(source[j] === '\n' ? '\n' : ' ');
+        return out.join('');
+      }
+      for (let j = i; j <= end + 1; j++) out.push(source[j] === '\n' ? '\n' : ' ');
+      i = end + 2;
+      continue;
+    }
+
+    if (ch === '/' && nx === '/') {
+      while (i < n && source[i] !== '\n') {
+        out.push(source[i]);
+        i++;
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      out.push(ch);
+      i++;
+      while (i < n) {
+        const c = source[i];
+        if (c === '\\' && i + 1 < n) {
+          out.push(c, source[i + 1]);
+          i += 2;
+          continue;
+        }
+        out.push(c);
+        i++;
+        if (c === quote || c === '\n') break;
+      }
+      continue;
+    }
+
+    if (ch === '`') {
+      out.push(ch);
+      i++;
+      let depth = 0;
+      while (i < n) {
+        const c = source[i];
+        if (c === '\\' && i + 1 < n) {
+          out.push(c, source[i + 1]);
+          i += 2;
+          continue;
+        }
+        if (c === '$' && i + 1 < n && source[i + 1] === '{') {
+          out.push(c, '{');
+          i += 2;
+          depth++;
+          continue;
+        }
+        if (c === '}' && depth > 0) {
+          out.push(c);
+          i++;
+          depth--;
+          continue;
+        }
+        out.push(c);
+        i++;
+        if (c === '`' && depth === 0) break;
+      }
+      continue;
+    }
+
+    out.push(ch);
+    i++;
+  }
+  return out.join('');
 }
 
 function relPath(file) {
