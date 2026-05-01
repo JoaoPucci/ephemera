@@ -354,33 +354,6 @@ def _is_sanctioned_or_none_source(
     return False
 
 
-def _locals_bound_to_sanctioned_getter(
-    scope: ast.AST, sanctioned_aliases: set[str]
-) -> set[str]:
-    """Set of local Name targets bound to a sanctioned-getter result
-    inside `scope`. Walks Assign statements (skipping nested function
-    bodies) and records `Name(X)` targets whose RHS is a
-    sanctioned-or-None source.
-
-    Limitation: doesn't track reassignment. `user = sanctioned(...);
-    user = other(...); user["totp_secret"]` would still treat `user`
-    as trusted because it once held a sanctioned value. A full
-    reaching-definitions pass would close that; the simple binding-set
-    is enough to catch the basic co-occurrence bypass while keeping
-    the helper readable. Tuple-unpacking and walrus assignments are
-    also out of scope; they don't appear in this codebase."""
-    bound: set[str] = set()
-    for node in _walk_local(scope):
-        if not isinstance(node, ast.Assign):
-            continue
-        if not _is_sanctioned_or_none_source(node.value, sanctioned_aliases):
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                bound.add(target.id)
-    return bound
-
-
 def _is_trusted_totp_receiver(
     recv: ast.AST, trusted_locals: set[str], sanctioned_aliases: set[str]
 ) -> bool:
@@ -400,21 +373,13 @@ def _is_trusted_totp_receiver(
     return False
 
 
-def _scope_totp_reads_are_quarantined(
-    scope: ast.AST, sanctioned_aliases: set[str]
+def _stmt_reads_are_quarantined(
+    stmt: ast.AST, trusted: set[str], sanctioned_aliases: set[str]
 ) -> bool:
-    """True iff every `totp_secret` read in `scope` is on a receiver
-    that came from a sanctioned-getter call (a name bound from one,
-    or the call expression itself). Replaces the earlier file-scope
-    co-occurrence check, which would pass any function that called
-    a sanctioned getter once AND read `totp_secret` from a different
-    object elsewhere -- a real bypass class.
-
-    Returns True if `scope` contains no `totp_secret` read at all,
-    so callers should still gate on `_scope_reads_totp_secret` first
-    when they want to skip read-free functions."""
-    trusted = _locals_bound_to_sanctioned_getter(scope, sanctioned_aliases)
-    for node in _walk_local(scope):
+    """Check every `totp_secret` read inside `stmt` against the
+    `trusted` set as it stands BEFORE the statement runs. Returns
+    False on the first untrusted receiver."""
+    for node in _walk_local(stmt):
         if (
             isinstance(node, ast.Subscript)
             and isinstance(node.ctx, ast.Load)
@@ -435,6 +400,71 @@ def _scope_totp_reads_are_quarantined(
             )
         ):
             return False
+    return True
+
+
+def _update_trust_from_stmt(
+    stmt: ast.AST, trusted: set[str], sanctioned_aliases: set[str]
+) -> None:
+    """Walk every `Assign` reachable in `stmt` (including those inside
+    `if` / `try` / loop branches) and update `trusted` in place: a
+    sanctioned-or-None RHS adds the target name; any other RHS REVOKES
+    the target name. Linear ordering inside the function body is the
+    caller's responsibility (process statements in source order); this
+    helper only handles the within-statement update.
+
+    Catches the basic reassignment-bypass `user = sanctioned();
+    user = other(); user["totp_secret"]` -- the second assign revokes
+    `user` from `trusted`, so the subsequent read fails the receiver
+    check. Branch-specific reassignment (`if cond: user = other()`)
+    is also caught because `_walk_local` descends into branch bodies
+    when collecting Assigns; this is intentionally aggressive (a
+    branch that REASSIGNS to something un-trusted revokes trust for
+    the rest of the function, even if at runtime the branch wouldn't
+    have run -- the conservative direction)."""
+    for node in _walk_local(stmt):
+        if not isinstance(node, ast.Assign):
+            continue
+        sanctioned = _is_sanctioned_or_none_source(node.value, sanctioned_aliases)
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                continue
+            if sanctioned:
+                trusted.add(target.id)
+            else:
+                trusted.discard(target.id)
+
+
+def _scope_totp_reads_are_quarantined(
+    scope: ast.AST, sanctioned_aliases: set[str]
+) -> bool:
+    """True iff every `totp_secret` read in `scope` is on a receiver
+    that's trusted at the point of the read. Walks the function body
+    statement-by-statement in source order, maintaining a `trusted`
+    set that's MUTATED as Assigns happen:
+
+      stmt 1:  user = sanctioned()    -- adds `user` to trusted
+      stmt 2:  user = other()         -- removes `user` from trusted
+      stmt 3:  return user[\"totp_secret\"]  -- user not trusted -> FAIL
+
+    The flow-sensitive shape closes the basic reassignment-bypass
+    that a static set would miss: trust must be invalidated on
+    reassignment, not just established once.
+
+    Limitation: branch-specific reassignment (`if cond: user =
+    other()`) revokes trust for the rest of the function body
+    unconditionally -- the conservative direction. A future full
+    reaching-definitions pass could distinguish "trust survives if
+    branch didn't run" from "trust revoked everywhere," but the
+    branched bypass is rare and the conservative posture matches
+    the rest of the test."""
+    if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return True
+    trusted: set[str] = set()
+    for stmt in scope.body:
+        if not _stmt_reads_are_quarantined(stmt, trusted, sanctioned_aliases):
+            return False
+        _update_trust_from_stmt(stmt, trusted, sanctioned_aliases)
     return True
 
 
@@ -514,13 +544,18 @@ def test_analytics_events_table_has_a_single_writer():
         "app/models/migrations/v4.py",
         "app/models/migrations/v5.py",
     }
-    # SQL keyword + (optional schema prefix) + (optionally quoted)
-    # `analytics_events`. Covers every realistic SQLite/SQL form:
+    # SQL keyword (or comma in a multi-table FROM list) + optional
+    # schema prefix + (optionally quoted) `analytics_events`. Covers
+    # every realistic SQLite/SQL form:
     #   FROM analytics_events
     #   JOIN analytics_events                  (any join family --
     #                                           INNER / LEFT / OUTER /
     #                                           CROSS all reduce to
     #                                           the JOIN keyword)
+    #   FROM users, analytics_events           (comma-join: ANSI implicit
+    #                                           join, second table after
+    #                                           the comma in a FROM
+    #                                           multi-table list)
     #   FROM main.analytics_events             (schema-qualified)
     #   FROM "analytics_events"                (standard double quotes)
     #   FROM `analytics_events`                (MySQL-style backticks)
@@ -530,14 +565,10 @@ def test_analytics_events_table_has_a_single_writer():
     # matches like `analytics_events_archive` don't trigger; the quoted
     # versions are anchored by their closing delimiter.
     #
-    # Limitations:
-    #   `RENAME TO ...` is a separate keyword we don't list here -- the
-    #   only RENAME sites are inside the migration allowlist.
-    #   Comma-separated FROM lists (`FROM users, analytics_events`)
-    #   are also unmatched; they're rare in modern SQL and the
-    #   codebase doesn't use them.
+    # Limitation: `RENAME TO ...` is a separate keyword we don't list
+    # here -- the only RENAME sites are inside the migration allowlist.
     sql_ref = re.compile(
-        r"\b(?:FROM|INTO|UPDATE|TABLE|ON|EXISTS|JOIN)\s+"
+        r"(?:\b(?:FROM|INTO|UPDATE|TABLE|ON|EXISTS|JOIN)\s+|,\s*)"
         r"(?:\w+\.)?"
         r"(?:"
         r'"_?analytics_events"'
