@@ -107,19 +107,43 @@ def _string_text_outside_docstrings(tree: ast.AST):
 
 
 def _autherror_local_names(tree: ast.AST) -> set[str]:
-    """Set of names in this module that resolve to AuthError. Always
-    includes the literal "AuthError" (covers the class definition in
-    _core.py + every direct `from ._core import AuthError`), plus any
-    local alias from `from ... import AuthError as <X>`. Without alias
-    resolution, `from ._core import AuthError as LoginError` followed
-    by `raise LoginError("wrong password")` would silently ship per-
-    factor wording while the test stayed green."""
+    """Set of names in this module that resolve to AuthError. Two
+    alias channels are tracked:
+
+      ImportFrom: `from ._core import AuthError as <X>` -- standard
+                  import aliasing.
+      Assign:     `<X> = AuthError` at module level -- in-module
+                  rebinding. Iterated to fixed point so chains like
+                  `A1 = AuthError; A2 = A1` propagate through.
+
+    Without both channels, an in-module alias would silently bypass
+    the canonical-message check: `LoginError = AuthError; raise
+    LoginError("wrong password")` would not match
+    `_is_autherror_construction` because `LoginError` wasn't in the
+    set."""
     names = {"AuthError"}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name == "AuthError":
                     names.add(alias.asname or "AuthError")
+    # Module-level alias assignments. Only top-level `body` is walked
+    # (not function-local rebinding) because the canonical-message
+    # rule applies to module-scope identity of the AuthError class;
+    # function-local shadowing would be a different bug class.
+    if isinstance(tree, ast.Module):
+        changed = True
+        while changed:
+            changed = False
+            for stmt in tree.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                if not (isinstance(stmt.value, ast.Name) and stmt.value.id in names):
+                    continue
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name) and target.id not in names:
+                        names.add(target.id)
+                        changed = True
     return names
 
 
@@ -452,6 +476,14 @@ def _update_trust_from_stmt(
                     trusted.add(target.id)
                 else:
                     trusted.discard(target.id)
+                    # Rebinding an imported sanctioned-getter NAME to a
+                    # non-sanctioned RHS shadows the import in this
+                    # function's scope, so subsequent `<name>(uid)` calls
+                    # no longer count as sanctioned. Mutates the caller's
+                    # local copy of the alias set; the module-level set
+                    # passed in by the test stays untouched.
+                    if target.id in sanctioned_aliases:
+                        sanctioned_aliases.discard(target.id)
         elif isinstance(node, ast.AnnAssign):
             if node.value is None:
                 continue
@@ -461,6 +493,8 @@ def _update_trust_from_stmt(
                 trusted.add(node.target.id)
             else:
                 trusted.discard(node.target.id)
+                if node.target.id in sanctioned_aliases:
+                    sanctioned_aliases.discard(node.target.id)
 
 
 def _scope_totp_reads_are_quarantined(
@@ -489,10 +523,18 @@ def _scope_totp_reads_are_quarantined(
     if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return True
     trusted: set[str] = set()
+    # Per-function copy of the sanctioned-alias set. Function-local
+    # rebinding of an imported getter name shadows the import in this
+    # scope only; the module-level set the caller maintains stays
+    # untouched. Without this, `get_user_with_totp_by_id = other_thing;
+    # user = get_user_with_totp_by_id(uid); user["totp_secret"]` would
+    # bypass -- the Name still appears in the (immutable) module-level
+    # alias set even though the local name resolves elsewhere.
+    local_sanctioned = set(sanctioned_aliases)
     for stmt in scope.body:
-        if not _stmt_reads_are_quarantined(stmt, trusted, sanctioned_aliases):
+        if not _stmt_reads_are_quarantined(stmt, trusted, local_sanctioned):
             return False
-        _update_trust_from_stmt(stmt, trusted, sanctioned_aliases)
+        _update_trust_from_stmt(stmt, trusted, local_sanctioned)
     return True
 
 
