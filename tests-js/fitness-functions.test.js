@@ -65,28 +65,39 @@ const PARSED = findJsFiles(STATIC_DIR).map((file) => {
   return { file, rel: relPath(file), ast, aliasMap: buildAliasMap(ast) };
 });
 
-// Walk the entire AST and build a Name -> chain map for every
+// Walk the entire AST and build a Name -> Array<chain> map for every
 // `const|let|var <name> = <chain>` declaration where `<chain>` is
 // either an Identifier or a MemberExpression (the kinds we
 // statically recognize as references to globals or methods on them).
 // This catches the alias-bypass pattern at every scope:
 //
-//   const f = fetch;          aliasMap.set('f', Identifier('fetch'))
-//   const log = console.log;  aliasMap.set('log', Member(console, log))
+//   const f = fetch;          aliasMap.set('f', [Identifier('fetch')])
+//   const log = console.log;  aliasMap.set('log', [Member(console, log)])
 //   function fn() {           aliasMap also catches function-local
 //     const e = eval;         aliases like `const e = eval` so
 //     e(payload);             `e(payload)` reaches the eval check
 //   }
 //
-// Single map covering all scopes. False-positive risk: a
-// function-local alias `const f = fetch` in one function leaks to
-// any use of `f` elsewhere in the file, even if the other scope's
-// `f` resolves to something different. For the realistic codebase
-// the trade is fine -- aliases are rare and the conservative
-// direction (over-flagging) matches the rest of the test posture.
-// A precise scope-aware resolver would need symbol-table tracking
-// for declarations, parameters, rebinds, and inner-function
-// boundaries; out of scope here.
+// Multiple bindings of the same name are appended to the array
+// rather than overwriting. Without per-scope tracking, a single map
+// can't tell whether top-level `const f = fetch` and inner `const f
+// = safeFn` shadow each other or coexist; conservative direction
+// for a fitness checker is to keep BOTH and let predicates OR-match
+// over them. Concretely:
+//
+//   const f = safeFn;            // outer scope
+//   function attack() {
+//     const f = fetch;           // shadowing inner
+//     f("https://evil");         // -> aliasMap['f'] = [safeFn, fetch]
+//   }                            //    OR-match -> fetch reachable -> flag
+//
+// False-positive risk: a non-attacking inner `const f = fetch` plus
+// an outer `const f = safeFn; f(...)` could be flagged on the outer
+// call. For the realistic codebase the trade is fine -- aliases of
+// dangerous globals are rare in benign code, and over-flagging is
+// the safer side of a security-shape check. A precise scope-aware
+// resolver would need symbol-table tracking for declarations,
+// parameters, rebinds, and inner-function boundaries; out of scope.
 function buildAliasMap(ast) {
   // Inline walk (rather than calling `walkAST`) because this runs at
   // module-load time during the PARSED initialization, before
@@ -106,7 +117,9 @@ function buildAliasMap(ast) {
           init.type === 'MemberExpression' ||
           init.type === 'ChainExpression'
         ) {
-          map.set(decl.id.name, init);
+          const list = map.get(decl.id.name);
+          if (list) list.push(init);
+          else map.set(decl.id.name, [init]);
         }
       }
     }
@@ -124,19 +137,32 @@ function buildAliasMap(ast) {
   return map;
 }
 
-// If `node` is (eventually) a Name in `aliasMap`, return the mapped
-// chain. Iterates through alias-of-alias chains up to a small depth
-// to bail on cycles. Returns the original node if no aliasing
-// applies, so callers can use the result as a drop-in replacement.
+// Return an array of candidate chains that `node` can resolve to
+// under the alias map. Always returns at least one element (the
+// input itself, when no aliasing applies) so callers iterate
+// uniformly. Walks through alias-of-alias chains, expanding every
+// branch when a name has multiple bindings. Tracks visited names to
+// bail on cycles, and caps depth at 8 per branch as a belt-and-
+// braces guard.
 function resolveAlias(node, aliasMap) {
-  if (!aliasMap) return node;
-  let cur = node;
-  for (let i = 0; i < 8; i++) {
+  if (!aliasMap) return [node];
+  const out = [];
+  function walk(cur, depth, seen) {
+    if (depth > 8) {
+      out.push(cur);
+      return;
+    }
     const u = cur && cur.type === 'ChainExpression' ? cur.expression : cur;
-    if (!u || u.type !== 'Identifier' || !aliasMap.has(u.name)) return cur;
-    cur = aliasMap.get(u.name);
+    if (!u || u.type !== 'Identifier' || !aliasMap.has(u.name) || seen.has(u.name)) {
+      out.push(cur);
+      return;
+    }
+    const next = new Set(seen);
+    next.add(u.name);
+    for (const candidate of aliasMap.get(u.name)) walk(candidate, depth + 1, next);
   }
-  return cur;
+  walk(node, 0, new Set());
+  return out.length > 0 ? out : [node];
 }
 
 // Generic AST walker. `visit(node, parent)` is called for every node;
@@ -257,13 +283,17 @@ function unwrapSequence(node) {
 // (`window === window.window === window.self === globalThis`), so any
 // chain of them is equivalent to bare access for fitness purposes.
 function resolvesToGlobalObject(node, aliasMap) {
-  let cur = unwrapSequence(unwrapChain(resolveAlias(node, aliasMap)));
-  while (cur) {
-    if (cur.type === 'Identifier') return GLOBAL_OBJECTS.has(cur.name);
-    if (cur.type !== 'MemberExpression') return false;
-    const prop = memberPropertyName(cur);
-    if (prop === null || !GLOBAL_OBJECTS.has(prop)) return false;
-    cur = unwrapSequence(unwrapChain(resolveAlias(cur.object, aliasMap)));
+  for (const candidate of resolveAlias(node, aliasMap)) {
+    const u = unwrapSequence(unwrapChain(candidate));
+    if (!u) continue;
+    if (u.type === 'Identifier') {
+      if (GLOBAL_OBJECTS.has(u.name)) return true;
+      continue;
+    }
+    if (u.type !== 'MemberExpression') continue;
+    const prop = memberPropertyName(u);
+    if (prop === null || !GLOBAL_OBJECTS.has(prop)) continue;
+    if (resolvesToGlobalObject(u.object, aliasMap)) return true;
   }
   return false;
 }
@@ -286,12 +316,18 @@ function resolvesToGlobalObject(node, aliasMap) {
 // Optional chaining at any layer is handled by `unwrapChain`; comma
 // wrapping is handled by `unwrapSequence`.
 function chainEndsWithName(node, targetName, aliasMap) {
-  const u = unwrapSequence(unwrapChain(resolveAlias(node, aliasMap)));
-  if (!u) return false;
-  if (u.type === 'Identifier') return u.name === targetName;
-  if (u.type !== 'MemberExpression') return false;
-  if (memberPropertyName(u) !== targetName) return false;
-  return resolvesToGlobalObject(u.object, aliasMap);
+  for (const candidate of resolveAlias(node, aliasMap)) {
+    const u = unwrapSequence(unwrapChain(candidate));
+    if (!u) continue;
+    if (u.type === 'Identifier') {
+      if (u.name === targetName) return true;
+      continue;
+    }
+    if (u.type !== 'MemberExpression') continue;
+    if (memberPropertyName(u) !== targetName) continue;
+    if (resolvesToGlobalObject(u.object, aliasMap)) return true;
+  }
+  return false;
 }
 
 // Peel `Function.prototype.{call, apply, bind}` wrappers off a Call
@@ -333,9 +369,9 @@ function unwrapBindValue(node) {
 // If `newCallee` is itself a wrapped CallExpression, recurse into it
 // to keep peeling. Returns the deepest underlying function, after
 // also collapsing any trailing `.bind(...)` chain on the value.
-function resolveWrappedCallee(newCallee, depth) {
+function resolveWrappedCallee(newCallee, depth, aliasMap) {
   if (newCallee?.type === 'CallExpression') {
-    const inner = effectiveCall(newCallee, depth + 1);
+    const inner = effectiveCall(newCallee, depth + 1, aliasMap);
     if (inner) return peelBindChain(inner.callee);
   }
   return peelBindChain(newCallee);
@@ -343,29 +379,31 @@ function resolveWrappedCallee(newCallee, depth) {
 
 // Shape: Reflect.apply(fn, thisArg, argsArray)
 //        Reflect.construct(fn, argsArray, newTarget?)
-function peelReflect(callee, node, depth) {
-  if (
-    !callee ||
-    callee.type !== 'MemberExpression' ||
-    !memberPropertyName(callee) ||
-    callee.object.type !== 'Identifier' ||
-    callee.object.name !== 'Reflect'
-  ) {
+//
+// The receiver match is via `chainEndsWithName(callee.object,
+// 'Reflect', aliasMap)`, not a bare-Identifier check, so globally-
+// qualified shapes like `globalThis.Reflect.apply(fetch, ...)` and
+// `window.Reflect.construct(fetch, [...])` and any aliased binding
+// (`const R = globalThis.Reflect; R.apply(...)`) unwrap the same way
+// bare `Reflect.apply(...)` does.
+function peelReflect(callee, node, depth, aliasMap) {
+  if (!callee || callee.type !== 'MemberExpression' || !memberPropertyName(callee)) {
     return null;
   }
+  if (!chainEndsWithName(callee.object, 'Reflect', aliasMap)) return null;
   const which = memberPropertyName(callee);
   if (which !== 'apply' && which !== 'construct') return null;
   const innerFn = node.arguments[0];
   const argsArrayIdx = which === 'apply' ? 2 : 1;
   const argsArray = node.arguments[argsArrayIdx];
   const args = argsArray?.type === 'ArrayExpression' ? argsArray.elements : null;
-  return { callee: resolveWrappedCallee(innerFn, depth), args };
+  return { callee: resolveWrappedCallee(innerFn, depth, aliasMap), args };
 }
 
 // Shape: fn.bind(thisArg, ...partials)(args...) -- outer callee is
 // itself a CallExpression whose callee is `<fn>.bind`. The bound
 // function is `<fn>`; logical args are `[...partials, ...outerArgs]`.
-function peelImmediateBind(callee, node, depth) {
+function peelImmediateBind(callee, node, depth, aliasMap) {
   if (!callee || callee.type !== 'CallExpression') return null;
   const innerCallee = unwrapSequence(unwrapChain(callee.callee));
   if (
@@ -378,11 +416,11 @@ function peelImmediateBind(callee, node, depth) {
   const partials = callee.arguments.slice(1);
   const newCallee = innerCallee.object;
   const newArgs = [...partials, ...node.arguments];
-  return { callee: resolveWrappedCallee(newCallee, depth), args: newArgs };
+  return { callee: resolveWrappedCallee(newCallee, depth, aliasMap), args: newArgs };
 }
 
 // Shape: fn.call(thisArg, ...args) or fn.apply(thisArg, argsArray)
-function peelCallOrApply(callee, node, depth) {
+function peelCallOrApply(callee, node, depth, aliasMap) {
   if (!callee || callee.type !== 'MemberExpression') return null;
   const prop = memberPropertyName(callee);
   if (prop !== 'call' && prop !== 'apply') return null;
@@ -394,10 +432,10 @@ function peelCallOrApply(callee, node, depth) {
     const argsArray = node.arguments[1];
     newArgs = argsArray?.type === 'ArrayExpression' ? argsArray.elements : null;
   }
-  return { callee: resolveWrappedCallee(newCallee, depth), args: newArgs };
+  return { callee: resolveWrappedCallee(newCallee, depth, aliasMap), args: newArgs };
 }
 
-function effectiveCall(node, depth = 0) {
+function effectiveCall(node, depth = 0, aliasMap = null) {
   if (depth > 8) return null;
   if (!node) return null;
   // NewExpression: `new fn(args...)`. No .call/.apply/.bind wrappers
@@ -415,9 +453,12 @@ function effectiveCall(node, depth = 0) {
   // .call()/.apply() chain), so order doesn't matter for correctness;
   // first match wins.
   return (
-    peelReflect(callee, node, depth) ||
-    peelImmediateBind(callee, node, depth) ||
-    peelCallOrApply(callee, node, depth) || { callee: node.callee, args: node.arguments }
+    peelReflect(callee, node, depth, aliasMap) ||
+    peelImmediateBind(callee, node, depth, aliasMap) ||
+    peelCallOrApply(callee, node, depth, aliasMap) || {
+      callee: node.callee,
+      args: node.arguments,
+    }
   );
 }
 
@@ -443,16 +484,20 @@ function peelBindChain(node) {
 // `console.log.bind(console)(x)`, and their optional/bracket variants.
 function isMethodCallOn(node, objectName, aliasMap) {
   if (node.type !== 'CallExpression') return false;
-  const eff = effectiveCall(node);
+  const eff = effectiveCall(node, 0, aliasMap);
   if (!eff) return false;
   // Resolve aliasing on the eff callee BEFORE expecting a Member.
   // `const log = console.log; log(secret)` -- `eff.callee` is
   // Identifier('log'), but resolveAlias substitutes the original
   // `console.log` MemberExpression so the receiver-chain check
-  // still fires.
-  const callee = unwrapSequence(unwrapChain(resolveAlias(eff.callee, aliasMap)));
-  if (!callee || callee.type !== 'MemberExpression') return false;
-  return chainEndsWithName(callee.object, objectName, aliasMap);
+  // still fires. ANY-match: if any candidate binding is a Member on
+  // `objectName`, the call is on that object.
+  for (const candidate of resolveAlias(eff.callee, aliasMap)) {
+    const callee = unwrapSequence(unwrapChain(candidate));
+    if (!callee || callee.type !== 'MemberExpression') continue;
+    if (chainEndsWithName(callee.object, objectName, aliasMap)) return true;
+  }
+  return false;
 }
 
 // Predicate: `node` is a Call (or NewExpression) whose LOGICAL callee
@@ -465,7 +510,7 @@ function isMethodCallOn(node, objectName, aliasMap) {
 function isBareCallOf(node, name, aliasMap) {
   if (node.type === 'NewExpression') return chainEndsWithName(node.callee, name, aliasMap);
   if (node.type !== 'CallExpression') return false;
-  const eff = effectiveCall(node);
+  const eff = effectiveCall(node, 0, aliasMap);
   return Boolean(eff && chainEndsWithName(eff.callee, name, aliasMap));
 }
 
@@ -536,7 +581,7 @@ describe('JS architectural fitness functions', () => {
           // `setTimeout.call(window, "code", 0)` has `node.arguments
           // [0] === Identifier("window")` but the actual first arg
           // the function receives is "code".
-          const eff = effectiveCall(node);
+          const eff = effectiveCall(node, 0, aliasMap);
           if (eff?.args && isStringShapedArg(eff.args[0])) {
             offenders.push(
               `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
@@ -676,7 +721,7 @@ describe('JS architectural fitness functions', () => {
         // `fetch.bind(window)("https://evil")` are checked against
         // the URL the function actually receives, not against the
         // thisArg/etc. that .call/.apply/.bind interpose.
-        const eff = effectiveCall(node);
+        const eff = effectiveCall(node, 0, aliasMap);
         if (!eff?.args) return;
         const prefix = staticStringPrefix(eff.args[0]);
         if (prefix == null) return;
