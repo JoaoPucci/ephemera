@@ -41,17 +41,34 @@ function findJsFiles(dir) {
 
 const JS_FILES = findJsFiles(STATIC_DIR);
 
-// Strip block + line comments before regex matching. The line-comment
-// regex uses `(^|[^:])` so URL strings ('https://...') keep their `//`.
-// JS string and template literals are NOT stripped, but the patterns
-// this file matches (`localStorage.setItem`, `eval(`, etc.) don't appear
-// inside string literals in the production code; if a future change puts
-// one of these patterns in a string literal, the right move is to
-// refactor that string rather than relax the test.
-function stripComments(source) {
-  let out = source.replace(/\/\*[\s\S]*?\*\//g, '');
-  out = out.replace(/(^|[^:])\/\/.*$/gm, '$1');
-  return out;
+// Strip block comments (`/* ... */`) before regex matching, while
+// preserving every original character position: comment characters
+// become spaces, newlines inside the block are kept. This means the
+// stripped text has the same length and the same line numbers as the
+// source -- crucial for accurate `path:line` offender reports when
+// the regex match crosses lines.
+//
+// Line comments (`// ...`) are intentionally NOT stripped. The
+// "obvious" stripper would treat `'//evil.example/x'` inside a string
+// as a comment (because the `//` is preceded by `'`, not `:`) and erase
+// it -- which is exactly the protocol-relative URL the same-origin
+// fitness check is supposed to catch. Robust line-comment detection
+// would need a real JS lexer; the pragmatic alternative is to leave
+// line comments in. Verified against the current source: the only
+// line comment in production JS that mentions a risky pattern is
+// two-click.js:115 ("Log to console.error..."), and the regex
+// requires `console.<method>(` with an open paren, which the comment
+// doesn't have. New comments that DO contain full call expressions
+// would be flagged -- which is arguably correct: a comment saying
+// "we removed `console.log(secret)` here" should ideally not survive
+// in source.
+//
+// JS string and template literals are also not stripped, but the
+// patterns this file matches don't appear inside string literals in
+// production code today; if a future change puts one inside a string,
+// the right move is to refactor that string rather than relax the test.
+function stripBlockComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '));
 }
 
 function relPath(file) {
@@ -59,19 +76,29 @@ function relPath(file) {
 }
 
 // Walk JS_FILES (optionally minus an allowlist of relative paths), apply
-// `predicate` to each (1-indexed) line of the comment-stripped source,
-// and collect `path:line: text` triplets where the predicate fires.
-function findOffenders(predicate, allowlist = new Set()) {
+// `regex` (which MUST have the global flag) to the comment-stripped
+// source AS A WHOLE -- not line-by-line -- so a banned pattern split
+// across lines (`fetch(\n  "https://...")`, `localStorage\n.setItem`,
+// chained `console\n  .log(...)`) still matches. For each match, report
+// the file path, the line number where the match starts, and the text
+// of that starting line trimmed.
+function findOffenders(regex, allowlist = new Set()) {
+  if (!regex.global) {
+    throw new Error('findOffenders: regex must have the global flag');
+  }
   const offenders = [];
   for (const file of JS_FILES) {
     const rel = relPath(file);
     if (allowlist.has(rel)) continue;
-    const text = stripComments(readFileSync(file, 'utf8'));
-    const lines = text.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (predicate(lines[i])) {
-        offenders.push(`${rel}:${i + 1}: ${lines[i].trim()}`);
-      }
+    const text = stripBlockComments(readFileSync(file, 'utf8'));
+    for (const match of text.matchAll(regex)) {
+      const before = text.slice(0, match.index);
+      const lineNumber = before.split('\n').length;
+      const lineStart = before.lastIndexOf('\n') + 1;
+      const lineEndIdx = text.indexOf('\n', match.index);
+      const lineEnd = lineEndIdx === -1 ? text.length : lineEndIdx;
+      const lineText = text.slice(lineStart, lineEnd).trim();
+      offenders.push(`${rel}:${lineNumber}: ${lineText}`);
     }
   }
   return offenders;
@@ -90,13 +117,9 @@ describe('JS architectural fitness functions', () => {
     //  - `setTimeout("foo()", n)` / `setInterval("foo()", n)`: the
     //    string overload delegates to eval too. Function references
     //    are fine; only the string-typed first argument is forbidden.
-    const banned = [
-      /\beval\s*\(/,
-      /\bnew\s+Function\s*\(/,
-      /\bsetTimeout\s*\(\s*['"`]/,
-      /\bsetInterval\s*\(\s*['"`]/,
-    ];
-    const offenders = findOffenders((line) => banned.some((re) => re.test(line)));
+    const banned =
+      /\beval\s*\(|\bnew\s+Function\s*\(|\bsetTimeout\s*\(\s*['"`]|\bsetInterval\s*\(\s*['"`]/g;
+    const offenders = findOffenders(banned);
     expect(offenders, `Anti-RCE violations:\n  ${offenders.join('\n  ')}`).toEqual([]);
   });
 
@@ -118,7 +141,7 @@ describe('JS architectural fitness functions', () => {
     // add itself to the allowlist below, rather than landing the call
     // by reflex.
     const allowlist = new Set(['app/static/two-click.js']);
-    const offenders = findOffenders((line) => /\bconsole\s*\.\s*\w+\s*\(/.test(line), allowlist);
+    const offenders = findOffenders(/\bconsole\s*\.\s*\w+\s*\(/g, allowlist);
     expect(offenders, `Non-allowlisted console.* calls:\n  ${offenders.join('\n  ')}`).toEqual([]);
   });
 
@@ -148,10 +171,7 @@ describe('JS architectural fitness functions', () => {
       'app/static/i18n.js',
       'app/static/sender/url-cache.js',
     ]);
-    const offenders = findOffenders(
-      (line) => /\b(local|session)Storage\s*\.\s*\w+\s*\(/.test(line),
-      allowlist
-    );
+    const offenders = findOffenders(/\b(?:local|session)Storage\s*\.\s*\w+\s*\(/g, allowlist);
     expect(
       offenders,
       `Non-allowlisted (local|session)Storage calls:\n  ${offenders.join('\n  ')}`
@@ -161,21 +181,32 @@ describe('JS architectural fitness functions', () => {
   // -------------------------------------------------------------------
   // 4. fetch() URLs are same-origin
   // -------------------------------------------------------------------
-  it('forbids absolute http(s) URLs in fetch()', () => {
+  it('forbids absolute or protocol-relative URLs in fetch()', () => {
     // The application is single-origin by deployment -- every API
     // route lives at /api/..., /send/..., /s/..., or /static/...
-    // relative to the page. An absolute http(s) URL passed to fetch()
-    // would either be a configuration leak (a hard-coded staging /
+    // relative to the page. An absolute URL passed to fetch() would
+    // either be a configuration leak (a hard-coded staging /
     // production hostname) or a cross-origin call that could leak
     // the user's session cookie or the secret URL fragment.
     //
-    // The CSP also has `connect-src 'self'`, so an absolute URL would
-    // fail at runtime; this test catches the regression at source
-    // before a release ships and the browser silently drops the call.
-    const offenders = findOffenders((line) => /\bfetch\s*\(\s*['"`]https?:\/\//.test(line));
+    // Three shapes are forbidden:
+    //   fetch("https://...")    explicit https
+    //   fetch("http://...")     explicit http (also a downgrade smell)
+    //   fetch("//host/path")    protocol-relative -- inherits the
+    //                            page's scheme but goes to a different
+    //                            host, still cross-origin
+    //
+    // The CSP `connect-src 'self'` would block all three at runtime;
+    // this test catches them at source so the regression doesn't
+    // ship and the browser doesn't silently drop the call.
+    //
+    // Limitation: only literal URL arguments are detected. A variable
+    // holding an absolute URL slips through. Catching every literal
+    // is the high-leverage win; runtime CSP catches the rest.
+    const offenders = findOffenders(/\bfetch\s*\(\s*['"`](?:https?:)?\/\//g);
     expect(
       offenders,
-      `Absolute-URL fetch calls (should be relative paths):\n  ${offenders.join('\n  ')}`
+      `Absolute / protocol-relative fetch calls (should be relative paths):\n  ${offenders.join('\n  ')}`
     ).toEqual([]);
   });
 
@@ -199,10 +230,7 @@ describe('JS architectural fitness functions', () => {
     // The pattern `[+\-*/%&|^]?=(?!=)` matches `=`, `+=`, `-=`, etc.
     // but excludes equality comparisons (`==`, `===`).
     const allowlist = new Set(['app/static/sender/tracked-list.js']);
-    const offenders = findOffenders(
-      (line) => /\.(inner|outer)HTML\b\s*[+\-*/%&|^]?=(?!=)/.test(line),
-      allowlist
-    );
+    const offenders = findOffenders(/\.(?:inner|outer)HTML\b\s*[+\-*/%&|^]?=(?!=)/g, allowlist);
     expect(
       offenders,
       `Non-allowlisted innerHTML/outerHTML assignments:\n  ${offenders.join('\n  ')}`
