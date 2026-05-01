@@ -819,7 +819,7 @@ def test_property_session_cookie_rejects_byte_flip(
     ),
 )
 @settings(
-    max_examples=200,
+    max_examples=500,
     # tmp_db_path is function-scoped; hypothesis would otherwise warn
     # that the fixture isn't re-run per example. Stable per-test
     # secret_key across examples is exactly what we want for a
@@ -828,20 +828,22 @@ def test_property_session_cookie_rejects_byte_flip(
 )
 def test_property_session_cookie_rejects_arbitrary_strings(tmp_db_path, raw: str):
     """For any random printable-ASCII string that we did NOT mint, the
-    cookie reader returns None instead of raising or returning a
-    malformed pair. Catches edge cases: empty string, string with
-    colons but no signature, signed-looking string with garbage HMAC,
-    etc."""
+    cookie reader returns None. Catches edge cases: empty string,
+    string with colons but no signature, signed-looking string with
+    garbage HMAC. Random strings have astronomically-low odds of
+    happening to forge a valid HMAC against the test's secret key
+    (the signature space is 2^256 wide); a non-None return means
+    EITHER hypothesis hit such a 1-in-2^N collision (effectively
+    never) OR a regression dropped signature verification entirely
+    -- which is exactly what we want this property to catch.
+    Asserting None strictly is the load-bearing check; a tuple-of-
+    ints assertion would be vacuous because read_session_cookie
+    constructs the tuple via int() casts unconditionally."""
     from app import dependencies
 
     parsed = dependencies.read_session_cookie(raw)
-    if parsed is None:
-        return  # expected for any non-minted input
-    # A garbage string that happens to parse means our generator hit a
-    # 1-in-2^N collision against a real HMAC, OR there's a parse path
-    # that should have rejected. Hypothesis will shrink to a minimal
-    # collision example if either is wrong.
-    uid, gen = parsed
-    assert isinstance(uid, int) and isinstance(gen, int), (
-        f"non-integer payload for {raw!r}: {parsed!r}"
+    assert parsed is None, (
+        f"non-minted string {raw!r} parsed as {parsed!r} -- "
+        "either signature verification dropped, or hypothesis hit a "
+        "1-in-2^N HMAC collision (file an issue if reproducible)"
     )
