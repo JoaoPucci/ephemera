@@ -123,26 +123,31 @@ def _autherror_local_names(tree: ast.AST) -> set[str]:
     return names
 
 
-def _raise_calls_autherror(
-    node: ast.Raise, autherror_names: set[str]
-) -> ast.Call | None:
-    """If `node` is `raise <X>(...)` where `<X>` is a name resolving to
-    AuthError (Name form against `autherror_names`, OR Attribute form
-    with trailing `.AuthError` regardless of module alias), return the
-    Call node; otherwise None."""
-    if not isinstance(node.exc, ast.Call):
-        return None
-    func = node.exc.func
+def _is_autherror_construction(call: ast.Call, autherror_names: set[str]) -> bool:
+    """True iff `call` constructs an AuthError instance: `AuthError(...)`,
+    `auth_core.AuthError(...)`, or an aliased `LoginError(...)` where
+    `LoginError` was imported from the data layer (recorded in
+    `autherror_names`).
+
+    Checking constructions instead of the narrower `raise <Call>(...)`
+    pattern catches two-step shapes the earlier helper missed:
+
+        err = AuthError("wrong password")
+        raise err
+
+    The construction itself is the message-bearing site -- if the
+    call's first arg isn't the canonical string, the eventual raise
+    leaks the per-factor wording regardless of how many local
+    variables sit between the two."""
+    func = call.func
     name = None
     if isinstance(func, ast.Name):
         name = func.id
     elif isinstance(func, ast.Attribute):
         name = func.attr
     if name is None:
-        return None
-    if name == "AuthError" or name in autherror_names:
-        return node.exc
-    return None
+        return False
+    return name == "AuthError" or name in autherror_names
 
 
 def test_authentication_only_raises_canonical_credential_error():
@@ -164,15 +169,14 @@ def test_authentication_only_raises_canonical_credential_error():
         tree = ast.parse(py.read_text())
         autherror_names = _autherror_local_names(tree)
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Raise):
+            if not isinstance(node, ast.Call):
                 continue
-            call = _raise_calls_autherror(node, autherror_names)
-            if call is None:
+            if not _is_autherror_construction(node, autherror_names):
                 continue
             ok = (
-                call.args
-                and isinstance(call.args[0], ast.Constant)
-                and call.args[0].value == canonical
+                node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == canonical
             )
             if not ok:
                 rel = py.relative_to(REPO_ROOT)
@@ -600,16 +604,28 @@ def test_state_mutating_routes_all_carry_origin_gate():
             ]
             if not mutating_decos:
                 continue
-            roots: list[ast.AST] = list(mutating_decos)
-            roots.append(node.args)
-            ok = any(
-                _is_origin_dependency(inner)
-                for root in roots
-                for inner in ast.walk(root)
+            # Each mutating decorator must be individually gated. Stacked
+            # registrations like `@router.post(...,
+            # dependencies=[Depends(verify_same_origin)])` +
+            # `@router.delete(...)` -- where one decorator wires the gate
+            # and another doesn't -- previously passed because we OR'd
+            # all decorators together. The post route's dependency would
+            # mask the delete route's missing gate. Now check every
+            # decorator separately; the function-signature dependency
+            # (the parameter-default form) inherits to every decorator
+            # since it applies to the handler's own call.
+            sig_has_dep = any(
+                _is_origin_dependency(inner) for inner in ast.walk(node.args)
             )
-            if not ok:
-                rel = py.relative_to(REPO_ROOT)
-                offenders.append(f"{rel}:{node.lineno} {node.name}")
+            for deco in mutating_decos:
+                deco_has_dep = any(
+                    _is_origin_dependency(inner) for inner in ast.walk(deco)
+                )
+                if not (deco_has_dep or sig_has_dep):
+                    rel = py.relative_to(REPO_ROOT)
+                    offenders.append(
+                        f"{rel}:{deco.lineno} {node.name} (.{deco.func.attr})"
+                    )
         # Pass 2: imperative `<expr>.add_api_route(path, endpoint,
         # methods=[...])` calls anywhere in the module. We can't
         # follow the endpoint reference to its signature statically,
