@@ -131,25 +131,52 @@ function memberPropertyName(node) {
   return null;
 }
 
-// Predicate: `node` is a CallExpression whose callee resolves (through
-// any combination of optional chaining and bracket access) to a member
-// access rooted on `objectName`. Catches `console.log`,
-// `console?.log`, `console["log"]`, `console?.["log"]?.(...)`, etc.
+// Names that count as "the global object" -- callees rooted at either
+// of these are treated as if the dangerous global were referenced bare.
+// Without this, `window.eval(...)`, `globalThis.fetch("https://...")`,
+// `window.console.log(secret)`, `window.localStorage.setItem(...)`
+// would all bypass the bare-name and method-on-name predicates.
+const GLOBAL_OBJECTS = new Set(['window', 'globalThis']);
+
+// Resolve whether `node` (a callee chain or a member-access object)
+// ultimately refers to the global named `targetName`. True for:
+//   - bare `targetName` -- Identifier(targetName)
+//   - `window.<targetName>` / `globalThis.<targetName>` -- a single
+//     Member step from a global root, with the property name (dot or
+//     bracket-string form) matching `targetName`
+// Optional chaining at any layer is handled by `unwrapChain`.
+function chainEndsWithName(node, targetName) {
+  const u = unwrapChain(node);
+  if (!u) return false;
+  if (u.type === 'Identifier') return u.name === targetName;
+  if (u.type !== 'MemberExpression') return false;
+  if (memberPropertyName(u) !== targetName) return false;
+  const obj = unwrapChain(u.object);
+  return Boolean(obj && obj.type === 'Identifier' && GLOBAL_OBJECTS.has(obj.name));
+}
+
+// Predicate: `node` is a CallExpression whose callee, after unwrapping
+// optional chains, is a MemberExpression whose RECEIVER chain ends at
+// `objectName` (possibly through `window.` / `globalThis.`). Catches
+// `console.log(...)`, `console?.log(...)`, `console["log"](...)`,
+// `console?.["log"]?.(...)`, AND `window.console.log(...)` /
+// `globalThis.console.log(...)` and their optional/bracket variants.
 function isMethodCallOn(node, objectName) {
   if (node.type !== 'CallExpression') return false;
   const callee = unwrapChain(node.callee);
   if (!callee || callee.type !== 'MemberExpression') return false;
-  return rootIdentifierName(callee) === objectName;
+  return chainEndsWithName(callee.object, objectName);
 }
 
 // Predicate: `node` is a Call (or NewExpression) whose callee resolves
-// to the bare identifier `name`. Catches `fn(...)`, `fn?.(...)`,
-// `new fn(...)`. Member-access calls (`obj.fn(...)`) are NOT a match;
-// see `isMethodCallOn` for that.
+// to the global identifier `name`. Catches `fn(...)`, `fn?.(...)`,
+// `new fn(...)`, AND `window.fn(...)` / `globalThis.fn(...)` and their
+// optional/bracket variants. The latter forms execute the same global
+// API as the bare call, so they're treated identically by the anti-RCE
+// and fetch checks.
 function isBareCallOf(node, name) {
   if (node.type !== 'CallExpression' && node.type !== 'NewExpression') return false;
-  const callee = unwrapChain(node.callee);
-  return callee && callee.type === 'Identifier' && callee.name === name;
+  return chainEndsWithName(node.callee, name);
 }
 
 const ABSOLUTE_URL_RE = /^(?:https?:)?\/\//;
