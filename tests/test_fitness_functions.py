@@ -30,6 +30,27 @@ def _py_files(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
 
 
+def _walk_local(node: ast.AST):
+    """`ast.walk` variant that yields the input node + descendants but
+    does NOT recurse into nested `FunctionDef` / `AsyncFunctionDef` /
+    `Lambda` bodies. Use this for per-function analysis: a nested
+    helper has its own scope, so its statements shouldn't count toward
+    the enclosing function's coupling -- and the nested helper itself
+    will be walked independently when the outer loop reaches it."""
+    from collections import deque
+
+    queue = deque([(node, True)])
+    while queue:
+        current, is_root = queue.popleft()
+        yield current
+        if not is_root and isinstance(
+            current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+        ):
+            continue
+        for child in ast.iter_child_nodes(current):
+            queue.append((child, False))
+
+
 def _string_constants_outside_docstrings(tree: ast.AST):
     """Yield every ast.Constant string node that is NOT a module / function
     / class docstring. Comments are already stripped by ast.parse, so the
@@ -145,14 +166,16 @@ def test_authentication_only_raises_canonical_credential_error():
 # ---------------------------------------------------------------------------
 
 
-def _scope_reads_totp_secret(tree: ast.AST) -> bool:
-    """True iff `tree` performs a real READ of `totp_secret` -- a Load-
-    context subscript (`x["totp_secret"]`) or a `.pop` / `.get` call
-    that returns the value. Store/Del subscripts (`row["totp_secret"]
-    = "[redacted]"`, `del row["totp_secret"]`) are NOT reads -- they
-    don't expose the plaintext value, so they don't need a
-    `_with_totp` getter on the same path."""
-    for node in ast.walk(tree):
+def _scope_reads_totp_secret(scope: ast.AST) -> bool:
+    """True iff `scope` performs a real READ of `totp_secret` in its
+    own body -- a Load-context subscript (`x["totp_secret"]`) or a
+    `.pop` / `.get` call that returns the value. Store/Del subscripts
+    (`row["totp_secret"] = "[redacted]"`, `del row["totp_secret"]`)
+    are NOT reads -- they don't expose the plaintext value.
+
+    Nested function bodies are skipped: a helper `def` inside `scope`
+    has its own scope and will be analyzed independently."""
+    for node in _walk_local(scope):
         if (
             isinstance(node, ast.Subscript)
             and isinstance(node.ctx, ast.Load)
@@ -172,12 +195,13 @@ def _scope_reads_totp_secret(tree: ast.AST) -> bool:
     return False
 
 
-def _scope_calls_with_totp_getter(tree: ast.AST) -> bool:
-    """True iff `tree` actually CALLS a `get_user_with_totp_*` function --
-    a real `Call` node, not just a comment, import, or string mentioning
-    the name. The substring fallback in an earlier draft could be tricked
-    by an import line or docstring containing the token."""
-    for node in ast.walk(tree):
+def _scope_calls_with_totp_getter(scope: ast.AST) -> bool:
+    """True iff `scope` actually CALLS a `get_user_with_totp_*` function
+    in its own body -- a real `Call` node, not a comment, import, or
+    string. Nested function bodies are skipped so a helper's getter
+    call can't satisfy the enclosing function's read; the helper is
+    analyzed in its own right when the outer loop reaches it."""
+    for node in _walk_local(scope):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -328,12 +352,17 @@ def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
 
 
 def _is_origin_dependency(node: ast.AST) -> bool:
-    """True iff `node` is a real `Depends(verify_same_origin)` call -- a
-    Call whose function is the bare name `Depends` and whose first
-    positional arg is the bare name `verify_same_origin`. Catches both
-    shapes used in the codebase:
-        dependencies=[Depends(verify_same_origin)]   # decorator form
-        _origin = Depends(verify_same_origin)        # parameter form
+    """True iff `node` is a real `Depends(verify_same_origin)` call --
+    a Call whose function is the bare name `Depends` and whose
+    `verify_same_origin` argument is supplied either as the first
+    positional arg OR via FastAPI's documented `dependency=` keyword.
+    Catches every shape used (or potentially used) in the codebase:
+
+        dependencies=[Depends(verify_same_origin)]             # positional
+        _origin = Depends(verify_same_origin)                  # positional
+        Depends(dependency=verify_same_origin)                 # keyword
+        dependencies=[Depends(dependency=verify_same_origin)]  # keyword
+
     Rejects substring-only matches: a parameter literally NAMED
     `verify_same_origin`, an annotation referencing the symbol, or a
     docstring/comment containing the token are all not the dependency."""
@@ -341,10 +370,18 @@ def _is_origin_dependency(node: ast.AST) -> bool:
         return False
     if not isinstance(node.func, ast.Name) or node.func.id != "Depends":
         return False
-    if not node.args:
-        return False
-    first = node.args[0]
-    return isinstance(first, ast.Name) and first.id == "verify_same_origin"
+    if node.args:
+        first = node.args[0]
+        if isinstance(first, ast.Name) and first.id == "verify_same_origin":
+            return True
+    for kw in node.keywords:
+        if (
+            kw.arg == "dependency"
+            and isinstance(kw.value, ast.Name)
+            and kw.value.id == "verify_same_origin"
+        ):
+            return True
+    return False
 
 
 def test_state_mutating_routes_all_carry_origin_gate():
