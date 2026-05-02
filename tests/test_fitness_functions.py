@@ -885,45 +885,63 @@ def _apply_walrus_in_expr(
                                                 # nested walrus would have
                                                 # blessed it
 
-    silently bless the outer read. `_walk_walrus_scope_local` skips
+    silently bless the outer read. `_walrus_rebinds_in_order` skips
     nested FunctionDef / AsyncFunctionDef / ClassDef / Lambda bodies
     so only walruses that actually bind in the enclosing scope are
-    applied."""
+    applied.
+
+    Order also matters. The previous shape used a breadth-first
+    walker, which could process a SHALLOW walrus *after* a deeper
+    walrus on the same target -- the wrong order. Concretely,
+
+        [(tmp := (user := sanctioned())), (user := unsanctioned())]
+
+    runs `user := sanctioned()` first (inside the deeper walrus),
+    then `user := unsanctioned()` second; net result at runtime
+    is `user` unsanctioned. BFS yielded the second list element's
+    walrus before the inner walrus inside the first, leaving the
+    running state ending in `sanctioned`. Now we walk in DFS
+    evaluation order: each `NamedExpr.value` (and its inner
+    walruses) is visited before the `NamedExpr` itself, matching
+    Python's evaluation rules."""
     if expr is None:
         return set(trusted), set(aliases)
     nt, na = set(trusted), set(aliases)
-    for node in _walk_walrus_scope_local(expr):
-        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
-            sanctioned = _is_sanctioned_or_none_source(node.value, na, models_shadowed)
-            if sanctioned:
-                nt.add(node.target.id)
-            else:
-                nt.discard(node.target.id)
-                na.discard(node.target.id)
+    for node in _walrus_rebinds_in_order(expr):
+        sanctioned = _is_sanctioned_or_none_source(node.value, na, models_shadowed)
+        if sanctioned:
+            nt.add(node.target.id)
+        else:
+            nt.discard(node.target.id)
+            na.discard(node.target.id)
     return nt, na
 
 
-def _walk_walrus_scope_local(node: ast.AST):
-    """`ast.walk` variant for collecting walrus bindings that bind in
-    the enclosing scope. Yields the input node + descendants but does
-    NOT descend into nested `FunctionDef` / `AsyncFunctionDef` /
-    `ClassDef` / `Lambda` bodies -- those are separate scopes per PEP
-    572, so a walrus inside one of them does not mutate the caller's
-    locals. Comprehensions ARE descended into (their walrus targets
-    explicitly bind the containing scope, by PEP 572)."""
-    from collections import deque
+def _walrus_rebinds_in_order(node: ast.AST):
+    """Yield every `NamedExpr` (walrus) inside `node` whose target
+    is a `Name`, in Python's evaluation order. Stops at nested
+    scope boundaries (`FunctionDef` / `AsyncFunctionDef` /
+    `ClassDef` / `Lambda`); comprehensions are descended into per
+    PEP 572's containing-scope rule.
 
-    queue = deque([(node, True)])
-    while queue:
-        current, is_root = queue.popleft()
-        yield current
-        if not is_root and isinstance(
-            current,
-            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
-        ):
-            continue
-        for child in ast.iter_child_nodes(current):
-            queue.append((child, False))
+    Within a `NamedExpr`, the `value` runs first (and may itself
+    contain inner walruses), then the target is bound -- the
+    recursion descends into `value` before yielding the outer
+    walrus. For other expression shapes the recursion follows
+    `ast.iter_child_nodes` order, which matches source / evaluation
+    order for the common cases (`BinOp.left` then `BinOp.right`,
+    `Call.func` then `Call.args`, list elements left-to-right)."""
+    if isinstance(
+        node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+    ):
+        return
+    if isinstance(node, ast.NamedExpr):
+        yield from _walrus_rebinds_in_order(node.value)
+        if isinstance(node.target, ast.Name):
+            yield node
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _walrus_rebinds_in_order(child)
 
 
 # ---------------------------------------------------------------------------
@@ -2746,25 +2764,56 @@ def _module_level_callable_aliases(tree: ast.AST) -> dict[str, list[ast.expr]]:
 
     `if True` is still a module-scope binding -- the conditional
     only gates whether the rebind happens, not the scope it lands
-    in."""
+    in.
+
+    Tuple / list destructuring is paired element-wise. The shape
+
+        post, _ = router.post, None
+
+    binds `post` to `router.post` (and `_` to `None`). The
+    pairing recurses, so nested unpacks like
+
+        (post, (helper, _)) = (router.post, (utils.helper, None))
+
+    bind every reachable Name -> RHS pair. Mismatched lengths or
+    starred targets / values bail out and contribute nothing
+    (we'd rather miss a candidate than mis-pair them)."""
     aliases: dict[str, list[ast.expr]] = {}
     if not isinstance(tree, ast.Module):
         return aliases
     for node in _walk_module_scope(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and isinstance(
-                    node.value, (ast.Name, ast.Attribute, ast.Call)
-                ):
-                    aliases.setdefault(target.id, []).append(node.value)
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.value is not None
-            and isinstance(node.value, (ast.Name, ast.Attribute, ast.Call))
-        ):
-            aliases.setdefault(node.target.id, []).append(node.value)
+                _record_callable_alias(target, node.value, aliases)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            _record_callable_alias(node.target, node.value, aliases)
     return aliases
+
+
+def _record_callable_alias(
+    target: ast.expr,
+    value: ast.expr,
+    aliases: dict[str, list[ast.expr]],
+) -> None:
+    """Walk an assignment target / value pair and record every
+    `Name -> (Name | Attribute | Call)` alias the pair establishes.
+    Recurses through tuple / list destructuring, pairing elements
+    element-wise. Anything else (Subscript / Attribute target,
+    Starred element, length mismatch) silently skips that branch
+    -- the goal is to avoid mis-pairing, not to flag every shape."""
+    if isinstance(target, ast.Name):
+        if isinstance(value, (ast.Name, ast.Attribute, ast.Call)):
+            aliases.setdefault(target.id, []).append(value)
+        return
+    if (
+        isinstance(target, (ast.Tuple, ast.List))
+        and isinstance(value, (ast.Tuple, ast.List))
+        and len(target.elts) == len(value.elts)
+        and not any(isinstance(e, ast.Starred) for e in target.elts)
+        and not any(isinstance(e, ast.Starred) for e in value.elts)
+    ):
+        for sub_target, sub_value in zip(target.elts, value.elts, strict=False):
+            _record_callable_alias(sub_target, sub_value, aliases)
 
 
 def _resolve_callable(
