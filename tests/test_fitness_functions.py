@@ -266,7 +266,7 @@ def _scope_reads_totp_secret(scope: ast.AST) -> bool:
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"pop", "get"}
+            and node.func.attr in {"pop", "get", "setdefault"}
             and node.args
         ):
             first = node.args[0]
@@ -507,7 +507,7 @@ def _stmt_reads_are_quarantined(
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"pop", "get"}
+            and node.func.attr in {"pop", "get", "setdefault"}
             and node.args
             and isinstance(node.args[0], ast.Constant)
             and node.args[0].value == "totp_secret"
@@ -599,18 +599,53 @@ def _apply_annassign(
     return nt, na
 
 
+def _apply_walrus_in_expr(
+    expr: ast.expr | None,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+) -> tuple[set[str], set[str]]:
+    """Apply every walrus binding (`name := value`) reachable inside
+    `expr` to (trusted, aliases), in source order. Returns fresh sets.
+
+    Walrus assignments in `if` / `while` headers, `match` subjects, and
+    For-loop iters bind in the enclosing scope and run BEFORE the
+    branching body (PEP 572). Without this hook, a reassignment like
+    `if (user := models.get_user_by_id(uid)):` would leave a trusted
+    `user` from earlier in the function trusted through both branches.
+
+    `ast.walk` descends through nested expressions, including list /
+    set / dict / generator comprehensions (PEP 572 explicitly says
+    walrus in those binds the enclosing scope). Skipping nested
+    `Lambda` would be the precise move, but the realistic codebase
+    doesn't ship lambdas with walrus side effects, and over-revoking
+    matches the rest of the test posture."""
+    if expr is None:
+        return set(trusted), set(aliases)
+    nt, na = set(trusted), set(aliases)
+    for node in ast.walk(expr):
+        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            sanctioned = _is_sanctioned_or_none_source(node.value, na, models_shadowed)
+            if sanctioned:
+                nt.add(node.target.id)
+            else:
+                nt.discard(node.target.id)
+                na.discard(node.target.id)
+    return nt, na
+
+
 def _apply_if(
     stmt: ast.If, trusted: set[str], aliases: set[str], models_shadowed: bool
 ) -> tuple[set[str], set[str]]:
-    """Thread the pre-If state through body and orelse separately, then
-    intersect the per-branch results: trust survives the construct only
-    if it survives on EVERY reachable path. Closes the bypass where one
-    branch reassigns to an unsanctioned source -- the other branch's
-    sanctioned reassignment can no longer "win" by visit order."""
-    if_t, if_a = _apply_seq(stmt.body, set(trusted), set(aliases), models_shadowed)
-    else_t, else_a = _apply_seq(
-        stmt.orelse, set(trusted), set(aliases), models_shadowed
-    )
+    """Evaluate any walrus bindings in the test, then thread the
+    resulting state through body and orelse separately and intersect:
+    trust survives the construct only if it survives on EVERY reachable
+    path. The walrus binding from the test is visible in BOTH branches
+    (it ran before the conditional jump), so it's applied to the pre-
+    branch state."""
+    pre_t, pre_a = _apply_walrus_in_expr(stmt.test, trusted, aliases, models_shadowed)
+    if_t, if_a = _apply_seq(stmt.body, set(pre_t), set(pre_a), models_shadowed)
+    else_t, else_a = _apply_seq(stmt.orelse, set(pre_t), set(pre_a), models_shadowed)
     return if_t & else_t, if_a & else_a
 
 
@@ -647,8 +682,22 @@ def _apply_loop(
     (body skipped) and the body-end state (body ran ≥ once and
     completed). The For target is bound to elements of `iter`, not
     sanctioned. The else clause runs only if the loop exits without a
-    break; thread it through the body-end state."""
-    body_t, body_a = set(trusted), set(aliases)
+    break; thread it through the body-end state.
+
+    Walrus bindings in the loop's header expression (the iter for For,
+    the test for While) are evaluated at least once on every reachable
+    entry to the loop -- even when the body skips, the iter / test was
+    evaluated to make that decision. Apply them to the pre-loop state
+    so they're reflected in the intersection too."""
+    if isinstance(stmt, ast.While):
+        pre_t, pre_a = _apply_walrus_in_expr(
+            stmt.test, trusted, aliases, models_shadowed
+        )
+    else:
+        pre_t, pre_a = _apply_walrus_in_expr(
+            stmt.iter, trusted, aliases, models_shadowed
+        )
+    body_t, body_a = set(pre_t), set(pre_a)
     if isinstance(stmt, (ast.For, ast.AsyncFor)):
         # Handles bare Name (`for user in rows:`) and tuple / list /
         # starred unpacking (`for user, _ in rows:`,
@@ -659,7 +708,7 @@ def _apply_loop(
             body_a.discard(bound)
     body_t, body_a = _apply_seq(stmt.body, body_t, body_a, models_shadowed)
     else_t, else_a = _apply_seq(stmt.orelse, body_t, body_a, models_shadowed)
-    return set(trusted) & else_t, set(aliases) & else_a
+    return set(pre_t) & else_t, set(pre_a) & else_a
 
 
 def _apply_with(
@@ -728,20 +777,25 @@ def _apply_match(
     aliases: set[str],
     models_shadowed: bool,
 ) -> tuple[set[str], set[str]]:
-    """`match X: case <pat>: <body>` (PEP 634, Python 3.10+). Each
-    case starts from pre-Match state minus the names bound by its
-    pattern (pattern captures are non-sanctioned: any MatchAs,
+    """`match X: case <pat>: <body>` (PEP 634, Python 3.10+). The
+    subject `X` is evaluated once before any case runs -- walrus
+    bindings inside it apply to every case's pre-state. Each case
+    starts from that subject-evaluated state minus the names bound by
+    its pattern (pattern captures are non-sanctioned: any MatchAs,
     MatchStar, MatchMapping rest, etc.). The case body threads through
     sequentially. Post-Match state is the intersection of every
-    case's end state PLUS the pre-Match state for the fall-through
-    path (no case matched at runtime), since static analysis can't
-    prove exhaustiveness in the general case (a wildcard arm can
-    have a guard, a class pattern's class can be malformed, etc.).
-    The conservative direction matches `_apply_if`'s missing-else
-    treatment."""
-    case_states: list[tuple[set[str], set[str]]] = [(set(trusted), set(aliases))]
+    case's end state PLUS the subject-evaluated state for the
+    fall-through path (no case matched at runtime), since static
+    analysis can't prove exhaustiveness in the general case (a
+    wildcard arm can have a guard, a class pattern's class can be
+    malformed, etc.). The conservative direction matches `_apply_if`'s
+    missing-else treatment."""
+    pre_t, pre_a = _apply_walrus_in_expr(
+        stmt.subject, trusted, aliases, models_shadowed
+    )
+    case_states: list[tuple[set[str], set[str]]] = [(set(pre_t), set(pre_a))]
     for case in stmt.cases:
-        case_t, case_a = set(trusted), set(aliases)
+        case_t, case_a = set(pre_t), set(pre_a)
         for bound in _pattern_bound_names(case.pattern):
             case_t.discard(bound)
             case_a.discard(bound)
