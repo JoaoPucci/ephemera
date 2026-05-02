@@ -1667,20 +1667,84 @@ def _module_level_rebound_names(
     if not isinstance(tree, ast.Module):
         return names
     for node in _walk_module_scope(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                names.update(_names_bound_by_target(target))
-        elif isinstance(node, ast.AnnAssign):
-            names.update(_names_bound_by_target(node.target))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
             for tracked_name in _CANONICAL_IMPORT_SOURCES:
                 if _import_binds_name_from_non_canonical_source(
                     node, tracked_name, file_path
                 ):
                     names.add(tracked_name)
+        else:
+            names.update(_names_bound_at_node(node))
     return names
+
+
+def _names_bound_at_node(node: ast.AST) -> list[str]:
+    """Every name `node` itself introduces into its enclosing scope
+    (not the names introduced by descendants -- the caller drives
+    the walk). Mirrors `_node_binds_name` for the same shape set,
+    but enumerates ALL names at once instead of asking about a
+    single candidate. Covers every binding channel the language
+    offers outside `import` statements:
+
+      Assign / AnnAssign            `<target> = <value>`
+      For / AsyncFor                `for <target> in iter:`
+      With / AsyncWith              `with cm() as <target>:`
+      ExceptHandler                 `except E as <name>:`
+      FunctionDef / AsyncFunctionDef `def <name>(...):`
+      ClassDef                      `class <name>: ...`
+      Match                         `match X: case <pat>:` (every
+                                    case's pattern bindings)
+      NamedExpr                     `(<name> := <expr>)`
+
+    A module-level rebind through any of these channels shadows
+    just like a top-level Assign would. The previous shape only
+    tracked Assign / AnnAssign / def / class / import, so a walrus
+    in a top-level `if` (`if (verify_same_origin := fake): ...`)
+    or a top-level `for verify_same_origin in [...]`,
+    `with cm() as verify_same_origin`, `except E as
+    verify_same_origin`, or `match X: case verify_same_origin: ...`
+    would silently rebind without setting `vso_shadowed` /
+    `depends_shadowed` / `models` -- letting both fitness checks
+    miss a real invariant break."""
+    if isinstance(node, ast.Assign):
+        return _names_from_assign_targets(node.targets)
+    if isinstance(node, ast.AnnAssign):
+        return _names_bound_by_target(node.target)
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        return _names_bound_by_target(node.target)
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return _names_from_with_items(node.items)
+    if isinstance(node, ast.ExceptHandler):
+        return [node.name] if node.name else []
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return [node.name]
+    if isinstance(node, ast.Match):
+        return _names_from_match_cases(node.cases)
+    if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+        return [node.target.id]
+    return []
+
+
+def _names_from_assign_targets(targets: list[ast.expr]) -> list[str]:
+    out: list[str] = []
+    for target in targets:
+        out.extend(_names_bound_by_target(target))
+    return out
+
+
+def _names_from_with_items(items: list[ast.withitem]) -> list[str]:
+    out: list[str] = []
+    for item in items:
+        if item.optional_vars is not None:
+            out.extend(_names_bound_by_target(item.optional_vars))
+    return out
+
+
+def _names_from_match_cases(cases: list[ast.match_case]) -> list[str]:
+    out: list[str] = []
+    for case in cases:
+        out.extend(_pattern_bound_names(case.pattern))
+    return out
 
 
 def _walk_module_scope(node: ast.AST):
