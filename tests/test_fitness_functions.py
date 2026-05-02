@@ -484,51 +484,45 @@ def _is_trusted_totp_receiver(
     return False
 
 
-def _stmt_reads_are_quarantined(
-    stmt: ast.AST,
+def _check_reads_in_node(
+    node: ast.AST | None,
     trusted: set[str],
     sanctioned_aliases: set[str],
     models_shadowed: bool = False,
 ) -> bool:
-    """Check every `totp_secret` read inside `stmt` against the
-    `trusted` set as it stands BEFORE the statement runs. Returns
-    False on the first untrusted receiver."""
-    for node in _walk_local(stmt):
+    """Walk `node` (any AST sub-tree -- a single expression, a simple
+    statement, or a nested compound that the structural walker has
+    already chosen to treat as a leaf) and verify every `totp_secret`
+    read is on a trusted receiver at the current state. Returns False
+    on the first untrusted receiver. `_walk_local` skips nested
+    `FunctionDef` / `AsyncFunctionDef` / `Lambda` bodies -- those
+    have their own scopes and are checked independently."""
+    if node is None:
+        return True
+    for sub in _walk_local(node):
         if (
-            isinstance(node, ast.Subscript)
-            and isinstance(node.ctx, ast.Load)
-            and isinstance(node.slice, ast.Constant)
-            and node.slice.value == "totp_secret"
+            isinstance(sub, ast.Subscript)
+            and isinstance(sub.ctx, ast.Load)
+            and isinstance(sub.slice, ast.Constant)
+            and sub.slice.value == "totp_secret"
             and not _is_trusted_totp_receiver(
-                node.value, trusted, sanctioned_aliases, models_shadowed
+                sub.value, trusted, sanctioned_aliases, models_shadowed
             )
         ):
             return False
         if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"pop", "get", "setdefault"}
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and node.args[0].value == "totp_secret"
+            isinstance(sub, ast.Call)
+            and isinstance(sub.func, ast.Attribute)
+            and sub.func.attr in {"pop", "get", "setdefault"}
+            and sub.args
+            and isinstance(sub.args[0], ast.Constant)
+            and sub.args[0].value == "totp_secret"
             and not _is_trusted_totp_receiver(
-                node.func.value, trusted, sanctioned_aliases, models_shadowed
+                sub.func.value, trusted, sanctioned_aliases, models_shadowed
             )
         ):
             return False
     return True
-
-
-def _apply_seq(
-    stmts: list[ast.stmt], trusted: set[str], aliases: set[str], models_shadowed: bool
-) -> tuple[set[str], set[str]]:
-    """Thread `(trusted, aliases)` through `stmts` in source order via
-    `_apply_stmt`. Used inside structural branch handlers to process
-    one branch's body sequentially before joining with siblings."""
-    t, a = trusted, aliases
-    for stmt in stmts:
-        t, a = _apply_stmt(stmt, t, a, models_shadowed)
-    return t, a
 
 
 def _names_bound_by_target(target: ast.expr) -> list[str]:
@@ -546,57 +540,6 @@ def _names_bound_by_target(target: ast.expr) -> list[str]:
     elif isinstance(target, ast.Starred):
         out.extend(_names_bound_by_target(target.value))
     return out
-
-
-def _apply_assign(
-    stmt: ast.Assign, trusted: set[str], aliases: set[str], models_shadowed: bool
-) -> tuple[set[str], set[str]]:
-    """Sanctioned RHS adds each top-level Name target to `trusted`;
-    non-sanctioned RHS discards every name bound by the assignment.
-    Discarding from `aliases` too revokes a function-local rebind of
-    an imported sanctioned-getter name -- `get_user_with_totp_by_id =
-    other_thing` shadows the import in this scope so downstream calls
-    of that name no longer count.
-
-    Tuple / list unpacking (`user, _ = call(), None`) revokes trust
-    for every Name in the unpacking pattern. Conservative direction:
-    we don't try to pair pattern slots to RHS-tuple elements, since
-    the RHS can be any iterable (function call, generator, etc.) the
-    static check can't follow. Even when the unpacking RHS happens
-    to be a static Tuple of sanctioned-or-None values, the unpacked
-    names lose trust -- the realistic codebase uses tuple unpacking
-    only for non-sanctioned RHS shapes."""
-    nt, na = set(trusted), set(aliases)
-    sanctioned = _is_sanctioned_or_none_source(stmt.value, na, models_shadowed)
-    for target in stmt.targets:
-        # Top-level Name target: sanctioned RHS adds to trusted.
-        # Tuple / list / starred unpacking: revoke every captured
-        # name regardless of RHS, since static analysis can't pair
-        # slots to RHS tuple elements.
-        if isinstance(target, ast.Name) and sanctioned:
-            nt.add(target.id)
-            continue
-        for name in _names_bound_by_target(target):
-            nt.discard(name)
-            na.discard(name)
-    return nt, na
-
-
-def _apply_annassign(
-    stmt: ast.AnnAssign, trusted: set[str], aliases: set[str], models_shadowed: bool
-) -> tuple[set[str], set[str]]:
-    """`user: dict = expr` -- behaves like Assign for trust purposes when
-    `value` is set. A bare `user: dict` with no `value` doesn't bind at
-    runtime, so we leave the sets unchanged."""
-    if stmt.value is None or not isinstance(stmt.target, ast.Name):
-        return set(trusted), set(aliases)
-    nt, na = set(trusted), set(aliases)
-    if _is_sanctioned_or_none_source(stmt.value, na, models_shadowed):
-        nt.add(stmt.target.id)
-    else:
-        nt.discard(stmt.target.id)
-        na.discard(stmt.target.id)
-    return nt, na
 
 
 def _apply_walrus_in_expr(
@@ -634,94 +577,191 @@ def _apply_walrus_in_expr(
     return nt, na
 
 
-def _apply_if(
+# ---------------------------------------------------------------------------
+# Flow-aware structural walker
+#
+# Each `_check_and_apply_*` returns `(ok, trusted, aliases)`. Reads
+# are checked against the threaded state -- so an inner-branch read
+# that depends on the same-branch reassignment sees the post-rebind
+# trust set, not the pre-stmt outer state. The previous design's
+# read-check-then-apply pair walked the whole stmt against entry-
+# state and missed these cases.
+# ---------------------------------------------------------------------------
+
+
+def _walk_scope_seq(
+    stmts: list[ast.stmt],
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+) -> tuple[bool, set[str], set[str]]:
+    """Thread `(trusted, aliases)` through `stmts` in source order via
+    `_check_and_apply_stmt`, returning False on the first read failure
+    along with the post-failure state (which the caller discards
+    anyway). Used inside structural branch handlers to process one
+    branch's body sequentially before joining with siblings."""
+    t, a = set(trusted), set(aliases)
+    for stmt in stmts:
+        ok, t, a = _check_and_apply_stmt(stmt, t, a, models_shadowed)
+        if not ok:
+            return False, t, a
+    return True, t, a
+
+
+def _check_and_apply_assign(
+    stmt: ast.Assign, trusted: set[str], aliases: set[str], models_shadowed: bool
+) -> tuple[bool, set[str], set[str]]:
+    """Read-check the RHS against pre-stmt state, then apply binding.
+    Sanctioned RHS adds each top-level Name target to `trusted`;
+    non-sanctioned RHS discards every name bound by the assignment.
+    Tuple / list unpacking revokes every Name in the pattern --
+    static analysis can't pair pattern slots to RHS-tuple elements."""
+    if not _check_reads_in_node(stmt.value, trusted, aliases, models_shadowed):
+        return False, set(trusted), set(aliases)
+    nt, na = set(trusted), set(aliases)
+    sanctioned = _is_sanctioned_or_none_source(stmt.value, na, models_shadowed)
+    for target in stmt.targets:
+        if isinstance(target, ast.Name) and sanctioned:
+            nt.add(target.id)
+            continue
+        for name in _names_bound_by_target(target):
+            nt.discard(name)
+            na.discard(name)
+    return True, nt, na
+
+
+def _check_and_apply_annassign(
+    stmt: ast.AnnAssign, trusted: set[str], aliases: set[str], models_shadowed: bool
+) -> tuple[bool, set[str], set[str]]:
+    """`user: dict = expr` -- behaves like Assign for trust purposes when
+    `value` is set. A bare `user: dict` with no `value` doesn't bind at
+    runtime, so the sets are unchanged. The annotation expression
+    itself isn't read-checked: any totp_secret subscript inside a
+    type annotation would be a static type expression, not a runtime
+    read."""
+    if stmt.value is None or not isinstance(stmt.target, ast.Name):
+        return True, set(trusted), set(aliases)
+    if not _check_reads_in_node(stmt.value, trusted, aliases, models_shadowed):
+        return False, set(trusted), set(aliases)
+    nt, na = set(trusted), set(aliases)
+    if _is_sanctioned_or_none_source(stmt.value, na, models_shadowed):
+        nt.add(stmt.target.id)
+    else:
+        nt.discard(stmt.target.id)
+        na.discard(stmt.target.id)
+    return True, nt, na
+
+
+def _check_and_apply_if(
     stmt: ast.If, trusted: set[str], aliases: set[str], models_shadowed: bool
-) -> tuple[set[str], set[str]]:
-    """Evaluate any walrus bindings in the test, then thread the
-    resulting state through body and orelse separately and intersect:
-    trust survives the construct only if it survives on EVERY reachable
-    path. The walrus binding from the test is visible in BOTH branches
-    (it ran before the conditional jump), so it's applied to the pre-
-    branch state."""
+) -> tuple[bool, set[str], set[str]]:
+    """Read-check the test, apply walrus bindings, then thread the
+    resulting state through body and orelse separately and intersect.
+    Inner-branch reads that depend on inner-branch assignments now
+    see the threaded state because each body statement is processed
+    one-at-a-time via `_walk_scope_seq`."""
+    if not _check_reads_in_node(stmt.test, trusted, aliases, models_shadowed):
+        return False, set(trusted), set(aliases)
     pre_t, pre_a = _apply_walrus_in_expr(stmt.test, trusted, aliases, models_shadowed)
-    if_t, if_a = _apply_seq(stmt.body, set(pre_t), set(pre_a), models_shadowed)
-    else_t, else_a = _apply_seq(stmt.orelse, set(pre_t), set(pre_a), models_shadowed)
-    return if_t & else_t, if_a & else_a
+    if_ok, if_t, if_a = _walk_scope_seq(stmt.body, pre_t, pre_a, models_shadowed)
+    if not if_ok:
+        return False, if_t, if_a
+    else_ok, else_t, else_a = _walk_scope_seq(
+        stmt.orelse, pre_t, pre_a, models_shadowed
+    )
+    if not else_ok:
+        return False, else_t, else_a
+    return True, if_t & else_t, if_a & else_a
 
 
-def _apply_try(
+def _check_and_apply_try(
     stmt: ast.Try, trusted: set[str], aliases: set[str], models_shadowed: bool
-) -> tuple[set[str], set[str]]:
+) -> tuple[bool, set[str], set[str]]:
     """Three reachable post-Try paths to merge: try-body completes (and
     orelse runs); or any handler runs (from arbitrary point in try body
     -- conservative pre-state is the original pre-Try state, with any
     `as <name>` excluded from trust). `finally` always runs after the
     merged state."""
-    try_t, try_a = _apply_seq(stmt.body, set(trusted), set(aliases), models_shadowed)
-    else_t, else_a = _apply_seq(stmt.orelse, try_t, try_a, models_shadowed)
+    body_ok, try_t, try_a = _walk_scope_seq(
+        stmt.body, trusted, aliases, models_shadowed
+    )
+    if not body_ok:
+        return False, try_t, try_a
+    else_ok, else_t, else_a = _walk_scope_seq(
+        stmt.orelse, try_t, try_a, models_shadowed
+    )
+    if not else_ok:
+        return False, else_t, else_a
     merged_t, merged_a = else_t, else_a
     for handler in stmt.handlers:
         h_t, h_a = set(trusted), set(aliases)
         if handler.name is not None:
             h_t.discard(handler.name)
             h_a.discard(handler.name)
-        h_t, h_a = _apply_seq(handler.body, h_t, h_a, models_shadowed)
+        if handler.type is not None and not _check_reads_in_node(
+            handler.type, h_t, h_a, models_shadowed
+        ):
+            return False, h_t, h_a
+        h_ok, h_t, h_a = _walk_scope_seq(handler.body, h_t, h_a, models_shadowed)
+        if not h_ok:
+            return False, h_t, h_a
         merged_t = merged_t & h_t
         merged_a = merged_a & h_a
-    return _apply_seq(stmt.finalbody, merged_t, merged_a, models_shadowed)
+    fin_ok, fin_t, fin_a = _walk_scope_seq(
+        stmt.finalbody, merged_t, merged_a, models_shadowed
+    )
+    if not fin_ok:
+        return False, fin_t, fin_a
+    return True, fin_t, fin_a
 
 
-def _apply_loop(
+def _check_and_apply_loop(
     stmt: ast.While | ast.For | ast.AsyncFor,
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-) -> tuple[set[str], set[str]]:
-    """Loop body might not execute at all (empty iter / initially false
-    cond) -- so the post-loop state is the intersection of pre-state
-    (body skipped) and the body-end state (body ran ≥ once and
-    completed). The For target is bound to elements of `iter`, not
-    sanctioned. The else clause runs only if the loop exits without a
-    break; thread it through the body-end state.
-
-    Walrus bindings in the loop's header expression (the iter for For,
-    the test for While) are evaluated at least once on every reachable
-    entry to the loop -- even when the body skips, the iter / test was
-    evaluated to make that decision. Apply them to the pre-loop state
-    so they're reflected in the intersection too."""
-    if isinstance(stmt, ast.While):
-        pre_t, pre_a = _apply_walrus_in_expr(
-            stmt.test, trusted, aliases, models_shadowed
-        )
-    else:
-        pre_t, pre_a = _apply_walrus_in_expr(
-            stmt.iter, trusted, aliases, models_shadowed
-        )
+) -> tuple[bool, set[str], set[str]]:
+    """Loop body might not execute at all -- the post-loop state is the
+    intersection of pre-state (body skipped) and the body-end state
+    (body ran ≥ once and completed). Walrus bindings in the header
+    apply to the pre-state."""
+    header = stmt.test if isinstance(stmt, ast.While) else stmt.iter
+    if not _check_reads_in_node(header, trusted, aliases, models_shadowed):
+        return False, set(trusted), set(aliases)
+    pre_t, pre_a = _apply_walrus_in_expr(header, trusted, aliases, models_shadowed)
     body_t, body_a = set(pre_t), set(pre_a)
     if isinstance(stmt, (ast.For, ast.AsyncFor)):
-        # Handles bare Name (`for user in rows:`) and tuple / list /
-        # starred unpacking (`for user, _ in rows:`,
-        # `for first, *rest in rows:`) the same way -- every captured
-        # Name is rebound to an iter element, none of them sanctioned.
         for bound in _names_bound_by_target(stmt.target):
             body_t.discard(bound)
             body_a.discard(bound)
-    body_t, body_a = _apply_seq(stmt.body, body_t, body_a, models_shadowed)
-    else_t, else_a = _apply_seq(stmt.orelse, body_t, body_a, models_shadowed)
-    return set(pre_t) & else_t, set(pre_a) & else_a
+    body_ok, body_t, body_a = _walk_scope_seq(
+        stmt.body, body_t, body_a, models_shadowed
+    )
+    if not body_ok:
+        return False, body_t, body_a
+    else_ok, else_t, else_a = _walk_scope_seq(
+        stmt.orelse, body_t, body_a, models_shadowed
+    )
+    if not else_ok:
+        return False, else_t, else_a
+    return True, set(pre_t) & else_t, set(pre_a) & else_a
 
 
-def _apply_with(
+def _check_and_apply_with(
     stmt: ast.With | ast.AsyncWith,
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-) -> tuple[set[str], set[str]]:
+) -> tuple[bool, set[str], set[str]]:
     """`with ctx as name:` binds `name` to the context manager's
     `__enter__` return; tuple/list-unpacking forms (`with ctx as
-    (a, b):`) bind every captured Name. None are sanctioned for our
-    purposes. Body statements thread through sequentially after the
-    bindings revoke."""
+    (a, b):`) bind every captured Name. Read-check each context_expr
+    first, then revoke the captured names, then thread the body."""
+    for item in stmt.items:
+        if not _check_reads_in_node(
+            item.context_expr, trusted, aliases, models_shadowed
+        ):
+            return False, set(trusted), set(aliases)
     nt, na = set(trusted), set(aliases)
     for item in stmt.items:
         if item.optional_vars is None:
@@ -729,67 +769,25 @@ def _apply_with(
         for bound in _names_bound_by_target(item.optional_vars):
             nt.discard(bound)
             na.discard(bound)
-    return _apply_seq(stmt.body, nt, na, models_shadowed)
+    return _walk_scope_seq(stmt.body, nt, na, models_shadowed)
 
 
-def _apply_import(
-    stmt: ast.Import | ast.ImportFrom,
-    trusted: set[str],
-    aliases: set[str],
-) -> tuple[set[str], set[str]]:
-    """A function-local `import` / `from ... import` rebinds the
-    imported names in this scope, shadowing any module-level binding
-    of the same name. Revoke each bound name from the local trust
-    and alias sets:
-
-      - From `aliases`: a function-local re-import of a sanctioned-
-        getter name (e.g. `from attacker import get_user_with_totp_
-        by_id`) shadows the module-level canonical alias for the
-        body of this function. Subsequent `<name>(uid)` calls must
-        no longer count as sanctioned, even if the module-level set
-        still records the canonical import.
-      - From `trusted`: a local import that uses a name previously
-        bound from a sanctioned call shadows the variable too. Rare
-        in practice, but it's the symmetric move and costs nothing
-        to keep consistent.
-
-    Conservative direction: even a local re-import from the
-    canonical data-layer (`from app.models import get_user_with_
-    totp_by_id` inside a function body) is treated as a fresh local
-    binding and revoked. Re-sanctioning would require scope-aware
-    canonical-source resolution at every read site, and the
-    realistic codebase's sanctioned getters live at module scope --
-    the over-revoke direction matches the rest of the test posture."""
-    nt, na = set(trusted), set(aliases)
-    for alias in stmt.names:
-        if isinstance(stmt, ast.ImportFrom):
-            bound = alias.asname or alias.name
-        else:
-            bound = alias.asname or alias.name.partition(".")[0]
-        nt.discard(bound)
-        na.discard(bound)
-    return nt, na
-
-
-def _apply_match(
+def _check_and_apply_match(
     stmt: ast.Match,
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-) -> tuple[set[str], set[str]]:
+) -> tuple[bool, set[str], set[str]]:
     """`match X: case <pat>: <body>` (PEP 634, Python 3.10+). The
-    subject `X` is evaluated once before any case runs -- walrus
-    bindings inside it apply to every case's pre-state. Each case
-    starts from that subject-evaluated state minus the names bound by
-    its pattern (pattern captures are non-sanctioned: any MatchAs,
-    MatchStar, MatchMapping rest, etc.). The case body threads through
-    sequentially. Post-Match state is the intersection of every
+    subject is read-checked once before any case runs; walrus bindings
+    inside it apply to every case's pre-state. Each case starts from
+    that subject-evaluated state minus the names bound by its pattern.
+    Pattern guards (`case X if cond:`) are read-checked against the
+    pattern-bound state. Post-Match state is the intersection of every
     case's end state PLUS the subject-evaluated state for the
-    fall-through path (no case matched at runtime), since static
-    analysis can't prove exhaustiveness in the general case (a
-    wildcard arm can have a guard, a class pattern's class can be
-    malformed, etc.). The conservative direction matches `_apply_if`'s
-    missing-else treatment."""
+    fall-through path (no case matched at runtime)."""
+    if not _check_reads_in_node(stmt.subject, trusted, aliases, models_shadowed):
+        return False, set(trusted), set(aliases)
     pre_t, pre_a = _apply_walrus_in_expr(
         stmt.subject, trusted, aliases, models_shadowed
     )
@@ -799,68 +797,85 @@ def _apply_match(
         for bound in _pattern_bound_names(case.pattern):
             case_t.discard(bound)
             case_a.discard(bound)
-        case_t, case_a = _apply_seq(case.body, case_t, case_a, models_shadowed)
+        if case.guard is not None and not _check_reads_in_node(
+            case.guard, case_t, case_a, models_shadowed
+        ):
+            return False, case_t, case_a
+        case_ok, case_t, case_a = _walk_scope_seq(
+            case.body, case_t, case_a, models_shadowed
+        )
+        if not case_ok:
+            return False, case_t, case_a
         case_states.append((case_t, case_a))
     final_t, final_a = case_states[0]
     for ct, ca in case_states[1:]:
         final_t = final_t & ct
         final_a = final_a & ca
-    return final_t, final_a
+    return True, final_t, final_a
 
 
-def _apply_stmt(
+def _check_and_apply_import(
+    stmt: ast.Import | ast.ImportFrom,
+    trusted: set[str],
+    aliases: set[str],
+) -> tuple[bool, set[str], set[str]]:
+    """A function-local `import` / `from ... import` rebinds the
+    imported names in this scope, shadowing any module-level binding
+    of the same name. Revoke each bound name from both `trusted` and
+    `aliases`. Conservative direction: even a local re-import from
+    the canonical data layer is treated as a fresh local binding and
+    revoked. Imports themselves contain no totp_secret reads, so
+    there's no read check."""
+    nt, na = set(trusted), set(aliases)
+    for alias in stmt.names:
+        if isinstance(stmt, ast.ImportFrom):
+            bound = alias.asname or alias.name
+        else:
+            bound = alias.asname or alias.name.partition(".")[0]
+        nt.discard(bound)
+        na.discard(bound)
+    return True, nt, na
+
+
+def _check_and_apply_stmt(
     stmt: ast.AST,
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool = False,
-) -> tuple[set[str], set[str]]:
-    """Return the (trusted, aliases) state after `stmt` runs, computed
-    structurally: branching constructs process each reachable branch
-    with cloned state and intersect the per-branch results, so trust
-    survives the construct only on every reachable path. Sequential
-    within-branch threading happens by chaining state through the
-    branch's statements in source order via `_apply_seq`.
+) -> tuple[bool, set[str], set[str]]:
+    """Return `(ok, new_trusted, new_aliases)` for one statement.
+    `ok` is False iff a `totp_secret` read inside the (recursively-
+    threaded) statement was on an untrusted receiver. The walker
+    threads state INTO compound bodies so inner-branch reads see
+    inner-branch reassignments -- closing the bypass where `if cond:
+    user = unsanctioned(); user["totp_secret"]` was checked against
+    the pre-If trusted set instead of the in-branch state.
 
-    Returns fresh sets; the input sets are never mutated.
-
-    All shapes not handled below (Return, Raise, Pass, Break, Continue,
-    Expr, Global, Nonlocal, Delete, FunctionDef, ClassDef, AugAssign)
-    leave (trusted, aliases) unchanged. Nested function / class
-    bodies have their own scopes and are checked independently by
-    the caller."""
+    Returns fresh sets; the input sets are never mutated. Statements
+    not handled below (Return, Raise, Pass, Break, Continue, Expr,
+    Global, Nonlocal, Delete, FunctionDef, ClassDef, AugAssign) have
+    no compound bodies, so the entire stmt is read-checked against
+    pre-state and trust is unchanged. Nested function / class bodies
+    are skipped (separate scopes; checked independently)."""
     if isinstance(stmt, ast.Assign):
-        return _apply_assign(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_assign(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, ast.AnnAssign):
-        return _apply_annassign(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_annassign(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, ast.If):
-        return _apply_if(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_if(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, ast.Try):
-        return _apply_try(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_try(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, ast.Match):
-        return _apply_match(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_match(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
-        return _apply_loop(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_loop(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, (ast.With, ast.AsyncWith)):
-        return _apply_with(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_with(stmt, trusted, aliases, models_shadowed)
     if isinstance(stmt, (ast.Import, ast.ImportFrom)):
-        return _apply_import(stmt, trusted, aliases)
-    return set(trusted), set(aliases)
-
-
-def _update_trust_from_stmt(
-    stmt: ast.AST,
-    trusted: set[str],
-    sanctioned_aliases: set[str],
-    models_shadowed: bool = False,
-) -> None:
-    """In-place wrapper around `_apply_stmt` for the legacy call shape.
-    Mutates `trusted` and `sanctioned_aliases` to reflect the post-
-    statement state."""
-    nt, na = _apply_stmt(stmt, trusted, sanctioned_aliases, models_shadowed)
-    trusted.clear()
-    trusted.update(nt)
-    sanctioned_aliases.clear()
-    sanctioned_aliases.update(na)
+        return _check_and_apply_import(stmt, trusted, aliases)
+    if not _check_reads_in_node(stmt, trusted, aliases, models_shadowed):
+        return False, set(trusted), set(aliases)
+    return True, set(trusted), set(aliases)
 
 
 def _import_binds_name_from_non_canonical_source(
@@ -1159,13 +1174,8 @@ def _scope_totp_reads_are_quarantined(
     models_shadowed = (
         "models" in (module_rebound or set())
     ) or _name_is_bound_in_scope("models", scope, file_path)
-    for stmt in scope.body:
-        if not _stmt_reads_are_quarantined(
-            stmt, trusted, local_sanctioned, models_shadowed
-        ):
-            return False
-        _update_trust_from_stmt(stmt, trusted, local_sanctioned, models_shadowed)
-    return True
+    ok, _t, _a = _walk_scope_seq(scope.body, trusted, local_sanctioned, models_shadowed)
+    return ok
 
 
 def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
@@ -1373,20 +1383,32 @@ def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
 
 
 def _is_imperative_mutating_registration(node: ast.AST) -> bool:
-    """True iff `node` is an imperative `<expr>.add_api_route(...)` call
-    that registers a state-mutating handler. FastAPI exposes
-    `router.add_api_route(path, endpoint, methods=[...], ...)` as the
-    function-call equivalent of the decorator API; the decorator-only
-    detector skipped this shape entirely, so a write endpoint added
-    imperatively could miss the CSRF gate while the test stayed
-    green."""
+    """True iff `node` is an imperative state-mutating route registration.
+    FastAPI exposes two function-call equivalents of the decorator API:
+
+    - **add_api_route**: `router.add_api_route(path, endpoint,
+      methods=[...], ...)` -- the explicit imperative shape. Counts
+      when `methods=` contains a state-mutating verb.
+
+    - **Call-style decorator**: `router.post("/x")(handler)`,
+      `router.delete("/x")(handler)`, `router.api_route("/x",
+      methods=["POST"])(handler)`. Equivalent to writing
+      `@router.post("/x") def handler():` -- a Call whose function
+      is itself a Call that the decorator detector recognises. The
+      verb-only detector skipped this shape entirely, so a write
+      endpoint registered through the call-style decorator could
+      miss the CSRF gate while the test stayed green."""
     if not isinstance(node, ast.Call):
         return False
-    if not isinstance(node.func, ast.Attribute):
-        return False
-    if node.func.attr != "add_api_route":
-        return False
-    return _kwargs_contain_mutating_method(node.keywords)
+    if (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_api_route"
+        and _kwargs_contain_mutating_method(node.keywords)
+    ):
+        return True
+    return isinstance(node.func, ast.Call) and _is_state_mutating_route_decorator(
+        node.func
+    )
 
 
 def _is_origin_dependency(
