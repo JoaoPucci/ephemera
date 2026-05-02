@@ -2275,9 +2275,18 @@ def _kwargs_contain_mutating_method(keywords: list[ast.keyword]) -> bool:
     legitimately hides a read-only set can be allowlisted explicitly;
     silently skipping any unresolvable element leaves a CSRF bypass.
 
+    `**opts` splats (the AST shape `keyword(arg=None, value=...)`)
+    also count as potentially mutating: `router.api_route("/x",
+    **opts)` could carry `methods=["POST"]` inside `opts`, but we
+    can't see the contents statically. Skipping those entries
+    would let a mutating registration silently bypass the
+    origin-gate invariant.
+
     Used by both the `api_route(...)` decorator detector and the
     imperative `add_api_route(...)` registration scan."""
     for kw in keywords:
+        if kw.arg is None:
+            return True
         if kw.arg != "methods":
             continue
         if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
