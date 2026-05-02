@@ -878,7 +878,7 @@ def _always_terminates(stmt: ast.stmt) -> bool:
         if not stmt.orelse:
             return False
         return _stmts_terminate(stmt.body) and _stmts_terminate(stmt.orelse)
-    if isinstance(stmt, ast.Try):
+    if isinstance(stmt, (ast.Try, ast.TryStar)):
         if stmt.finalbody and _stmts_terminate(stmt.finalbody):
             return True
         if not all(_stmts_terminate(h.body) for h in stmt.handlers):
@@ -1029,7 +1029,7 @@ def _check_and_apply_if(
 
 
 def _check_and_apply_try(
-    stmt: ast.Try,
+    stmt: ast.Try | ast.TryStar,
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
@@ -1312,7 +1312,7 @@ def _check_and_apply_stmt(
         return _check_and_apply_if(
             stmt, trusted, aliases, models_shadowed, string_consts
         )
-    if isinstance(stmt, ast.Try):
+    if isinstance(stmt, (ast.Try, ast.TryStar)):
         return _check_and_apply_try(
             stmt, trusted, aliases, models_shadowed, string_consts
         )
