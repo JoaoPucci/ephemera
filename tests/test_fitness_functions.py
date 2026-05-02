@@ -1061,6 +1061,23 @@ def _check_and_apply_try(
     the post-body `try_t` only, which over-trusted any name that
     happened to be re-blessed before the try body completed.
 
+    The walk stops at the first statement that unconditionally
+    transfers control (`raise` / `return` / `break` / `continue`,
+    or any compound that always terminates). Everything after such
+    a statement is dead code: an unreachable reassignment must not
+    revoke trust in the interim accumulator, otherwise an honest
+    pattern like
+
+        user = sanctioned()
+        try:
+            raise SpecificError()
+            user = unsanctioned()   # dead, never executes
+        except SpecificError:
+            return user["totp_secret"]
+
+    would over-revoke at handler entry and false-positive on a
+    legitimate read.
+
     `finally` always runs after the merged state; threaded through
     that."""
     running_t, running_a = set(trusted), set(aliases)
@@ -1073,6 +1090,8 @@ def _check_and_apply_try(
             return False, running_t, running_a
         interim_t &= running_t
         interim_a &= running_a
+        if _always_terminates(s):
+            break
     try_t, try_a = running_t, running_a
     else_ok, else_t, else_a = _walk_scope_seq(
         stmt.orelse, try_t, try_a, models_shadowed, string_consts
