@@ -5,10 +5,11 @@ import time
 from datetime import UTC
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from app import auth, models
+from app.auth import tokens as tokens_mod
 
 
 def test_hash_and_verify_password_roundtrip():
@@ -865,3 +866,133 @@ def test_property_totp_secret_is_uniformly_base32(_: int):
     # raise binascii.Error here.
     decoded = base64.b32decode(secret)
     assert len(decoded) == 20  # 32 base32 chars -> 20 bytes
+
+
+# ---------------------------------------------------------------------------
+# API-token properties
+#
+# `mint_api_token` is a stateless source of randomness: the integer
+# inputs below are hypothesis's generator handle and don't affect what
+# the function returns. The point is to invoke the function many times
+# and pin every returned value against the structural invariants the
+# bearer-token format depends on -- a regression that quietly changed
+# the prefix, the body length, or the digest-formula would slip past
+# the existing single-shot `test_api_token_mint_and_lookup` because
+# that one happens to mint a fresh token whose body always satisfies
+# whatever the implementation produced.
+# ---------------------------------------------------------------------------
+
+
+@given(_=st.integers(min_value=0, max_value=2**31 - 1))
+@settings(max_examples=30, deadline=None)
+def test_property_mint_api_token_digest_is_lowercase_hex_sha256_format(_: int):
+    """For any call, the returned digest is a 64-character lowercase
+    hex string -- the format produced by `sha256.hexdigest()`. The
+    digest's CORRECTNESS (mint and lookup using the same formula) is
+    pinned by the existing single-shot `test_api_token_mint_and_lookup`
+    round-trip; this property pins the FORMAT, which catches a
+    refactor that swapped to a different-length algorithm (sha1 ->
+    40 chars, sha512 -> 128 chars) or returned the raw bytes / a
+    base-encoded form. We deliberately don't recompute sha256 in
+    test code on the hypothesis-generated plaintext: CodeQL's
+    `py/weak-cryptographic-algorithm` rule pattern-matches that as
+    a password-being-hashed-with-a-fast-hash, which doesn't apply to
+    our high-entropy bearer tokens but is hard to suppress per-
+    occurrence."""
+    _plaintext, digest = auth.mint_api_token()
+    assert isinstance(digest, str)
+    assert len(digest) == 64
+    assert all(c in "0123456789abcdef" for c in digest)
+
+
+@given(_=st.integers(min_value=0, max_value=2**31 - 1))
+@settings(max_examples=30, deadline=None)
+def test_property_mint_api_token_plaintext_starts_with_prefix(_: int):
+    """Every minted plaintext starts with the documented prefix. The
+    prefix is the discriminator `lookup_api_token` uses to short-
+    circuit on obviously-not-a-token input before hashing -- a mint
+    that produced an unprefixed value would fail to round-trip through
+    the lookup gate."""
+    plaintext, _digest = auth.mint_api_token()
+    assert plaintext.startswith(tokens_mod.TOKEN_PREFIX)
+    # Body (post-prefix) is non-empty -- secrets.token_urlsafe(32)
+    # always returns at least 43 url-safe base64 chars.
+    assert len(plaintext) > len(tokens_mod.TOKEN_PREFIX)
+
+
+@given(_=st.integers(min_value=0, max_value=2**31 - 1))
+@settings(max_examples=30, deadline=None)
+def test_property_mint_api_token_body_is_urlsafe_base64(_: int):
+    """The body (the part after the prefix) consists only of url-safe
+    base64 characters. `secrets.token_urlsafe(32)` is the documented
+    source; if a future refactor swapped to a generator that emits
+    `+` / `/` / `=` characters, the token would survive minting but
+    break URL-bearing flows (CLI args, query strings, headers)."""
+    import string
+
+    plaintext, _digest = auth.mint_api_token()
+    body = plaintext[len(tokens_mod.TOKEN_PREFIX) :]
+    urlsafe_alphabet = set(string.ascii_letters + string.digits + "-_")
+    extras = set(body) - urlsafe_alphabet
+    assert not extras, f"non-url-safe chars in token body: {extras!r}"
+
+
+@pytest.fixture
+def stored_api_token(provisioned_user):
+    """Mint a real token and persist its digest so the lookup-rejection
+    property exercises the "DB has a real row, presented value doesn't
+    match" path -- not just the empty-DB short-circuit. Function-
+    scoped: hypothesis shares one fixture invocation across every
+    example in the test, so the UNIQUE `(user_id, name)` constraint
+    isn't tripped on iteration 2."""
+    plaintext, digest = auth.mint_api_token()
+    models.create_token(
+        user_id=provisioned_user["id"], name="prop-fixture", token_hash=digest
+    )
+    return plaintext
+
+
+_printable_ascii = st.text(
+    min_size=0,
+    max_size=80,
+    alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+)
+
+
+@given(
+    raw=st.one_of(
+        # Prefix-bearing -- exercises the post-prefix hash + DB-lookup
+        # mismatch branch. Without this arm, sampling uniformly from
+        # printable ASCII gives roughly 200/95**4 expected `eph_`
+        # hits over 200 examples (~zero in practice), so the test
+        # would coverage-only the early-reject path. Pinning explicit
+        # `"eph_"` ensures the hot branch runs every iteration.
+        _printable_ascii.map(lambda body: tokens_mod.TOKEN_PREFIX + body),
+        # Arbitrary -- exercises the early `startswith` reject branch
+        # (empty string, malformed prefixes, accidental near-misses).
+        _printable_ascii,
+    )
+)
+@settings(
+    max_examples=200,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    deadline=None,
+)
+def test_property_lookup_api_token_rejects_arbitrary_strings(
+    stored_api_token: str, raw: str
+):
+    """For any printable-ASCII string we did NOT mint+store, the
+    lookup returns None. The strategy biases roughly 50/50 between
+    prefix-bearing inputs (which reach the hash+DB-lookup branch and
+    exercise the "stored row, presented value doesn't match" path)
+    and arbitrary printable-ASCII (which exercise the early prefix-
+    reject path). Catches edge cases the unit tests don't enumerate:
+    empty string, prefix-only (`"eph_"`), prefix-prefix
+    (`"eph_eph_"`), strings with whitespace / colons / equals signs.
+    Skips when hypothesis happens to invent a string that exactly
+    matches the real stored token (astronomically unlikely with 192
+    bits of entropy in `secrets.token_urlsafe(32)`, but the property
+    doesn't apply if it ever does)."""
+    if raw == stored_api_token:
+        return  # collision; property doesn't apply
+    assert auth.lookup_api_token(raw) is None
