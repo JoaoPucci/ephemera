@@ -1230,3 +1230,319 @@ describe('sender.js — telemetry fields on submit body', () => {
     expect(getBody().near_cap).toBe(true);
   });
 });
+
+// Targeted coverage for form.js shapes that the existing in-flight /
+// telemetry / passphrase / hint suites don't exercise: tab toggle DOM
+// effects, the create-secret request body's exact shape, and the
+// /api/me / /api/me-update event handlers' tolerance of missing detail.
+// Without these, equivalent mutations on the tab toggle, body builder,
+// and analytics-opt-in event readers survive Stryker silently.
+describe('sender.js — tab toggle DOM effects', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  function captureCreateBody() {
+    let captured = null;
+    const fetchMock = stubSenderFetch((opts) => {
+      captured = opts;
+      return Promise.resolve(
+        jsonResponse({
+          url: 'https://example/s/tok#key',
+          id: 'deadbeef',
+          expires_at: '2099-01-01T00:00:00Z',
+        })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return () => captured;
+  }
+
+  it('clicking the image tab activates the image panel and deactivates text', async () => {
+    captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.querySelector('.tab[data-tab="image"]').click();
+
+    expect(document.querySelector('.tab[data-tab="image"]').classList.contains('active')).toBe(
+      true
+    );
+    expect(document.querySelector('.tab[data-tab="text"]').classList.contains('active')).toBe(
+      false
+    );
+    expect(document.getElementById('panel-image').hidden).toBe(false);
+    expect(document.getElementById('panel-text').hidden).toBe(true);
+  });
+
+  it('clicking back to text after image flips active class and panel visibility back', async () => {
+    captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.querySelector('.tab[data-tab="image"]').click();
+    document.querySelector('.tab[data-tab="text"]').click();
+
+    expect(document.querySelector('.tab[data-tab="text"]').classList.contains('active')).toBe(true);
+    expect(document.querySelector('.tab[data-tab="image"]').classList.contains('active')).toBe(
+      false
+    );
+    expect(document.getElementById('panel-text').hidden).toBe(false);
+    expect(document.getElementById('panel-image').hidden).toBe(true);
+  });
+
+  it('default mount has the text tab active and image panel hidden', async () => {
+    // The `setTab('text')` call at the bottom of form.js initialises this
+    // state on load. Pinning it stops a regression that defaulted to image
+    // (or to no tab at all) -- which would surface the wrong panel before
+    // any user click.
+    captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    expect(document.querySelector('.tab[data-tab="text"]').classList.contains('active')).toBe(true);
+    expect(document.querySelector('.tab[data-tab="image"]').classList.contains('active')).toBe(
+      false
+    );
+    expect(document.getElementById('panel-text').hidden).toBe(false);
+    expect(document.getElementById('panel-image').hidden).toBe(true);
+  });
+});
+
+describe('sender.js — text-submit body shape', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  function captureCreateBody({ analyticsOptIn = true } = {}) {
+    let captured = null;
+    const fetchMock = stubSenderFetch(
+      (opts) => {
+        captured = opts;
+        return Promise.resolve(
+          jsonResponse({
+            url: 'https://example/s/tok#key',
+            id: 'deadbeef',
+            expires_at: '2099-01-01T00:00:00Z',
+          })
+        );
+      },
+      { analyticsOptIn }
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return () => (captured ? JSON.parse(captured.body) : null);
+  }
+
+  it('always includes content, content_type=text, expires_in, and track', async () => {
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('content').value = 'hello world';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const body = getBody();
+    expect(body).not.toBeNull();
+    expect(body.content).toBe('hello world');
+    expect(body.content_type).toBe('text');
+    expect(body.expires_in).toBe(3600);
+    expect(body.track).toBe(false);
+  });
+
+  it('sends passphrase=null when the field is empty (not undefined / not omitted)', async () => {
+    // The receiver-side flow distinguishes "no passphrase" from "passphrase
+    // missing"; the body explicitly carries `null` for the no-passphrase
+    // case so the server-side schema has a clear absent signal.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('content').value = 'hello';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const body = getBody();
+    expect(body).toHaveProperty('passphrase');
+    expect(body.passphrase).toBeNull();
+  });
+
+  it('sends the typed passphrase verbatim when one is entered', async () => {
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('content').value = 'hello';
+    document.getElementById('passphrase').value = 'open-sesame';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().passphrase).toBe('open-sesame');
+  });
+
+  it('omits the label key entirely when track is on but the label field is empty', async () => {
+    // form.js builds `label` only when the trimmed label is truthy; an
+    // unchecked-then-rechecked track flow should not leak an empty-string
+    // label into the body.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('content').value = 'hello';
+    document.getElementById('track').checked = true;
+    document.getElementById('label').value = '';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const body = getBody();
+    expect(body.track).toBe(true);
+    expect(body).not.toHaveProperty('label');
+  });
+
+  it('sends the trimmed label when track is on and label is non-empty', async () => {
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('content').value = 'hello';
+    document.getElementById('track').checked = true;
+    document.getElementById('label').value = '  for-alice  ';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().label).toBe('for-alice');
+  });
+
+  it('omits the label key when track is off, even with text in the label field', async () => {
+    // The label is only meaningful when track is on; a stale label value
+    // (e.g. user typed it, then unchecked track) must not ride along.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    document.getElementById('content').value = 'hello';
+    document.getElementById('track').checked = false;
+    document.getElementById('label').value = 'stale-label';
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody()).not.toHaveProperty('label');
+  });
+});
+
+describe('sender.js — me-loaded / me-updated event tolerance', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  function captureCreateBody() {
+    let captured = null;
+    const fetchMock = stubSenderFetch((opts) => {
+      captured = opts;
+      return Promise.resolve(
+        jsonResponse({
+          url: 'https://example/s/tok#key',
+          id: 'deadbeef',
+          expires_at: '2099-01-01T00:00:00Z',
+        })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return () => (captured ? JSON.parse(captured.body) : null);
+  }
+
+  it('me-loaded with no detail leaves the analytics opt-in falsy without crashing', async () => {
+    // The handler uses optional chaining (`e.detail?.analytics_opt_in`)
+    // because /api/me may return a payload without the field on a stale
+    // backend. Removing the chain would crash on the missing detail; this
+    // test pins the defensive read by asserting the post-event submit
+    // doesn't carry near_cap (which is gated on analyticsOptIn).
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    // First force the threshold-crossing so near_cap WOULD fire if opt-in
+    // were truthy.
+    const input = document.getElementById('content');
+    input.value = 'a'.repeat(96_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    // Now broadcast a malformed me-loaded that stryker would parse as the
+    // "missing detail" shape. With optional chaining, analyticsOptIn becomes
+    // false; without it, this dispatch crashes.
+    window.dispatchEvent(new CustomEvent('ephemera:me-loaded', { detail: undefined }));
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().near_cap).toBeUndefined();
+  });
+
+  it('me-updated with no detail flips opt-in to false and clears the sticky bit', async () => {
+    // The handler reads `e.detail?.analytics_opt_in`. A missing detail
+    // resolves the chained access to undefined, which Boolean() coerces
+    // to false. The transition `true -> false` must also reset
+    // nearCapHit per the consent-boundary rule -- otherwise opt-in
+    // activity could leak into a post-opt-out submit.
+    const getBody = captureCreateBody();
+    await loadModule('sender');
+    await flushAsync();
+
+    const input = document.getElementById('content');
+    input.value = 'a'.repeat(96_000);
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    window.dispatchEvent(new CustomEvent('ephemera:me-updated', { detail: undefined }));
+
+    input.value = 'a'.repeat(50_000);
+    input.dispatchEvent(
+      new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
+    );
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(getBody().near_cap).toBeUndefined();
+  });
+});
+
+describe('sender.js — track checkbox sync clears stale label', () => {
+  beforeEach(() => {
+    mountSender();
+  });
+
+  it('unchecking track hides the label wrap and clears the typed label value', async () => {
+    // syncLabelVisibility runs on track-change events; without it, a label
+    // typed under track=on would persist in the input element after the
+    // user unchecks track, and re-checking would surface it again.
+    const fetchMock = stubSenderFetch(() => Promise.resolve(jsonResponse({})));
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    const trackBox = document.getElementById('track');
+    const labelWrap = document.getElementById('label-wrap');
+    const labelInput = document.getElementById('label');
+
+    trackBox.checked = true;
+    trackBox.dispatchEvent(new Event('change', { bubbles: true }));
+    labelInput.value = 'typed-label';
+    expect(labelWrap.hidden).toBe(false);
+
+    trackBox.checked = false;
+    trackBox.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(labelWrap.hidden).toBe(true);
+    expect(labelInput.value).toBe('');
+  });
+});
