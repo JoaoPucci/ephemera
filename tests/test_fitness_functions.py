@@ -1353,14 +1353,30 @@ def _check_and_apply_with(
 ) -> tuple[bool, set[str], set[str]]:
     """`with ctx as name:` binds `name` to the context manager's
     `__enter__` return; tuple/list-unpacking forms (`with ctx as
-    (a, b):`) bind every captured Name. Read-check each context_expr
-    first, then revoke the captured names, then thread the body."""
+    (a, b):`) bind every captured Name.
+
+    Each `item.context_expr` runs in the enclosing scope, so
+    walrus rebinds inside it (PEP 572) leak outward. The previous
+    shape read-checked each context_expr against entry state but
+    never threaded those rebinds into the body or onward state,
+    accepting the bypass
+
+        user = sanctioned()
+        with (user := unsanctioned()):
+            pass
+        return user["totp_secret"]   # silently OK'd
+
+    Now each item is processed in source order: read-check the
+    context_expr against the running state, then fold its walrus
+    rebinds into that state before the next item runs and before
+    the body / `as`-targets are processed."""
+    nt, na = set(trusted), set(aliases)
     for item in stmt.items:
         if not _check_reads_in_node(
-            item.context_expr, trusted, aliases, models_shadowed, string_consts
+            item.context_expr, nt, na, models_shadowed, string_consts
         ):
-            return False, set(trusted), set(aliases)
-    nt, na = set(trusted), set(aliases)
+            return False, set(nt), set(na)
+        nt, na = _apply_walrus_in_expr(item.context_expr, nt, na, models_shadowed)
     for item in stmt.items:
         if item.optional_vars is None:
             continue
@@ -2585,7 +2601,30 @@ def _is_state_mutating_route_decorator(
     underlying Attribute. Without it, `post = router.post` followed
     by `@post("/x")` would slip past since the Call's `func` is a
     bare Name rather than an Attribute. Returns True if ANY resolved
-    binding for that Name is a mutating shape."""
+    binding for that Name is a mutating shape.
+
+    Bare-Name decorators that wrap a pre-bound factory call also
+    count:
+
+        register = router.post("/x")    # factory call held under alias
+        @register                        # decorator is just `register`
+        def handler(): ...
+
+    `deco` is `Name('register')`, not a Call. We resolve through
+    `callable_aliases` and recurse on each resolved Call -- if any
+    of them resolves to a mutating decorator, this Name decorator
+    inherits the mutating classification. The recursion is finite
+    because `_resolve_callable` already breaks cycles via its
+    `seen` set."""
+    if isinstance(deco, ast.Name):
+        for resolved in _resolve_callable(deco, callable_aliases):
+            if resolved is deco:
+                continue
+            if isinstance(resolved, ast.Call) and _is_state_mutating_route_decorator(
+                resolved, callable_aliases
+            ):
+                return True
+        return False
     if not isinstance(deco, ast.Call):
         return False
     for func in _resolve_callable(deco.func, callable_aliases):
@@ -2597,6 +2636,61 @@ def _is_state_mutating_route_decorator(
         if attr == "api_route" and _kwargs_contain_mutating_method(deco.keywords):
             return True
     return False
+
+
+def _decorator_dependency_candidates(
+    deco: ast.expr,
+    callable_aliases: dict[str, list[ast.expr]] | None,
+) -> list[ast.AST]:
+    """Return every AST subtree that may carry the dependency
+    declarations for `deco`, a state-mutating decorator. For
+    one-step `@router.post("/x", dependencies=[...])` the deco is
+    a Call and holds the deps directly. For two-step
+
+        register = router.post("/x", dependencies=[Depends(VSO)])
+        @register
+        def handler(): ...
+
+    the deco is a Name and the deps live in the resolved factory
+    Call. Walk both. Already-walked nodes are de-duplicated by
+    `id()`."""
+    candidates: list[ast.AST] = [deco]
+    seen_ids = {id(deco)}
+    if callable_aliases is None:
+        return candidates
+    target = deco.func if isinstance(deco, ast.Call) else deco
+    if not isinstance(target, ast.Name):
+        return candidates
+    for resolved in _resolve_callable(target, callable_aliases):
+        if not isinstance(resolved, ast.Call) or id(resolved) in seen_ids:
+            continue
+        seen_ids.add(id(resolved))
+        candidates.append(resolved)
+    return candidates
+
+
+def _decorator_print_attr(
+    deco: ast.expr,
+    callable_aliases: dict[str, list[ast.expr]] | None,
+) -> str:
+    """Best-effort label for a decorator in the offender printout.
+    Resolves through `callable_aliases` so an aliased decorator
+    reports the underlying `.post` / `.put` rather than the alias
+    Name. Falls back to the deco's own Name id if resolution
+    doesn't reach an Attribute."""
+    target = deco.func if isinstance(deco, ast.Call) else deco
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    if isinstance(target, ast.Name):
+        for resolved in _resolve_callable(target, callable_aliases):
+            if isinstance(resolved, ast.Call) and isinstance(
+                resolved.func, ast.Attribute
+            ):
+                return resolved.func.attr
+            if isinstance(resolved, ast.Attribute):
+                return resolved.attr
+        return target.id
+    return "?"
 
 
 def _imperative_dependency_candidates(
@@ -2813,22 +2907,20 @@ def test_state_mutating_routes_all_carry_origin_gate():
                 for inner in ast.walk(node.args)
             )
             for deco in mutating_decos:
+                # For a Name-only decorator (`@register` where
+                # `register = router.post(..., dependencies=[...])`),
+                # the dep lives in the resolved factory call, not in
+                # the decorator itself. Walk both -- the decorator
+                # node AND every resolved factory Call -- mirroring
+                # `_imperative_dependency_candidates` for pass 2.
                 deco_has_dep = any(
                     _is_origin_dependency(inner, vso_shadowed, depends_shadowed)
-                    for inner in ast.walk(deco)
+                    for cand in _decorator_dependency_candidates(deco, callable_aliases)
+                    for inner in ast.walk(cand)
                 )
                 if not (deco_has_dep or sig_has_dep):
                     rel = py.relative_to(REPO_ROOT)
-                    # Resolve through the alias map for the printout so
-                    # an aliased `@post(...)` reports the underlying
-                    # `.post` rather than crashing on `deco.func.attr`
-                    # (which doesn't exist when `deco.func` is a Name).
-                    resolved = _resolve_callable(deco.func, callable_aliases)
-                    attr = (
-                        resolved.attr
-                        if isinstance(resolved, ast.Attribute)
-                        else getattr(deco.func, "id", "?")
-                    )
+                    attr = _decorator_print_attr(deco, callable_aliases)
                     offenders.append(f"{rel}:{deco.lineno} {node.name} (.{attr})")
         # Pass 2: imperative `<expr>.add_api_route(path, endpoint,
         # methods=[...])` calls anywhere in the module, plus call-style
