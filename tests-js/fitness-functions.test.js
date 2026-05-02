@@ -54,6 +54,14 @@ function relPath(file) {
   return relative(REPO_ROOT, file);
 }
 
+// Position metadata keys that the AST-walking helpers skip (acorn
+// emits these on every node and they aren't part of the structural
+// shape we care about). Hoisted here so `buildAliasMap` and the
+// generic `walkAST` can both use it -- `buildAliasMap` runs at
+// module-load time (PARSED initialiser), so `META_KEYS` must be
+// declared before any function that closes over it.
+const META_KEYS = new Set(['type', 'loc', 'start', 'end', 'range']);
+
 // Pre-parse every JS file once, share the resulting ASTs across tests.
 const PARSED = findJsFiles(STATIC_DIR).map((file) => {
   const ast = acornParse(readFileSync(file, 'utf8'), {
@@ -270,22 +278,7 @@ function buildAliasMap(ast) {
     }
   }
 
-  const stack = [ast];
-  while (stack.length) {
-    const node = stack.pop();
-    if (!node || typeof node !== 'object') continue;
-    processNode(node);
-    for (const key of Object.keys(node)) {
-      if (key === 'type' || key === 'loc' || key === 'start' || key === 'end' || key === 'range')
-        continue;
-      const child = node[key];
-      if (Array.isArray(child)) {
-        for (const c of child) stack.push(c);
-      } else if (child && typeof child === 'object' && typeof child.type === 'string') {
-        stack.push(child);
-      }
-    }
-  }
+  walkAST(ast, processNode);
   return map;
 }
 
@@ -321,8 +314,8 @@ function resolveAlias(node, aliasMap) {
 // to skip a subtree, return `false` from the visitor. Recurses on every
 // child that's either an array of nodes or a node-shaped object (one
 // with a string `type`); skips position metadata keys (`loc`, `start`,
-// `end`, `range`).
-const META_KEYS = new Set(['type', 'loc', 'start', 'end', 'range']);
+// `end`, `range`). `META_KEYS` is hoisted to the top of this file so
+// `buildAliasMap` can reuse this same walker at module-load time.
 function walkAST(node, visit, parent = null) {
   if (!node || typeof node !== 'object') return;
   if (visit(node, parent) === false) return;
@@ -768,32 +761,35 @@ describe('JS architectural fitness functions', () => {
     //  - `setTimeout("foo()", n)` / `setInterval("foo()", n)`: the
     //    string overload delegates to eval too. Function references
     //    are fine; only the string-typed first argument is forbidden.
+    function checkAntiRceNode(rel, aliasMap, offenders, node) {
+      if (isBareCallOf(node, 'eval', aliasMap) || isBareCallOf(node, 'Function', aliasMap)) {
+        offenders.push(
+          `${rel}:${node.loc.start.line}: ${node.type} of ${rootIdentifierName(node.callee)}`
+        );
+        return;
+      }
+      if (
+        !isBareCallOf(node, 'setTimeout', aliasMap) &&
+        !isBareCallOf(node, 'setInterval', aliasMap)
+      ) {
+        return;
+      }
+      // The "first argument" check must use the LOGICAL arg list --
+      // after .call/.apply/.bind wrappers strip the thisArg.
+      // `setTimeout.call(window, "code", 0)` has `node.arguments[0]
+      // === Identifier("window")` but the actual first arg the
+      // function receives is "code".
+      const eff = effectiveCall(node, 0, aliasMap);
+      if (eff?.args && isStringShapedArg(eff.args[0], aliasMap)) {
+        offenders.push(
+          `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
+        );
+      }
+    }
+
     const offenders = [];
     for (const { rel, ast, aliasMap } of PARSED) {
-      walkAST(ast, (node) => {
-        if (isBareCallOf(node, 'eval', aliasMap) || isBareCallOf(node, 'Function', aliasMap)) {
-          offenders.push(
-            `${rel}:${node.loc.start.line}: ${node.type} of ${rootIdentifierName(node.callee)}`
-          );
-          return;
-        }
-        if (
-          isBareCallOf(node, 'setTimeout', aliasMap) ||
-          isBareCallOf(node, 'setInterval', aliasMap)
-        ) {
-          // The "first argument" check must use the LOGICAL arg list
-          // -- after .call/.apply/.bind wrappers strip the thisArg.
-          // `setTimeout.call(window, "code", 0)` has `node.arguments
-          // [0] === Identifier("window")` but the actual first arg
-          // the function receives is "code".
-          const eff = effectiveCall(node, 0, aliasMap);
-          if (eff?.args && isStringShapedArg(eff.args[0], aliasMap)) {
-            offenders.push(
-              `${rel}:${node.loc.start.line}: string-arg ${rootIdentifierName(node.callee)}`
-            );
-          }
-        }
-      });
+      walkAST(ast, (node) => checkAntiRceNode(rel, aliasMap, offenders, node));
     }
     expect(offenders, `Anti-RCE violations:\n  ${offenders.join('\n  ')}`).toEqual([]);
   });
@@ -910,37 +906,39 @@ describe('JS architectural fitness functions', () => {
     // Limitation: only literal URL arguments are detected. A variable
     // holding an absolute URL slips through. Catching every literal
     // is the high-leverage win; runtime CSP catches the rest.
+    function checkFetchUrlNode(rel, aliasMap, offenders, node) {
+      if (!isBareCallOf(node, 'fetch', aliasMap)) return;
+      // Match both regular string literals and template literals;
+      // for templates, the static prefix is the cooked text of the
+      // first quasi (the part before any `${...}`). A template
+      // whose first quasi starts with `https?://` or `//` is a
+      // hard-coded absolute URL regardless of any later
+      // interpolation, and gets flagged.
+      //
+      // Use the LOGICAL first arg via `effectiveCall` so wrapped
+      // forms like `fetch.call(window, "https://evil")` and
+      // `fetch.bind(window)("https://evil")` are checked against
+      // the URL the function actually receives, not against the
+      // thisArg/etc. that .call/.apply/.bind interpose.
+      const eff = effectiveCall(node, 0, aliasMap);
+      if (!eff?.args) return;
+      // Iterate every string-shaped candidate the first arg can
+      // resolve to. The multi-binding alias map can record more than
+      // one binding per name across scopes; a benign prefix returned
+      // first would otherwise mask a dangerous one.
+      for (const prefix of staticStringPrefixes(eff.args[0], aliasMap)) {
+        if (ABSOLUTE_URL_RE.test(prefix)) {
+          offenders.push(
+            `${rel}:${node.loc.start.line}: fetch(${JSON.stringify(prefix).slice(0, 80)})`
+          );
+          break;
+        }
+      }
+    }
+
     const offenders = [];
     for (const { rel, ast, aliasMap } of PARSED) {
-      walkAST(ast, (node) => {
-        if (!isBareCallOf(node, 'fetch', aliasMap)) return;
-        // Match both regular string literals and template literals;
-        // for templates, the static prefix is the cooked text of the
-        // first quasi (the part before any `${...}`). A template
-        // whose first quasi starts with `https?://` or `//` is a
-        // hard-coded absolute URL regardless of any later
-        // interpolation, and gets flagged.
-        //
-        // Use the LOGICAL first arg via `effectiveCall` so wrapped
-        // forms like `fetch.call(window, "https://evil")` and
-        // `fetch.bind(window)("https://evil")` are checked against
-        // the URL the function actually receives, not against the
-        // thisArg/etc. that .call/.apply/.bind interpose.
-        const eff = effectiveCall(node, 0, aliasMap);
-        if (!eff?.args) return;
-        // Iterate every string-shaped candidate the first arg can
-        // resolve to. The multi-binding alias map can record more
-        // than one binding per name across scopes; a benign prefix
-        // returned first would otherwise mask a dangerous one.
-        for (const prefix of staticStringPrefixes(eff.args[0], aliasMap)) {
-          if (ABSOLUTE_URL_RE.test(prefix)) {
-            offenders.push(
-              `${rel}:${node.loc.start.line}: fetch(${JSON.stringify(prefix).slice(0, 80)})`
-            );
-            break;
-          }
-        }
-      });
+      walkAST(ast, (node) => checkFetchUrlNode(rel, aliasMap, offenders, node));
     }
     expect(
       offenders,
@@ -973,19 +971,19 @@ describe('JS architectural fitness functions', () => {
     // `BinaryExpression` nodes, not `AssignmentExpression`, so they
     // don't trip the gate.
     const allowlist = new Set(['app/static/sender/tracked-list.js']);
+    function checkHtmlAssignNode(rel, offenders, node) {
+      if (node.type !== 'AssignmentExpression') return;
+      if (!node.left || node.left.type !== 'MemberExpression') return;
+      const prop = memberPropertyName(node.left);
+      if (prop !== 'innerHTML' && prop !== 'outerHTML') return;
+      const shape = node.left.computed ? 'bracket' : 'dot';
+      offenders.push(`${rel}:${node.loc.start.line}: ${prop} ${node.operator} (${shape})`);
+    }
+
     const offenders = [];
     for (const { rel, ast } of PARSED) {
       if (allowlist.has(rel)) continue;
-      walkAST(ast, (node) => {
-        if (node.type !== 'AssignmentExpression') return;
-        if (!node.left || node.left.type !== 'MemberExpression') return;
-        const prop = memberPropertyName(node.left);
-        if (prop === 'innerHTML' || prop === 'outerHTML') {
-          offenders.push(
-            `${rel}:${node.loc.start.line}: ${prop} ${node.operator} (${node.left.computed ? 'bracket' : 'dot'})`
-          );
-        }
-      });
+      walkAST(ast, (node) => checkHtmlAssignNode(rel, offenders, node));
     }
     expect(
       offenders,

@@ -165,71 +165,73 @@
   //
   // Both channels carry the same string; both clear after 1.5s.
   let ackTimer = null;
+
+  // Position the desktop tip at show-time. Anchored to the trigger
+  // pill's rect rather than the chrome row's right edge because
+  // lang-picker / theme-toggle neighbours shift width with locale.
+  function positionDesktopTip(text) {
+    if (!desktopAckTip || !desktopBtn) return;
+    const rect = desktopBtn.getBoundingClientRect();
+    const isRTL = document.documentElement.dir === 'rtl' || document.dir === 'rtl';
+    desktopAckTip.textContent = text;
+    desktopAckTip.style.top = `${rect.bottom + 6}px`;
+    if (isRTL) {
+      desktopAckTip.style.left = `${rect.left}px`;
+      desktopAckTip.style.right = 'auto';
+    } else {
+      desktopAckTip.style.right = `${window.innerWidth - rect.right}px`;
+      desktopAckTip.style.left = 'auto';
+    }
+    desktopAckTip.classList.add('is-visible');
+  }
+
+  // Clean up the desktop tip after its 1.5s show window. Two-stage:
+  // remove the visibility class to start the fade, then clear text
+  // and inline positioning after the 250ms transition so the next
+  // show recomputes fresh against current layout.
+  function clearDesktopTip() {
+    if (desktopAckTip) {
+      desktopAckTip.classList.remove('is-visible');
+      setTimeout(() => {
+        if (desktopAckTip && !desktopAckTip.classList.contains('is-visible')) {
+          desktopAckTip.textContent = '';
+          desktopAckTip.style.top = '';
+          desktopAckTip.style.left = '';
+          desktopAckTip.style.right = '';
+        }
+      }, 250);
+    }
+    if (desktopAck) desktopAck.textContent = '';
+  }
+
+  function announceDesktopAck(text) {
+    positionDesktopTip(text);
+    if (desktopAck) desktopAck.textContent = text;
+    ackTimer = setTimeout(clearDesktopTip, 1500);
+  }
+
+  function announceDrawerAck(text) {
+    if (!drawerBtn) return;
+    const labelEl = drawerBtn.querySelector('.chrome-menu-row-label');
+    const original = labelEl ? labelEl.textContent : '';
+    if (labelEl) labelEl.textContent = text;
+    const srAck = drawerBtn.querySelector('.chrome-menu-row-ack');
+    if (srAck) srAck.textContent = text;
+    ackTimer = setTimeout(() => {
+      // Revert only if the label wasn't already changed by something
+      // else (e.g. an i18n locale flip mid-1.5s). The locale change
+      // would have rewritten textContent through the data-i18n
+      // pipeline, in which case we leave it alone.
+      if (labelEl && labelEl.textContent === text) labelEl.textContent = original;
+      if (srAck) srAck.textContent = '';
+    }, 1500);
+  }
+
   function announceDisabledAck(surface) {
     const text = t('analytics.disabled_ack', 'Sharing turned off');
     if (ackTimer) clearTimeout(ackTimer);
-
-    if (surface === 'desktop') {
-      // Sighted: tooltip-style overlay positioned under the trigger
-      // pill. Anchored at show-time via getBoundingClientRect because
-      // the chrome neighbours (lang-picker / theme-toggle) shift width
-      // with the active locale, and the tip should track the pill
-      // exactly -- not the chrome row's right edge (which is where
-      // theme-toggle lives, not where the user clicked).
-      if (desktopAckTip && desktopBtn) {
-        const rect = desktopBtn.getBoundingClientRect();
-        const isRTL = document.documentElement.dir === 'rtl' || document.dir === 'rtl';
-        desktopAckTip.textContent = text;
-        desktopAckTip.style.top = `${rect.bottom + 6}px`;
-        if (isRTL) {
-          desktopAckTip.style.left = `${rect.left}px`;
-          desktopAckTip.style.right = 'auto';
-        } else {
-          desktopAckTip.style.right = `${window.innerWidth - rect.right}px`;
-          desktopAckTip.style.left = 'auto';
-        }
-        desktopAckTip.classList.add('is-visible');
-      }
-      // SR: aria-live span.
-      if (desktopAck) desktopAck.textContent = text;
-      ackTimer = setTimeout(() => {
-        if (desktopAckTip) {
-          desktopAckTip.classList.remove('is-visible');
-          // Wait for fade transition before clearing the textContent
-          // so the text doesn't pop out before opacity finishes. Also
-          // clear the inline positioning so the next show recomputes
-          // fresh against current layout.
-          setTimeout(() => {
-            if (desktopAckTip && !desktopAckTip.classList.contains('is-visible')) {
-              desktopAckTip.textContent = '';
-              desktopAckTip.style.top = '';
-              desktopAckTip.style.left = '';
-              desktopAckTip.style.right = '';
-            }
-          }, 250);
-        }
-        if (desktopAck) desktopAck.textContent = '';
-      }, 1500);
-      return;
-    }
-
-    if (surface === 'drawer' && drawerBtn) {
-      // Sighted: label-swap on the row label.
-      const labelEl = drawerBtn.querySelector('.chrome-menu-row-label');
-      const original = labelEl ? labelEl.textContent : '';
-      if (labelEl) labelEl.textContent = text;
-      // SR: aria-live span on the row.
-      const srAck = drawerBtn.querySelector('.chrome-menu-row-ack');
-      if (srAck) srAck.textContent = text;
-      ackTimer = setTimeout(() => {
-        // Revert only if the label wasn't already changed by something
-        // else (e.g. an i18n locale flip mid-1.5s). The locale change
-        // would have rewritten textContent through the data-i18n
-        // pipeline, in which case we leave it alone.
-        if (labelEl && labelEl.textContent === text) labelEl.textContent = original;
-        if (srAck) srAck.textContent = '';
-      }, 1500);
-    }
+    if (surface === 'desktop') announceDesktopAck(text);
+    else if (surface === 'drawer') announceDrawerAck(text);
   }
 
   // ---- PATCH + state propagation ----

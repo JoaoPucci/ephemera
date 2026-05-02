@@ -42,32 +42,42 @@ function makeFetchStub({
     delete: [],
     clear: [],
   };
-  const fn = vi.fn((url, opts = {}) => {
-    if (url === '/api/secrets/tracked') {
-      calls.tracked.push({ url, opts });
-      if (trackedThrows) return Promise.reject(new Error('network'));
-      if (trackedStatus !== 200) {
-        return Promise.resolve(new Response(null, { status: trackedStatus }));
-      }
-      return Promise.resolve(jsonResponse({ items: trackedItems }));
+  function handleTracked(url, opts) {
+    calls.tracked.push({ url, opts });
+    if (trackedThrows) return Promise.reject(new Error('network'));
+    if (trackedStatus !== 200) {
+      return Promise.resolve(new Response(null, { status: trackedStatus }));
     }
+    return Promise.resolve(jsonResponse({ items: trackedItems }));
+  }
+
+  function handleClear(url, opts) {
+    calls.clear.push({ url, opts });
+    if (clearStatus !== 200) {
+      return Promise.resolve(new Response(null, { status: clearStatus }));
+    }
+    return Promise.resolve(jsonResponse({ cleared: clearedCount }));
+  }
+
+  function handleCancel(match, opts) {
+    calls.cancel.push({ id: decodeURIComponent(match[1]), opts });
+    return Promise.resolve(new Response(null, { status: cancelStatus }));
+  }
+
+  function handleDelete(match, opts) {
+    calls.delete.push({ id: decodeURIComponent(match[1]), opts });
+    return Promise.resolve(new Response(null, { status: deleteStatus }));
+  }
+
+  const fn = vi.fn((url, opts = {}) => {
+    if (url === '/api/secrets/tracked') return handleTracked(url, opts);
     if (url === '/api/secrets/tracked/clear' && opts.method === 'POST') {
-      calls.clear.push({ url, opts });
-      if (clearStatus !== 200) {
-        return Promise.resolve(new Response(null, { status: clearStatus }));
-      }
-      return Promise.resolve(jsonResponse({ cleared: clearedCount }));
+      return handleClear(url, opts);
     }
     const cancelMatch = url.match(/^\/api\/secrets\/([^/]+)\/cancel$/);
-    if (cancelMatch && opts.method === 'POST') {
-      calls.cancel.push({ id: decodeURIComponent(cancelMatch[1]), opts });
-      return Promise.resolve(new Response(null, { status: cancelStatus }));
-    }
+    if (cancelMatch && opts.method === 'POST') return handleCancel(cancelMatch, opts);
     const deleteMatch = url.match(/^\/api\/secrets\/([^/]+)$/);
-    if (deleteMatch && opts.method === 'DELETE') {
-      calls.delete.push({ id: decodeURIComponent(deleteMatch[1]), opts });
-      return Promise.resolve(new Response(null, { status: deleteStatus }));
-    }
+    if (deleteMatch && opts.method === 'DELETE') return handleDelete(deleteMatch, opts);
     return Promise.resolve(new Response(null, { status: 404 }));
   });
   return { fn, calls };

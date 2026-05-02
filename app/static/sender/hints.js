@@ -77,6 +77,44 @@ export function bindCounterHint(input, hintEl, max, opts = {}) {
 
   _showIdle();
 
+  // Decide whether a paste produces a one-shot hint override and
+  // what the override looks like. Three reachable outcomes:
+  //
+  //   { message, modifier, intendedAfter }  -- show a paste-aware
+  //                                            hint instead of the
+  //                                            input-level counter
+  //   null                                  -- no override; let the
+  //                                            input handler render
+  //                                            the regular counter
+  //                                            on the next tick
+  //
+  // Threshold is UTF-8 BYTES ("10KB chunk"); JS .length is UTF-16
+  // code units, which diverges 2-4x from byte length for CJK/emoji.
+  // We encode for an accurate byte count, but only when a threshold
+  // was actually configured -- the Infinity sentinel skips the
+  // TextEncoder allocation for label/passphrase fields.
+  function computePasteOverride(pasted, intendedAfter) {
+    if (intendedAfter > max) {
+      const message = useShortTrim
+        ? window.i18n.t('hint.label_trimmed', { max: _formatNumber(max) })
+        : window.i18n.t('hint.paste_trimmed', {
+            max: _formatNumber(max),
+            original: _formatNumber(intendedAfter),
+          });
+      return { message, modifier: 'error', intendedAfter };
+    }
+    if (pasteLargeThreshold === Number.POSITIVE_INFINITY) return null;
+    const pastedBytes = new TextEncoder().encode(pasted).length;
+    if (pastedBytes < pasteLargeThreshold) return null;
+    return {
+      message: window.i18n.t('hint.content_paste_large', {
+        size: _formatBytes(pastedBytes),
+      }),
+      modifier: 'warning',
+      intendedAfter,
+    };
+  }
+
   input.addEventListener('paste', (e) => {
     const pasted = e.clipboardData?.getData('text') ?? '';
     const selStart = input.selectionStart ?? 0;
@@ -84,34 +122,11 @@ export function bindCounterHint(input, hintEl, max, opts = {}) {
     const currentLen = input.value.length;
     const intendedAfter = currentLen - (selEnd - selStart) + pasted.length;
 
-    if (intendedAfter > max) {
-      // Browser will silently truncate at maxlength. Show paste-trim error.
-      pasteOverrideMessage = useShortTrim
-        ? window.i18n.t('hint.label_trimmed', { max: _formatNumber(max) })
-        : window.i18n.t('hint.paste_trimmed', {
-            max: _formatNumber(max),
-            original: _formatNumber(intendedAfter),
-          });
-      pasteOverrideModifier = 'error';
-      if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
-    } else if (pasteLargeThreshold !== Number.POSITIVE_INFINITY) {
-      // Threshold is UTF-8 bytes ("10KB chunk"); JS .length is UTF-16
-      // code units, which diverges 2-4x from byte length for CJK/emoji.
-      // Encode for an accurate byte count -- a 4K-character BMP CJK
-      // paste is 4K code units but ~12K UTF-8 bytes and should trip
-      // this. Skipped for fields that opt out (Infinity sentinel) so
-      // we don't allocate a TextEncoder for label/passphrase pastes
-      // that never use this branch.
-      const pastedBytes = new TextEncoder().encode(pasted).length;
-      if (pastedBytes >= pasteLargeThreshold) {
-        pasteOverrideMessage = window.i18n.t('hint.content_paste_large', {
-          size: _formatBytes(pastedBytes),
-        });
-        pasteOverrideModifier = 'warning';
-        if (opts.onIntendedSize) opts.onIntendedSize(intendedAfter);
-      } else {
-        pasteOverrideMessage = null;
-      }
+    const override = computePasteOverride(pasted, intendedAfter);
+    if (override) {
+      pasteOverrideMessage = override.message;
+      pasteOverrideModifier = override.modifier;
+      if (opts.onIntendedSize) opts.onIntendedSize(override.intendedAfter);
     } else {
       pasteOverrideMessage = null;
     }

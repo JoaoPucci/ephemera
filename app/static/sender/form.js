@@ -159,6 +159,92 @@ bindDropzone({ dropzone, fileInput, preview, fileName, clearFile });
 const submitBtn = document.getElementById('submit-btn');
 const submitLabel = submitBtn.textContent;
 
+// Build the JSON body for the text-secret POST. Throws if the
+// content field is empty (mapped to a localized error in the
+// caller's catch block).
+function buildTextBody(passphrase, track, label) {
+  const content = document.getElementById('content').value;
+  if (!content.trim()) throw new Error(window.i18n.t('error.please_enter_message'));
+  const body = {
+    content,
+    content_type: 'text',
+    expires_in: Number(document.getElementById('expires_in').value),
+    passphrase: passphrase || null,
+    track,
+  };
+  if (label) body.label = label;
+  // Cap-proximity telemetry. Single sticky bit: presence-only signal
+  // that the user crossed >=95% of the cap somewhere during this
+  // compose session, even if they edited back down before hitting
+  // submit. Two-side gate: only ship `near_cap` if the user has
+  // opted in. Server still validates and drops the field if its own
+  // per-user gate is closed -- we don't trust the client. But not
+  // sending it at all when consent is off honors the user's mental
+  // model of "I turned this off; nothing related goes over the wire."
+  if (nearCapHit && analyticsOptIn) body.near_cap = true;
+  return body;
+}
+
+// Build the multipart/form-data payload for the image-secret POST.
+// Throws if no file is selected (mapped to a localized error in the
+// caller's catch block).
+function buildImageFormData(passphrase, track, label) {
+  if (!fileInput.files.length) throw new Error(window.i18n.t('error.please_select_image'));
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('expires_in', document.getElementById('expires_in').value);
+  if (passphrase) fd.append('passphrase', passphrase);
+  fd.append('track', track ? 'true' : 'false');
+  if (label) fd.append('label', label);
+  return fd;
+}
+
+// Translate a non-2xx response into a user-visible error message.
+// Server returns `{detail: {code, message}}`; prefer the localized
+// `error.<code>` toast when available, else the English `message`,
+// else a generic "Request failed (N)" fallback.
+async function parseErrorMessage(res) {
+  let msg = window.i18n.t('error.request_failed', { status: res.status });
+  try {
+    const j = await res.json();
+    if (j.detail?.code) {
+      const key = `error.${j.detail.code}`;
+      const localized = window.i18n.t(key);
+      msg = localized === key ? j.detail.message || msg : localized;
+    } else if (typeof j.detail === 'string') {
+      msg = j.detail;
+    }
+  } catch {}
+  return msg;
+}
+
+// Snapshot the passphrase before awaiting the request: the input
+// stays editable while bcrypt-cost-12 hashing runs server-side (~5s
+// on a shared CPU), and a mid-flight edit would split the user-
+// visible value from what the backend stored, breaking the
+// URL+passphrase pair for the receiver. The same captured value
+// feeds both the request body and the result row.
+async function submitSecret() {
+  const track = document.getElementById('track').checked;
+  const label = track ? (document.getElementById('label').value || '').trim() : '';
+  const passphrase = document.getElementById('passphrase').value || '';
+  let res;
+  if (activeTab === 'text') {
+    const body = buildTextBody(passphrase, track, label);
+    res = await fetch('/api/secrets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } else {
+    res = await fetch('/api/secrets', {
+      method: 'POST',
+      body: buildImageFormData(passphrase, track, label),
+    });
+  }
+  return { res, passphrase, track };
+}
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   // In-flight guard: a rapid double-tap would otherwise create two
@@ -169,77 +255,13 @@ form.addEventListener('submit', async (e) => {
   submitBtn.disabled = true;
   submitBtn.textContent = window.i18n.t('button.creating');
 
-  let res;
   try {
-    const track = document.getElementById('track').checked;
-    const label = track ? (document.getElementById('label').value || '').trim() : '';
-    // Snapshot the passphrase before awaiting the request: the input stays
-    // editable while bcrypt-cost-12 hashing runs server-side (~5s on a
-    // shared CPU), and a mid-flight edit would split the user-visible value
-    // from what the backend stored, breaking the URL+passphrase pair for
-    // the receiver. We use this same captured value for the request body
-    // AND for the result row so they're guaranteed to agree.
-    const passphrase = document.getElementById('passphrase').value || '';
-    if (activeTab === 'text') {
-      const content = document.getElementById('content').value;
-      if (!content.trim()) throw new Error(window.i18n.t('error.please_enter_message'));
-      const body = {
-        content,
-        content_type: 'text',
-        expires_in: Number(document.getElementById('expires_in').value),
-        passphrase: passphrase || null,
-        track,
-      };
-      if (label) body.label = label;
-      // Cap-proximity telemetry. Single sticky bit: presence-only signal
-      // that the user crossed >=95% of the cap somewhere during this
-      // compose session, even if they edited back down before hitting
-      // submit. The backend records the bare event (no size, no paste-
-      // vs-typed, no user identity) and only when analytics is enabled
-      // operator-side.
-      // Two-side gate: only ship `near_cap` if the user has opted in.
-      // Server still validates and drops the field if its own per-user
-      // gate is closed -- we don't trust the client. But not sending it
-      // at all when consent is off honors the user's mental model of
-      // "I turned this off; nothing related goes over the wire."
-      if (nearCapHit && analyticsOptIn) body.near_cap = true;
-      res = await fetch('/api/secrets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-    } else {
-      if (!fileInput.files.length) throw new Error(window.i18n.t('error.please_select_image'));
-      const fd = new FormData();
-      fd.append('file', fileInput.files[0]);
-      fd.append('expires_in', document.getElementById('expires_in').value);
-      if (passphrase) fd.append('passphrase', passphrase);
-      fd.append('track', track ? 'true' : 'false');
-      if (label) fd.append('label', label);
-      res = await fetch('/api/secrets', { method: 'POST', body: fd });
-    }
-
+    const { res, passphrase, track } = await submitSecret();
     if (res.status === 401) {
       window.location.reload();
       return;
     }
-    if (!res.ok) {
-      let msg = window.i18n.t('error.request_failed', { status: res.status });
-      // Server's {code, message} shape: prefer the localized error.<code>
-      // toast when available, else the English fallback `message`, else the
-      // generic "Request failed (N)" above.
-      try {
-        const j = await res.json();
-        if (j.detail?.code) {
-          const key = `error.${j.detail.code}`;
-          const localized = window.i18n.t(key);
-          msg = localized === key ? j.detail.message || msg : localized;
-        } else if (typeof j.detail === 'string') {
-          msg = j.detail;
-        }
-      } catch {}
-      throw new Error(msg);
-    }
+    if (!res.ok) throw new Error(await parseErrorMessage(res));
     const data = await res.json();
     if (track && data.url && data.id) cacheUrl(data.id, data.url);
     showResult(data, passphrase);
