@@ -2,6 +2,7 @@
 submodule. Kept underscore-prefixed so the public `app.auth` namespace stays
 focused on the per-concern functions."""
 
+import sys
 from datetime import UTC, datetime
 
 # ----------------------------------------------------------------------------
@@ -9,6 +10,26 @@ from datetime import UTC, datetime
 # ----------------------------------------------------------------------------
 
 BCRYPT_ROUNDS = 12
+
+# Test-mode override: when pytest itself is loaded into the process,
+# drop the bcrypt cost from 12 (~250ms/hash on CI) to 4 (~1ms/hash).
+# Cosmic-ray's per-mutant pytest invocation runs the full ~10min cost-12
+# suite once per mutant, which timed out the GitHub-hosted runner's 6h
+# ceiling on the weekly mutation run. The behavioural tests assert
+# constant-time properties via `monkeypatch`-counted `bcrypt.checkpw`
+# calls (not wall-clock measurements), so cost has no effect on the
+# security signal -- only on wall-clock duration.
+#
+# Production safety: `pytest` is in requirements-dev.txt, NOT
+# requirements.txt, so a production install from the runtime lockfile
+# can't satisfy `import pytest`. `"pytest" in sys.modules` is True only
+# when something actively loaded pytest -- in practice, the pytest
+# entrypoint itself. The cost-12 source constant above is what
+# `test_security_constants_are_not_silently_weakened` (in
+# tests/test_fitness_functions.py) AST-pins, so any source-level
+# regression of the production cost still trips the fitness gate.
+if "pytest" in sys.modules:
+    BCRYPT_ROUNDS = 4
 TOTP_DIGITS = 6
 TOTP_INTERVAL = 30
 TOTP_STEP_TOLERANCE = 1  # accept current step +/- 1
