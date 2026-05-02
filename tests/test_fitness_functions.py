@@ -2122,26 +2122,40 @@ def _module_level_callable_aliases(tree: ast.AST) -> dict[str, list[ast.expr]]:
 def _resolve_callable(
     node: ast.expr,
     aliases: dict[str, list[ast.expr]] | None,
-    depth: int = 0,
+    seen: frozenset[str] = frozenset(),
 ) -> list[ast.expr]:
     """Resolve `node` through `aliases`, returning a list of every
     underlying expression it can reach. If `node` is a `Name`
     recorded in `aliases`, follow each binding (multi-valued, since
     the same Name can be reassigned at module scope) and recurse
-    until depth 4 or until the binding isn't itself a tracked Name.
+    until the binding isn't itself a tracked Name.
 
     Returns `[node]` unchanged when the input isn't a tracked Name,
     so callers can iterate the result and check each candidate
     shape in turn. Conservative direction: a name with multiple
     bindings flags as state-mutating if ANY binding resolves to a
     mutating decorator -- a later reassignment doesn't get to
-    silently disarm an earlier one."""
-    if depth > 4 or aliases is None:
+    silently disarm an earlier one.
+
+    Cycle protection comes from `seen` (the set of Name ids
+    already on this resolution path), not from a depth cap. A
+    fixed-depth cutoff would falsely bottom out a long but honest
+    alias chain (`a = router.post; b = a; c = b; d = c; e = d;
+    @e('/x')`) as the unresolved Name, which the mutating-route
+    detectors then ignore -- letting a POST/PUT/PATCH/DELETE
+    handler skip the `Depends(verify_same_origin)` check. Using a
+    name-tracking seen set instead, the resolver follows a chain
+    of arbitrary length and only bottoms out on a true cycle
+    (`a = b; b = a`), where the final Name is returned and the
+    caller continues to ignore non-Attribute candidates from that
+    branch."""
+    if aliases is None:
         return [node]
-    if isinstance(node, ast.Name) and node.id in aliases:
+    if isinstance(node, ast.Name) and node.id in aliases and node.id not in seen:
         out: list[ast.expr] = []
+        next_seen = seen | {node.id}
         for sub in aliases[node.id]:
-            out.extend(_resolve_callable(sub, aliases, depth + 1))
+            out.extend(_resolve_callable(sub, aliases, next_seen))
         return out or [node]
     return [node]
 
