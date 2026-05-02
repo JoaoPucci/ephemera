@@ -70,11 +70,17 @@ yourself.
 | Frontend handlers (in-flight guards, error paths) | Vitest + jsdom |
 | End-to-end golden path in a real browser | Playwright (Chromium) |
 
-Tests run against the real bcrypt cost (12) — no mocked faster config — which
-is why the suite takes a few minutes. The E2E test drives a real browser
-through login → create → reveal across two separate browser contexts,
-exercising the full pipeline including the browser's fragment handling. For
-exact counts and runtimes, run the suites (see below).
+Tests run with bcrypt cost dropped to 4 via an explicit env-var gate that
+[`tests/conftest.py`](tests/conftest.py) sets automatically (production keeps
+cost 12). The reduction is purely a wall-clock optimisation — every
+constant-time test in the suite counts `bcrypt.checkpw` invocations via
+`monkeypatch` rather than measuring elapsed time, so the security signal is
+identical at either cost. The cost-12 source constant stays pinned by
+`tests/test_fitness_functions.py::test_security_constants_are_not_silently_weakened`.
+The E2E test drives a real browser through login → create → reveal across two
+separate browser contexts, exercising the full pipeline including the
+browser's fragment handling. For exact counts and runtimes, run the suites
+(see below).
 
 </details>
 
@@ -248,7 +254,7 @@ Three layers, each tests a different concern:
 
 | Layer | Tool | Rough runtime |
 |---|---|---|
-| Backend unit + integration | pytest | minutes (dominated by bcrypt cost 12) |
+| Backend unit + integration | pytest | ~15s (test-mode bcrypt cost 4) |
 | Frontend handlers | Vitest + jsdom | under a second |
 | End-to-end golden path | Playwright (Chromium) | a few seconds + server boot |
 
@@ -259,8 +265,13 @@ Three layers, each tests a different concern:
 ```
 
 Every test isolates its own SQLite DB and resets in-memory rate limiters between
-runs. Runtime is dominated by bcrypt cost 12 — tests exercise the real security
-configuration, not a fake one.
+runs. The suite runs with bcrypt cost dropped to 4 via the
+`EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE` env var that
+[`tests/conftest.py`](tests/conftest.py) sets at module-load time, before any
+`from app...` import. Production keeps cost 12; the test-mode reduction is a
+wall-clock optimisation only -- constant-time tests count `bcrypt.checkpw`
+invocations via `monkeypatch` rather than measuring elapsed time. Validate at
+production cost via `EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE=12 pytest`.
 
 ### Frontend unit tests (Vitest + jsdom)
 

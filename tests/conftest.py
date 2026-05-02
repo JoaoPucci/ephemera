@@ -1,9 +1,26 @@
 """Shared fixtures for the ephemera test suite."""
 
+import os
 import sys
 from pathlib import Path
 
-import pytest
+# Drop bcrypt's cost factor in tests via an explicit env-var signal
+# that `app/auth/_core.py` reads at import time. Cost-12 hashing makes
+# the suite ~10min wall-clock, which times out cosmic-ray's per-mutant
+# runs on the GitHub-hosted 6h ceiling. Cost-4 hashing makes the same
+# suite finish in ~15s while preserving every constant-time assertion
+# (those count `bcrypt.checkpw` invocations via monkeypatch, not
+# wall-clock).
+#
+# `setdefault` so a developer can override the override -- e.g.
+# `EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE=12 pytest` to validate at
+# production cost.
+#
+# Set before any `from app...` import below so `_core.py`'s module-
+# level read of the env var sees this value.
+os.environ.setdefault("EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE", "4")
+
+import pytest  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
