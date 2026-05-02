@@ -767,16 +767,31 @@ def _apply_walrus_in_expr(
     fallback `_check_and_apply_stmt` paths can apply walrus from
     Expr / Return / Raise statements that contain `:=` expressions.
 
-    `ast.walk` descends through nested expressions, including list /
-    set / dict / generator comprehensions (PEP 572 explicitly says
-    walrus in those binds the enclosing scope). Skipping nested
-    `Lambda` would be the precise move, but the realistic codebase
-    doesn't ship lambdas with walrus side effects, and over-revoking
-    matches the rest of the test posture."""
+    The walk MUST stop at nested scope boundaries. Per PEP 572, walrus
+    inside a comprehension binds in the containing scope (so we *do*
+    descend into list / set / dict / generator comprehensions), but
+    walrus inside a `def` / `async def` / `class` body or a `Lambda`
+    binds in that nested scope -- not the enclosing function. A naive
+    `ast.walk` would let
+
+        def outer():
+            user = models.get_user_by_id(uid)   # outer trust = unsanctioned
+            def helper():
+                if (user := models.get_user_with_totp_by_id(...)):
+                    ...
+            return user["totp_secret"]          # outer `user` still
+                                                # unsanctioned, but the
+                                                # nested walrus would have
+                                                # blessed it
+
+    silently bless the outer read. `_walk_walrus_scope_local` skips
+    nested FunctionDef / AsyncFunctionDef / ClassDef / Lambda bodies
+    so only walruses that actually bind in the enclosing scope are
+    applied."""
     if expr is None:
         return set(trusted), set(aliases)
     nt, na = set(trusted), set(aliases)
-    for node in ast.walk(expr):
+    for node in _walk_walrus_scope_local(expr):
         if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
             sanctioned = _is_sanctioned_or_none_source(node.value, na, models_shadowed)
             if sanctioned:
@@ -785,6 +800,29 @@ def _apply_walrus_in_expr(
                 nt.discard(node.target.id)
                 na.discard(node.target.id)
     return nt, na
+
+
+def _walk_walrus_scope_local(node: ast.AST):
+    """`ast.walk` variant for collecting walrus bindings that bind in
+    the enclosing scope. Yields the input node + descendants but does
+    NOT descend into nested `FunctionDef` / `AsyncFunctionDef` /
+    `ClassDef` / `Lambda` bodies -- those are separate scopes per PEP
+    572, so a walrus inside one of them does not mutate the caller's
+    locals. Comprehensions ARE descended into (their walrus targets
+    explicitly bind the containing scope, by PEP 572)."""
+    from collections import deque
+
+    queue = deque([(node, True)])
+    while queue:
+        current, is_root = queue.popleft()
+        yield current
+        if not is_root and isinstance(
+            current,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
+        ):
+            continue
+        for child in ast.iter_child_nodes(current):
+            queue.append((child, False))
 
 
 # ---------------------------------------------------------------------------
@@ -1398,6 +1436,14 @@ def _node_binds_name(node: ast.AST, name: str, file_path: pathlib.Path | None) -
                                                   MatchStar, MatchMapping
                                                   rest, etc.; recurse via
                                                   `_pattern_bound_names`)
+      NamedExpr       `(<name> := expr)`        (walrus; PEP 572 binds
+                                                  the target in the
+                                                  enclosing scope, so a
+                                                  walrus in an `if`
+                                                  header / `while`
+                                                  guard / expression
+                                                  statement counts as a
+                                                  fresh local binding)
       Import / ImportFrom from a NON-canonical source (delegates to
                       `_import_binds_name_from_non_canonical_source`).
     """
@@ -1422,6 +1468,8 @@ def _node_binds_name(node: ast.AST, name: str, file_path: pathlib.Path | None) -
         return node.name == name
     if isinstance(node, ast.Match):
         return any(name in _pattern_bound_names(case.pattern) for case in node.cases)
+    if isinstance(node, ast.NamedExpr):
+        return isinstance(node.target, ast.Name) and node.target.id == name
     if isinstance(node, (ast.Import, ast.ImportFrom)):
         return _import_binds_name_from_non_canonical_source(node, name, file_path)
     return False
@@ -1481,6 +1529,16 @@ def _module_level_rebound_names(
     aren't added -- a stray `from urllib import parse` at module
     scope doesn't shadow anything we care about.
 
+    Assign targets are walked through `_names_bound_by_target` so
+    tuple / list destructuring rebinds count too -- a module-level
+
+        (verify_same_origin, _) = (attacker_fn, None)
+        (Depends, _) = (other_attacker, None)
+
+    rebinds both names just as much as the direct-Name form, so
+    later `Depends(verify_same_origin)` must not pass the
+    origin-gate check.
+
     Without the import channel, a malicious-or-mistaken
     `from attacker import models` / `from attacker import
     verify_same_origin` would still satisfy the TOTP-quarantine and
@@ -1496,10 +1554,9 @@ def _module_level_rebound_names(
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign):
             for target in stmt.targets:
-                if isinstance(target, ast.Name):
-                    names.add(target.id)
-        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
-            names.add(stmt.target.id)
+                names.update(_names_bound_by_target(target))
+        elif isinstance(stmt, ast.AnnAssign):
+            names.update(_names_bound_by_target(stmt.target))
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(stmt.name)
         elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
