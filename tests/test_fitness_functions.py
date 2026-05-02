@@ -342,11 +342,16 @@ def _scope_reads_totp_secret(
     scope: ast.AST, string_consts: dict[str, set[str]] | None = None
 ) -> bool:
     """True iff `scope` performs a real READ of `totp_secret` in its
-    own body -- a Load-context subscript (`x["totp_secret"]`) or a
-    `.pop` / `.get` / `.setdefault` call that returns the value.
-    Store/Del subscripts (`row["totp_secret"] = "[redacted]"`, `del
-    row["totp_secret"]`) are NOT reads -- they don't expose the
-    plaintext value.
+    own body. Recognises four read shapes:
+
+      Subscript Load                    `x["totp_secret"]`
+      `.pop` / `.get` / `.setdefault`   `x.pop("totp_secret", ...)`
+      bound `__getitem__` call          `x.__getitem__("totp_secret")`
+      unbound `__getitem__` call        `dict.__getitem__(x, "totp_secret")`
+
+    Store / Del subscripts (`row["totp_secret"] = ...`,
+    `del row["totp_secret"]`) are NOT reads -- they don't expose
+    the plaintext value.
 
     Indirect-key access via a local string-const alias
     (`key = "totp_secret"; row[key]`) is recognised when
@@ -366,14 +371,30 @@ def _scope_reads_totp_secret(
             and _matches_totp_secret_key(node.slice, consts)
         ):
             return True
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"pop", "get", "setdefault"}
-            and node.args
-            and _matches_totp_secret_key(node.args[0], consts)
-        ):
+        if _call_reads_totp_secret(node, consts):
             return True
+    return False
+
+
+def _call_reads_totp_secret(node: ast.AST, consts: dict[str, set[str]]) -> bool:
+    """True iff `node` is a Call shape that reads a `totp_secret`
+    key. Covers the dict-method shorthands (`.get` / `.pop` /
+    `.setdefault`) and both `__getitem__` forms. The unbound class
+    form `<ClassName>.__getitem__(receiver, key)` -- e.g.,
+    `dict.__getitem__(row, "totp_secret")` -- is the dunder
+    counterpart that desugars to `row["totp_secret"]` at runtime."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+        return False
+    attr = node.func.attr
+    if attr in {"pop", "get", "setdefault"}:
+        return bool(node.args) and _matches_totp_secret_key(node.args[0], consts)
+    if attr == "__getitem__":
+        if not node.args:
+            return False
+        # Bound: <recv>.__getitem__(<key>) (one arg).
+        # Unbound: <ClassName>.__getitem__(<recv>, <key>) (two+ args).
+        # In both cases the key is the LAST positional arg.
+        return _matches_totp_secret_key(node.args[-1], consts)
     return False
 
 
@@ -741,10 +762,12 @@ def _is_untrusted_totp_subscript_or_call(
     consts: dict[str, set[str]],
     shadowed: frozenset[str],
 ) -> bool:
-    """True iff `node` is a totp_secret read shape (Subscript or
-    `.get` / `.pop` / `.setdefault` call) AND the receiver is NOT
-    trusted at this read site (accounting for `shadowed` from any
-    enclosing comprehension / lambda scope)."""
+    """True iff `node` is a totp_secret read shape AND the receiver
+    is NOT trusted at this read site (accounting for `shadowed`
+    from any enclosing comprehension / lambda scope). Recognises
+    every shape `_scope_reads_totp_secret` does -- `Subscript Load`,
+    `.get` / `.pop` / `.setdefault` calls, and both bound /
+    unbound `__getitem__` forms."""
     if (
         isinstance(node, ast.Subscript)
         and isinstance(node.ctx, ast.Load)
@@ -754,16 +777,42 @@ def _is_untrusted_totp_subscript_or_call(
         )
     ):
         return True
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"pop", "get", "setdefault"}
-        and bool(node.args)
-        and _matches_totp_secret_key(node.args[0], consts)
-        and not _read_receiver_trusted(
-            node.func.value, trusted, sanctioned_aliases, models_shadowed, shadowed
-        )
+    receiver_key = _untrusted_call_receiver(node, consts)
+    if receiver_key is None:
+        return False
+    receiver, _ = receiver_key
+    return not _read_receiver_trusted(
+        receiver, trusted, sanctioned_aliases, models_shadowed, shadowed
     )
+
+
+def _untrusted_call_receiver(
+    node: ast.AST, consts: dict[str, set[str]]
+) -> tuple[ast.expr, ast.expr] | None:
+    """Return `(receiver, key)` if `node` is a Call shape that reads
+    `totp_secret`; otherwise None. The receiver is what the trust
+    check should see:
+
+      <recv>.get / .pop / .setdefault(<key>, ...)  -> recv = func.value
+      <recv>.__getitem__(<key>)                     -> recv = func.value
+      <Class>.__getitem__(<recv>, <key>)           -> recv = args[0]
+
+    The disambiguation between bound and unbound `__getitem__`
+    relies on argument count: a 1-arg call is bound, a 2+-arg call
+    is the unbound class form."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+        return None
+    attr = node.func.attr
+    if attr in {"pop", "get", "setdefault"}:
+        if node.args and _matches_totp_secret_key(node.args[0], consts):
+            return node.func.value, node.args[0]
+        return None
+    if attr == "__getitem__":
+        if len(node.args) == 1 and _matches_totp_secret_key(node.args[0], consts):
+            return node.func.value, node.args[0]
+        if len(node.args) >= 2 and _matches_totp_secret_key(node.args[1], consts):
+            return node.args[0], node.args[1]
+    return None
 
 
 def _read_receiver_trusted(
