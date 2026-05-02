@@ -32,20 +32,28 @@ def _py_files(root: pathlib.Path) -> list[pathlib.Path]:
 
 def _walk_local(node: ast.AST):
     """`ast.walk` variant that yields the input node + descendants but
-    does NOT recurse into nested `FunctionDef` / `AsyncFunctionDef` /
-    `Lambda` bodies. Use this for per-function analysis: a nested
-    helper has its own scope, so its statements shouldn't count toward
-    the enclosing function's coupling -- and the nested helper itself
-    will be walked independently when the outer loop reaches it."""
+    does NOT recurse into nested `FunctionDef` / `AsyncFunctionDef`
+    bodies. Use this for per-function analysis: a nested function
+    has its own scope, so its statements shouldn't count toward the
+    enclosing function's coupling -- and the nested function itself
+    will be walked independently when the outer test loop reaches it.
+
+    `Lambda` bodies ARE descended into. A lambda is a single
+    expression, never iterated by the outer test loop; reads inside
+    a lambda would otherwise vanish from analysis entirely
+    (`def f(): callback = lambda r: r["totp_secret"]; ...` would
+    bypass the quarantine because the enclosing function's read
+    detector skipped the lambda body and the lambda itself was
+    never analysed). The lambda's parameters live in its own scope,
+    so a read on a lambda parameter is correctly an untrusted
+    Identifier read under the enclosing function's trust set."""
     from collections import deque
 
     queue = deque([(node, True)])
     while queue:
         current, is_root = queue.popleft()
         yield current
-        if not is_root and isinstance(
-            current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
-        ):
+        if not is_root and isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for child in ast.iter_child_nodes(current):
             queue.append((child, False))
@@ -246,21 +254,82 @@ def test_authentication_only_raises_canonical_credential_error():
 # ---------------------------------------------------------------------------
 
 
-def _scope_reads_totp_secret(scope: ast.AST) -> bool:
+def _string_const_aliases(scope: ast.AST) -> dict[str, str]:
+    """Return a `Name -> string` map for every `<name> = "literal"`
+    Assign / AnnAssign at any reachable point in `scope` (including
+    inside lambdas, conditionals, etc.; `_walk_local` skips only
+    nested function bodies). Used to resolve indirect totp_secret
+    key access:
+
+        def f(row):
+            key = "totp_secret"
+            return row[key]            # was missed; now flagged
+
+    Multiple bindings of the same name keep the LAST seen value
+    (last write wins). False-positive surface is small: the only
+    consumer treats a name as "totp_secret" iff it resolves to that
+    exact string, and benign code that binds a name to "totp_secret"
+    is rare (`KEY = "totp_secret"` module constants would qualify --
+    flagged, since reading via that constant is still a totp_secret
+    read)."""
+    aliases: dict[str, str] = {}
+    for node in _walk_local(scope):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    aliases[target.id] = node.value.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and isinstance(node.target, ast.Name)
+        ):
+            aliases[node.target.id] = node.value.value
+    return aliases
+
+
+def _matches_totp_secret_key(node: ast.AST, string_consts: dict[str, str]) -> bool:
+    """True iff `node` is the literal `"totp_secret"` constant or a
+    `Name` that resolves to that string through `string_consts`. Used
+    by both the scope-level read detector and the per-statement read
+    check inside the structural walker."""
+    if isinstance(node, ast.Constant) and node.value == "totp_secret":
+        return True
+    if isinstance(node, ast.Name):
+        return string_consts.get(node.id) == "totp_secret"
+    return False
+
+
+def _scope_reads_totp_secret(
+    scope: ast.AST, string_consts: dict[str, str] | None = None
+) -> bool:
     """True iff `scope` performs a real READ of `totp_secret` in its
     own body -- a Load-context subscript (`x["totp_secret"]`) or a
-    `.pop` / `.get` call that returns the value. Store/Del subscripts
-    (`row["totp_secret"] = "[redacted]"`, `del row["totp_secret"]`)
-    are NOT reads -- they don't expose the plaintext value.
+    `.pop` / `.get` / `.setdefault` call that returns the value.
+    Store/Del subscripts (`row["totp_secret"] = "[redacted]"`, `del
+    row["totp_secret"]`) are NOT reads -- they don't expose the
+    plaintext value.
 
-    Nested function bodies are skipped: a helper `def` inside `scope`
-    has its own scope and will be analyzed independently."""
+    Indirect-key access via a local string-const alias
+    (`key = "totp_secret"; row[key]`) is recognised when
+    `string_consts` resolves `key` to the literal value. Pass the
+    map (computed once per scope via `_string_const_aliases`); the
+    default `None` handles callers that don't want the indirection
+    coverage.
+
+    Nested function bodies are skipped via `_walk_local`; lambda
+    bodies are NOT skipped, so a `lambda r: r["totp_secret"]` inside
+    the scope counts as a read of the enclosing function."""
+    consts = string_consts or {}
     for node in _walk_local(scope):
         if (
             isinstance(node, ast.Subscript)
             and isinstance(node.ctx, ast.Load)
-            and isinstance(node.slice, ast.Constant)
-            and node.slice.value == "totp_secret"
+            and _matches_totp_secret_key(node.slice, consts)
         ):
             return True
         if (
@@ -268,10 +337,9 @@ def _scope_reads_totp_secret(scope: ast.AST) -> bool:
             and isinstance(node.func, ast.Attribute)
             and node.func.attr in {"pop", "get", "setdefault"}
             and node.args
+            and _matches_totp_secret_key(node.args[0], consts)
         ):
-            first = node.args[0]
-            if isinstance(first, ast.Constant) and first.value == "totp_secret":
-                return True
+            return True
     return False
 
 
@@ -489,22 +557,26 @@ def _check_reads_in_node(
     trusted: set[str],
     sanctioned_aliases: set[str],
     models_shadowed: bool = False,
+    string_consts: dict[str, str] | None = None,
 ) -> bool:
     """Walk `node` (any AST sub-tree -- a single expression, a simple
     statement, or a nested compound that the structural walker has
     already chosen to treat as a leaf) and verify every `totp_secret`
     read is on a trusted receiver at the current state. Returns False
     on the first untrusted receiver. `_walk_local` skips nested
-    `FunctionDef` / `AsyncFunctionDef` / `Lambda` bodies -- those
-    have their own scopes and are checked independently."""
+    `FunctionDef` / `AsyncFunctionDef` bodies (those have their own
+    scopes and are checked independently) but descends into Lambda
+    bodies. `string_consts` -- a per-scope map produced by
+    `_string_const_aliases` -- catches indirect totp_secret key
+    reads via a local string-const alias."""
     if node is None:
         return True
+    consts = string_consts or {}
     for sub in _walk_local(node):
         if (
             isinstance(sub, ast.Subscript)
             and isinstance(sub.ctx, ast.Load)
-            and isinstance(sub.slice, ast.Constant)
-            and sub.slice.value == "totp_secret"
+            and _matches_totp_secret_key(sub.slice, consts)
             and not _is_trusted_totp_receiver(
                 sub.value, trusted, sanctioned_aliases, models_shadowed
             )
@@ -515,8 +587,7 @@ def _check_reads_in_node(
             and isinstance(sub.func, ast.Attribute)
             and sub.func.attr in {"pop", "get", "setdefault"}
             and sub.args
-            and isinstance(sub.args[0], ast.Constant)
-            and sub.args[0].value == "totp_secret"
+            and _matches_totp_secret_key(sub.args[0], consts)
             and not _is_trusted_totp_receiver(
                 sub.func.value, trusted, sanctioned_aliases, models_shadowed
             )
@@ -652,6 +723,7 @@ def _walk_scope_seq(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Thread `(trusted, aliases)` through `stmts` in source order via
     `_check_and_apply_stmt`, returning False on the first read failure
@@ -685,7 +757,7 @@ def _walk_scope_seq(
     `raise` and the every-branch-raises forms."""
     t, a = set(trusted), set(aliases)
     for stmt in stmts:
-        ok, t, a = _check_and_apply_stmt(stmt, t, a, models_shadowed)
+        ok, t, a = _check_and_apply_stmt(stmt, t, a, models_shadowed, string_consts)
         if not ok:
             return False, t, a
         if _always_terminates(stmt):
@@ -694,14 +766,20 @@ def _walk_scope_seq(
 
 
 def _check_and_apply_assign(
-    stmt: ast.Assign, trusted: set[str], aliases: set[str], models_shadowed: bool
+    stmt: ast.Assign,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Read-check the RHS against pre-stmt state, then apply binding.
     Sanctioned RHS adds each top-level Name target to `trusted`;
     non-sanctioned RHS discards every name bound by the assignment.
     Tuple / list unpacking revokes every Name in the pattern --
     static analysis can't pair pattern slots to RHS-tuple elements."""
-    if not _check_reads_in_node(stmt.value, trusted, aliases, models_shadowed):
+    if not _check_reads_in_node(
+        stmt.value, trusted, aliases, models_shadowed, string_consts
+    ):
         return False, set(trusted), set(aliases)
     nt, na = set(trusted), set(aliases)
     sanctioned = _is_sanctioned_or_none_source(stmt.value, na, models_shadowed)
@@ -716,7 +794,11 @@ def _check_and_apply_assign(
 
 
 def _check_and_apply_annassign(
-    stmt: ast.AnnAssign, trusted: set[str], aliases: set[str], models_shadowed: bool
+    stmt: ast.AnnAssign,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """`user: dict = expr` -- behaves like Assign for trust purposes when
     `value` is set. A bare `user: dict` with no `value` doesn't bind at
@@ -726,7 +808,9 @@ def _check_and_apply_annassign(
     read."""
     if stmt.value is None or not isinstance(stmt.target, ast.Name):
         return True, set(trusted), set(aliases)
-    if not _check_reads_in_node(stmt.value, trusted, aliases, models_shadowed):
+    if not _check_reads_in_node(
+        stmt.value, trusted, aliases, models_shadowed, string_consts
+    ):
         return False, set(trusted), set(aliases)
     nt, na = set(trusted), set(aliases)
     if _is_sanctioned_or_none_source(stmt.value, na, models_shadowed):
@@ -738,21 +822,29 @@ def _check_and_apply_annassign(
 
 
 def _check_and_apply_if(
-    stmt: ast.If, trusted: set[str], aliases: set[str], models_shadowed: bool
+    stmt: ast.If,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Read-check the test, apply walrus bindings, then thread the
     resulting state through body and orelse separately and intersect.
     Inner-branch reads that depend on inner-branch assignments now
     see the threaded state because each body statement is processed
     one-at-a-time via `_walk_scope_seq`."""
-    if not _check_reads_in_node(stmt.test, trusted, aliases, models_shadowed):
+    if not _check_reads_in_node(
+        stmt.test, trusted, aliases, models_shadowed, string_consts
+    ):
         return False, set(trusted), set(aliases)
     pre_t, pre_a = _apply_walrus_in_expr(stmt.test, trusted, aliases, models_shadowed)
-    if_ok, if_t, if_a = _walk_scope_seq(stmt.body, pre_t, pre_a, models_shadowed)
+    if_ok, if_t, if_a = _walk_scope_seq(
+        stmt.body, pre_t, pre_a, models_shadowed, string_consts
+    )
     if not if_ok:
         return False, if_t, if_a
     else_ok, else_t, else_a = _walk_scope_seq(
-        stmt.orelse, pre_t, pre_a, models_shadowed
+        stmt.orelse, pre_t, pre_a, models_shadowed, string_consts
     )
     if not else_ok:
         return False, else_t, else_a
@@ -760,7 +852,11 @@ def _check_and_apply_if(
 
 
 def _check_and_apply_try(
-    stmt: ast.Try, trusted: set[str], aliases: set[str], models_shadowed: bool
+    stmt: ast.Try,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Three reachable post-Try paths to merge: try-body completes (and
     orelse runs); or any handler runs (from arbitrary point in try
@@ -784,12 +880,12 @@ def _check_and_apply_try(
     since the pre-Try set wouldn't have it.) `finally` always runs
     after the merged state; threaded through that."""
     body_ok, try_t, try_a = _walk_scope_seq(
-        stmt.body, trusted, aliases, models_shadowed
+        stmt.body, trusted, aliases, models_shadowed, string_consts
     )
     if not body_ok:
         return False, try_t, try_a
     else_ok, else_t, else_a = _walk_scope_seq(
-        stmt.orelse, try_t, try_a, models_shadowed
+        stmt.orelse, try_t, try_a, models_shadowed, string_consts
     )
     if not else_ok:
         return False, else_t, else_a
@@ -801,16 +897,18 @@ def _check_and_apply_try(
             h_t.discard(handler.name)
             h_a.discard(handler.name)
         if handler.type is not None and not _check_reads_in_node(
-            handler.type, h_t, h_a, models_shadowed
+            handler.type, h_t, h_a, models_shadowed, string_consts
         ):
             return False, h_t, h_a
-        h_ok, h_t, h_a = _walk_scope_seq(handler.body, h_t, h_a, models_shadowed)
+        h_ok, h_t, h_a = _walk_scope_seq(
+            handler.body, h_t, h_a, models_shadowed, string_consts
+        )
         if not h_ok:
             return False, h_t, h_a
         merged_t = merged_t & h_t
         merged_a = merged_a & h_a
     fin_ok, fin_t, fin_a = _walk_scope_seq(
-        stmt.finalbody, merged_t, merged_a, models_shadowed
+        stmt.finalbody, merged_t, merged_a, models_shadowed, string_consts
     )
     if not fin_ok:
         return False, fin_t, fin_a
@@ -822,13 +920,16 @@ def _check_and_apply_loop(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Loop body might not execute at all -- the post-loop state is the
     intersection of pre-state (body skipped) and the body-end state
     (body ran ≥ once and completed). Walrus bindings in the header
     apply to the pre-state."""
     header = stmt.test if isinstance(stmt, ast.While) else stmt.iter
-    if not _check_reads_in_node(header, trusted, aliases, models_shadowed):
+    if not _check_reads_in_node(
+        header, trusted, aliases, models_shadowed, string_consts
+    ):
         return False, set(trusted), set(aliases)
     pre_t, pre_a = _apply_walrus_in_expr(header, trusted, aliases, models_shadowed)
     body_t, body_a = set(pre_t), set(pre_a)
@@ -837,12 +938,12 @@ def _check_and_apply_loop(
             body_t.discard(bound)
             body_a.discard(bound)
     body_ok, body_t, body_a = _walk_scope_seq(
-        stmt.body, body_t, body_a, models_shadowed
+        stmt.body, body_t, body_a, models_shadowed, string_consts
     )
     if not body_ok:
         return False, body_t, body_a
     else_ok, else_t, else_a = _walk_scope_seq(
-        stmt.orelse, body_t, body_a, models_shadowed
+        stmt.orelse, body_t, body_a, models_shadowed, string_consts
     )
     if not else_ok:
         return False, else_t, else_a
@@ -854,6 +955,7 @@ def _check_and_apply_with(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """`with ctx as name:` binds `name` to the context manager's
     `__enter__` return; tuple/list-unpacking forms (`with ctx as
@@ -861,7 +963,7 @@ def _check_and_apply_with(
     first, then revoke the captured names, then thread the body."""
     for item in stmt.items:
         if not _check_reads_in_node(
-            item.context_expr, trusted, aliases, models_shadowed
+            item.context_expr, trusted, aliases, models_shadowed, string_consts
         ):
             return False, set(trusted), set(aliases)
     nt, na = set(trusted), set(aliases)
@@ -871,7 +973,7 @@ def _check_and_apply_with(
         for bound in _names_bound_by_target(item.optional_vars):
             nt.discard(bound)
             na.discard(bound)
-    return _walk_scope_seq(stmt.body, nt, na, models_shadowed)
+    return _walk_scope_seq(stmt.body, nt, na, models_shadowed, string_consts)
 
 
 def _check_and_apply_match(
@@ -879,6 +981,7 @@ def _check_and_apply_match(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """`match X: case <pat>: <body>` (PEP 634, Python 3.10+). The
     subject is read-checked once before any case runs; walrus bindings
@@ -888,7 +991,9 @@ def _check_and_apply_match(
     pattern-bound state. Post-Match state is the intersection of every
     case's end state PLUS the subject-evaluated state for the
     fall-through path (no case matched at runtime)."""
-    if not _check_reads_in_node(stmt.subject, trusted, aliases, models_shadowed):
+    if not _check_reads_in_node(
+        stmt.subject, trusted, aliases, models_shadowed, string_consts
+    ):
         return False, set(trusted), set(aliases)
     pre_t, pre_a = _apply_walrus_in_expr(
         stmt.subject, trusted, aliases, models_shadowed
@@ -900,11 +1005,11 @@ def _check_and_apply_match(
             case_t.discard(bound)
             case_a.discard(bound)
         if case.guard is not None and not _check_reads_in_node(
-            case.guard, case_t, case_a, models_shadowed
+            case.guard, case_t, case_a, models_shadowed, string_consts
         ):
             return False, case_t, case_a
         case_ok, case_t, case_a = _walk_scope_seq(
-            case.body, case_t, case_a, models_shadowed
+            case.body, case_t, case_a, models_shadowed, string_consts
         )
         if not case_ok:
             return False, case_t, case_a
@@ -944,6 +1049,7 @@ def _check_and_apply_stmt(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool = False,
+    string_consts: dict[str, str] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Return `(ok, new_trusted, new_aliases)` for one statement.
     `ok` is False iff a `totp_secret` read inside the (recursively-
@@ -960,22 +1066,36 @@ def _check_and_apply_stmt(
     pre-state and trust is unchanged. Nested function / class bodies
     are skipped (separate scopes; checked independently)."""
     if isinstance(stmt, ast.Assign):
-        return _check_and_apply_assign(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_assign(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if isinstance(stmt, ast.AnnAssign):
-        return _check_and_apply_annassign(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_annassign(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if isinstance(stmt, ast.If):
-        return _check_and_apply_if(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_if(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if isinstance(stmt, ast.Try):
-        return _check_and_apply_try(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_try(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if isinstance(stmt, ast.Match):
-        return _check_and_apply_match(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_match(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
-        return _check_and_apply_loop(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_loop(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if isinstance(stmt, (ast.With, ast.AsyncWith)):
-        return _check_and_apply_with(stmt, trusted, aliases, models_shadowed)
+        return _check_and_apply_with(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if isinstance(stmt, (ast.Import, ast.ImportFrom)):
         return _check_and_apply_import(stmt, trusted, aliases)
-    if not _check_reads_in_node(stmt, trusted, aliases, models_shadowed):
+    if not _check_reads_in_node(stmt, trusted, aliases, models_shadowed, string_consts):
         return False, set(trusted), set(aliases)
     return True, set(trusted), set(aliases)
 
@@ -1283,7 +1403,14 @@ def _scope_totp_reads_are_quarantined(
     models_shadowed = (
         "models" in (module_rebound or set())
     ) or _name_is_bound_in_scope("models", scope, file_path)
-    ok, _t, _a = _walk_scope_seq(scope.body, trusted, local_sanctioned, models_shadowed)
+    # String-const aliases for indirect totp_secret key access: a
+    # `key = "totp_secret"; row[key]` in this function body resolves
+    # `key` through this map and is treated as a literal-key read.
+    # Computed once per scope (constant for the whole walker).
+    string_consts = _string_const_aliases(scope)
+    ok, _t, _a = _walk_scope_seq(
+        scope.body, trusted, local_sanctioned, models_shadowed, string_consts
+    )
     return ok
 
 
@@ -1324,7 +1451,8 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if not _scope_reads_totp_secret(fn):
+            string_consts = _string_const_aliases(fn)
+            if not _scope_reads_totp_secret(fn, string_consts):
                 continue
             if not _scope_totp_reads_are_quarantined(
                 fn, sanctioned, module_rebound, py
