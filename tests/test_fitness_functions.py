@@ -21,6 +21,7 @@ test. The invariants are spec, not implementation -- see AGENTS.md §3.
 import ast
 import pathlib
 import re
+import string
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP_DIR = REPO_ROOT / "app"
@@ -1352,17 +1353,58 @@ def _check_and_apply_stmt(
         )
     if isinstance(stmt, (ast.Import, ast.ImportFrom)):
         return _check_and_apply_import(stmt, trusted, aliases)
+    if isinstance(stmt, ast.AugAssign):
+        return _check_and_apply_augassign(
+            stmt, trusted, aliases, models_shadowed, string_consts
+        )
     if not _check_reads_in_node(stmt, trusted, aliases, models_shadowed, string_consts):
         return False, set(trusted), set(aliases)
     # Fallback shapes (Expr, Return, Raise, Pass, Break, Continue,
-    # Global, Nonlocal, Delete, AugAssign, FunctionDef, ClassDef)
-    # don't have their own state-update rule, but they CAN contain
-    # walrus expressions that bind in the enclosing scope -- e.g.,
-    # an Expr stmt `(user := models.get_user_by_id(uid))` runs the
+    # Global, Nonlocal, Delete, FunctionDef, ClassDef) don't have
+    # their own state-update rule, but they CAN contain walrus
+    # expressions that bind in the enclosing scope -- e.g., an
+    # Expr stmt `(user := models.get_user_by_id(uid))` runs the
     # walrus and revokes prior trust. Apply walrus from the entire
     # stmt subtree before returning.
     new_t, new_a = _apply_walrus_in_expr(stmt, trusted, aliases, models_shadowed)
     return True, new_t, new_a
+
+
+def _check_and_apply_augassign(
+    stmt: ast.AugAssign,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+    string_consts: dict[str, set[str]] | None,
+) -> tuple[bool, set[str], set[str]]:
+    """Augmented assignments (`x op= y`) rebind `x` to the result of
+    `x op y`. Even when the operator looks innocuous (`|=` on a
+    dict, `+=` on a list), the new binding is no longer the object
+    directly returned from a sanctioned getter -- it has been
+    mutated, and content the caller didn't author can flow into
+    the totp_secret slot:
+
+        user = models.get_user_with_totp_by_id(uid)
+        user |= {"totp_secret": "evil"}        # silently mutates
+        user["totp_secret"]                    # reads attacker value
+
+    The previous fallback path treated AugAssign as "trust
+    unchanged"; the read above slipped past quarantine because
+    `user` was still in `trusted`. Now AugAssign read-checks the
+    target and value, then revokes the Name target's trust /
+    alias entries (Subscript / Attribute targets like
+    `obj.attr += val` don't rebind a tracked Name and leave the
+    sets unchanged). Walrus rebinds inside `value` are still
+    applied so a contrived `x += (y := f())` still threads
+    correctly."""
+    if not _check_reads_in_node(stmt, trusted, aliases, models_shadowed, string_consts):
+        return False, set(trusted), set(aliases)
+    nt, na = set(trusted), set(aliases)
+    if isinstance(stmt.target, ast.Name):
+        nt.discard(stmt.target.id)
+        na.discard(stmt.target.id)
+    nt, na = _apply_walrus_in_expr(stmt.value, nt, na, models_shadowed)
+    return True, nt, na
 
 
 def _import_binds_name_from_non_canonical_source(
@@ -2004,6 +2046,102 @@ def _string_assembly_segments(
         return _string_assembly_segments(
             node.left, aliases
         ) + _string_assembly_segments(node.right, aliases)
+    if isinstance(node, ast.Call):
+        fmt_segments = _format_call_segments(node, aliases)
+        if fmt_segments is not None:
+            return fmt_segments
+    return [["?"]]
+
+
+def _format_call_segments(
+    call: ast.Call, aliases: dict[str, set[str]]
+) -> list[list[str]] | None:
+    """Reconstruct segments from a `<str-literal>.format(...)` call,
+    or `None` if the call doesn't match that shape. Catches the
+    bypass
+
+        table = "analytics_events"
+        sql = "INSERT INTO {} (event_type, payload) VALUES (?, ?)".format(table)
+
+    where neither pass on its own (literal-text scan, JoinedStr +
+    BinOp scan) sees the SQL keyword and the table token in the
+    same string -- the keyword lives in the template Constant, the
+    table token in the call's positional arg.
+
+    Uses `string.Formatter().parse()` to split the template into
+    `(literal, field_name, ...)` chunks. Each chunk's literal text
+    becomes a constant segment; each `{...}` field is resolved to
+    its corresponding positional or keyword argument and that
+    argument's segments are spliced in. Auto-positional `{}` and
+    explicit `{0}` / `{name}` are all handled. Anything we can't
+    statically resolve (computed args, attribute / subscript paths
+    on the field name, format specs we can't expand) becomes a
+    single `?` so the regex doesn't accidentally bridge unrelated
+    fragments."""
+    if not (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == "format"
+        and isinstance(call.func.value, ast.Constant)
+        and isinstance(call.func.value.value, str)
+    ):
+        return None
+    template = call.func.value.value
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except (ValueError, IndexError):
+        return None
+    auto_idx = 0
+    segments: list[list[str]] = []
+    for literal_text, field_name, _format_spec, _conversion in parsed:
+        if literal_text:
+            segments.append([literal_text])
+        if field_name is None:
+            continue
+        field_segments, auto_idx = _format_field_segments(
+            field_name, auto_idx, call, aliases
+        )
+        segments.extend(field_segments)
+    return segments
+
+
+def _format_field_segments(
+    field_name: str,
+    auto_idx: int,
+    call: ast.Call,
+    aliases: dict[str, set[str]],
+) -> tuple[list[list[str]], int]:
+    """Resolve one `{field_name}` placeholder from a `.format(...)`
+    call to its argument's segments, returning the new auto-positional
+    counter alongside. Anything not statically resolvable (nested
+    `.attr` / `[idx]` paths, missing args, named field that isn't a
+    keyword) collapses to a single `?` placeholder."""
+    if field_name == "":
+        idx = auto_idx
+        auto_idx += 1
+        return _segments_for_arg_idx(idx, call, aliases), auto_idx
+    if "." in field_name or "[" in field_name:
+        return [["?"]], auto_idx
+    if field_name[0].isdigit() and field_name.isdigit():
+        return _segments_for_arg_idx(int(field_name), call, aliases), auto_idx
+    if field_name[0].isdigit():
+        return [["?"]], auto_idx
+    return _segments_for_kwarg(field_name, call, aliases), auto_idx
+
+
+def _segments_for_arg_idx(
+    idx: int, call: ast.Call, aliases: dict[str, set[str]]
+) -> list[list[str]]:
+    if idx < len(call.args):
+        return _string_assembly_segments(call.args[idx], aliases)
+    return [["?"]]
+
+
+def _segments_for_kwarg(
+    name: str, call: ast.Call, aliases: dict[str, set[str]]
+) -> list[list[str]]:
+    for kw in call.keywords:
+        if kw.arg == name:
+            return _string_assembly_segments(kw.value, aliases)
     return [["?"]]
 
 
@@ -2028,13 +2166,20 @@ def _candidates_from_segments(segments: list[list[str]]) -> list[str]:
 
 def _is_string_assembly_node(node: ast.AST) -> bool:
     """True for the AST shapes whose reconstruction the analytics SQL
-    scan walks: `JoinedStr` (f-string) or `BinOp` with an `Add`
-    operator. Other expression shapes don't compose strings out of
-    multiple fragments and so can't carry the keyword + table-name
-    bypass on their own."""
+    scan walks: `JoinedStr` (f-string), `BinOp` with `Add`, or a
+    `<str>.format(...)` Call on a string-shaped receiver. Other
+    expression shapes don't compose strings out of multiple
+    fragments and so can't carry the keyword + table-name bypass
+    on their own."""
     if isinstance(node, ast.JoinedStr):
         return True
-    return isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return True
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "format"
+    )
 
 
 # ---------------------------------------------------------------------------
