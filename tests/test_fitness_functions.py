@@ -655,29 +655,51 @@ def _check_comprehension_reads(
 ) -> bool:
     """Walk a list / set / dict / generator comprehension, adding
     the comprehension's generator-target names to `shadowed` for
-    its `elt`, key/value (DictComp), iters, and ifs."""
+    its `elt`, key/value (DictComp), iters, and ifs.
+
+    Threads walrus (`:=`) rebinds from the iters and ifs into the
+    trust state before checking the elt. PEP 572 says a walrus
+    inside a comprehension binds in the *containing scope*, and
+    Python evaluates a comprehension clause-by-clause -- iter[0]
+    -> bind target[0] -> ifs[0] -> iter[1] -> bind target[1] ->
+    ifs[1] -> ... -> elt -- so by the time the elt runs, every
+    walrus in the iters / ifs that fired this iteration has
+    already mutated the containing scope. Without threading those
+    rebinds, the elt is checked against a stale snapshot:
+
+        user = models.get_user_with_totp_by_id(uid)  # trusted
+        [
+            user["totp_secret"]
+            for row in rows
+            if (user := models.get_user_by_id(uid))   # unsanctioned
+        ]
+
+    The if's walrus rebinds `user` to an unsanctioned source on
+    every matching iteration; the elt's read should be flagged.
+    Threading state through iter and ifs in clause order makes the
+    elt's check see the post-walrus trust set."""
     new_shadowed = shadowed | _comprehension_target_names(node)
+    cur_t, cur_a = trusted, sanctioned_aliases
+    for gen in node.generators:
+        if not _check_reads_in_node(
+            gen.iter, cur_t, cur_a, models_shadowed, consts, new_shadowed
+        ):
+            return False
+        cur_t, cur_a = _apply_walrus_in_expr(gen.iter, cur_t, cur_a, models_shadowed)
+        for if_clause in gen.ifs:
+            if not _check_reads_in_node(
+                if_clause, cur_t, cur_a, models_shadowed, consts, new_shadowed
+            ):
+                return False
+            cur_t, cur_a = _apply_walrus_in_expr(
+                if_clause, cur_t, cur_a, models_shadowed
+            )
     elt_nodes = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
     for elt in elt_nodes:
         if not _check_reads_in_node(
-            elt, trusted, sanctioned_aliases, models_shadowed, consts, new_shadowed
+            elt, cur_t, cur_a, models_shadowed, consts, new_shadowed
         ):
             return False
-    for gen in node.generators:
-        if not _check_reads_in_node(
-            gen.iter, trusted, sanctioned_aliases, models_shadowed, consts, new_shadowed
-        ):
-            return False
-        for if_clause in gen.ifs:
-            if not _check_reads_in_node(
-                if_clause,
-                trusted,
-                sanctioned_aliases,
-                models_shadowed,
-                consts,
-                new_shadowed,
-            ):
-                return False
     return True
 
 
