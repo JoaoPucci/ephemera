@@ -749,7 +749,7 @@ def _names_bound_by_target(target: ast.expr) -> list[str]:
 
 
 def _apply_walrus_in_expr(
-    expr: ast.expr | None,
+    expr: ast.AST | None,
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
@@ -757,11 +757,15 @@ def _apply_walrus_in_expr(
     """Apply every walrus binding (`name := value`) reachable inside
     `expr` to (trusted, aliases), in source order. Returns fresh sets.
 
-    Walrus assignments in `if` / `while` headers, `match` subjects, and
-    For-loop iters bind in the enclosing scope and run BEFORE the
-    branching body (PEP 572). Without this hook, a reassignment like
-    `if (user := models.get_user_by_id(uid)):` would leave a trusted
-    `user` from earlier in the function trusted through both branches.
+    Walrus assignments in `if` / `while` headers, `match` subjects /
+    case guards, For-loop iters, and as expression statements
+    (`(name := value)`) bind in the enclosing scope and run BEFORE
+    the branching body (PEP 572). Without this hook, a reassignment
+    like `if (user := models.get_user_by_id(uid)):` would leave a
+    trusted `user` from earlier in the function trusted through both
+    branches. The helper accepts any AST node (statements too) so
+    fallback `_check_and_apply_stmt` paths can apply walrus from
+    Expr / Return / Raise statements that contain `:=` expressions.
 
     `ast.walk` descends through nested expressions, including list /
     set / dict / generator comprehensions (PEP 572 explicitly says
@@ -1139,10 +1143,19 @@ def _check_and_apply_match(
         for bound in _pattern_bound_names(case.pattern):
             case_t.discard(bound)
             case_a.discard(bound)
-        if case.guard is not None and not _check_reads_in_node(
-            case.guard, case_t, case_a, models_shadowed, string_consts
-        ):
-            return False, case_t, case_a
+        if case.guard is not None:
+            if not _check_reads_in_node(
+                case.guard, case_t, case_a, models_shadowed, string_consts
+            ):
+                return False, case_t, case_a
+            # Walrus bindings in `case ... if (x := ...):` bind in the
+            # enclosing scope per PEP 572, and they run BEFORE the
+            # case body. Apply them to the per-case state so a
+            # `(user := unsanctioned())` guard revokes trust before
+            # the body's reads.
+            case_t, case_a = _apply_walrus_in_expr(
+                case.guard, case_t, case_a, models_shadowed
+            )
         case_ok, case_t, case_a = _walk_scope_seq(
             case.body, case_t, case_a, models_shadowed, string_consts
         )
@@ -1232,7 +1245,15 @@ def _check_and_apply_stmt(
         return _check_and_apply_import(stmt, trusted, aliases)
     if not _check_reads_in_node(stmt, trusted, aliases, models_shadowed, string_consts):
         return False, set(trusted), set(aliases)
-    return True, set(trusted), set(aliases)
+    # Fallback shapes (Expr, Return, Raise, Pass, Break, Continue,
+    # Global, Nonlocal, Delete, AugAssign, FunctionDef, ClassDef)
+    # don't have their own state-update rule, but they CAN contain
+    # walrus expressions that bind in the enclosing scope -- e.g.,
+    # an Expr stmt `(user := models.get_user_by_id(uid))` runs the
+    # walrus and revokes prior trust. Apply walrus from the entire
+    # stmt subtree before returning.
+    new_t, new_a = _apply_walrus_in_expr(stmt, trusted, aliases, models_shadowed)
+    return True, new_t, new_a
 
 
 def _import_binds_name_from_non_canonical_source(
