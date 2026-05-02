@@ -254,25 +254,29 @@ def test_authentication_only_raises_canonical_credential_error():
 # ---------------------------------------------------------------------------
 
 
-def _string_const_aliases(scope: ast.AST) -> dict[str, str]:
-    """Return a `Name -> string` map for every `<name> = "literal"`
-    Assign / AnnAssign at any reachable point in `scope` (including
-    inside lambdas, conditionals, etc.; `_walk_local` skips only
-    nested function bodies). Used to resolve indirect totp_secret
-    key access:
+def _string_const_aliases(scope: ast.AST) -> dict[str, set[str]]:
+    """Return a `Name -> set[string]` map collecting EVERY string
+    constant a local name has been bound to anywhere in `scope`.
+    Multiple bindings ACCUMULATE; the matcher treats a name as a
+    totp_secret alias iff `"totp_secret"` is in its set, regardless
+    of source order.
 
-        def f(row):
-            key = "totp_secret"
-            return row[key]            # was missed; now flagged
+    Last-write-wins (the previous semantics) loses reads from
+    earlier bindings:
 
-    Multiple bindings of the same name keep the LAST seen value
-    (last write wins). False-positive surface is small: the only
-    consumer treats a name as "totp_secret" iff it resolves to that
-    exact string, and benign code that binds a name to "totp_secret"
-    is rare (`KEY = "totp_secret"` module constants would qualify --
-    flagged, since reading via that constant is still a totp_secret
-    read)."""
-    aliases: dict[str, str] = {}
+        key = "totp_secret"
+        row[key]                # reads totp_secret here
+        key = "other"           # later rebind hid the earlier match
+                                # under last-write-wins -- bypass
+
+    Set accumulation conservatively flags both `row[key]` reads in
+    the rebind-then-read shape `key = "totp_secret"; row[key];
+    key = "x"; row[key]` (the second isn't actually a totp_secret
+    read at runtime). Realistic codebases rarely rebind a totp-key
+    variable, and over-flagging is the safe direction. `_walk_local`
+    picks up bindings inside lambdas / conditionals but skips
+    nested `FunctionDef` bodies (their own scope)."""
+    aliases: dict[str, set[str]] = {}
     for node in _walk_local(scope):
         if (
             isinstance(node, ast.Assign)
@@ -281,31 +285,31 @@ def _string_const_aliases(scope: ast.AST) -> dict[str, str]:
         ):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    aliases[target.id] = node.value.value
+                    aliases.setdefault(target.id, set()).add(node.value.value)
         elif (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.value, ast.Constant)
             and isinstance(node.value.value, str)
             and isinstance(node.target, ast.Name)
         ):
-            aliases[node.target.id] = node.value.value
+            aliases.setdefault(node.target.id, set()).add(node.value.value)
     return aliases
 
 
-def _matches_totp_secret_key(node: ast.AST, string_consts: dict[str, str]) -> bool:
+def _matches_totp_secret_key(node: ast.AST, string_consts: dict[str, set[str]]) -> bool:
     """True iff `node` is the literal `"totp_secret"` constant or a
-    `Name` that resolves to that string through `string_consts`. Used
-    by both the scope-level read detector and the per-statement read
-    check inside the structural walker."""
+    `Name` whose alias set in `string_consts` contains "totp_secret".
+    Used by both the scope-level read detector and the per-statement
+    read check inside the structural walker."""
     if isinstance(node, ast.Constant) and node.value == "totp_secret":
         return True
     if isinstance(node, ast.Name):
-        return string_consts.get(node.id) == "totp_secret"
+        return "totp_secret" in string_consts.get(node.id, set())
     return False
 
 
 def _scope_reads_totp_secret(
-    scope: ast.AST, string_consts: dict[str, str] | None = None
+    scope: ast.AST, string_consts: dict[str, set[str]] | None = None
 ) -> bool:
     """True iff `scope` performs a real READ of `totp_secret` in its
     own body -- a Load-context subscript (`x["totp_secret"]`) or a
@@ -552,48 +556,179 @@ def _is_trusted_totp_receiver(
     return False
 
 
+_COMP_NODES = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _comprehension_target_names(node: ast.AST) -> set[str]:
+    """Names bound by a comprehension's `for ... in ...` generators.
+    A list/set/dict/generator comprehension introduces a NEW local
+    scope where every generator target shadows enclosing names; a
+    `[user["totp_secret"] for user in rows]` re-binds `user` to each
+    element of `rows`, so the read inside is on the comprehension-
+    scope `user`, not the outer trusted one."""
+    out: set[str] = set()
+    if isinstance(node, _COMP_NODES):
+        for gen in node.generators:
+            out.update(_names_bound_by_target(gen.target))
+    return out
+
+
+def _lambda_param_names(node: ast.Lambda) -> set[str]:
+    """Lambda parameters: positional, kw-only, *args, **kwargs."""
+    args = node.args
+    out = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+    if args.vararg is not None:
+        out.add(args.vararg.arg)
+    if args.kwarg is not None:
+        out.add(args.kwarg.arg)
+    return out
+
+
 def _check_reads_in_node(
     node: ast.AST | None,
     trusted: set[str],
     sanctioned_aliases: set[str],
     models_shadowed: bool = False,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
+    shadowed: frozenset[str] = frozenset(),
 ) -> bool:
-    """Walk `node` (any AST sub-tree -- a single expression, a simple
-    statement, or a nested compound that the structural walker has
-    already chosen to treat as a leaf) and verify every `totp_secret`
-    read is on a trusted receiver at the current state. Returns False
-    on the first untrusted receiver. `_walk_local` skips nested
-    `FunctionDef` / `AsyncFunctionDef` bodies (those have their own
-    scopes and are checked independently) but descends into Lambda
-    bodies. `string_consts` -- a per-scope map produced by
-    `_string_const_aliases` -- catches indirect totp_secret key
-    reads via a local string-const alias."""
+    """Recursively check `totp_secret` reads inside `node`. Returns
+    False on the first untrusted receiver.
+
+    `shadowed` carries names bound by an enclosing comprehension /
+    lambda. A read on a Name in `shadowed` is treated as untrusted
+    even when that Name is in the outer `trusted` set, because
+    comprehension targets and lambda parameters live in their own
+    inner scope:
+
+        user = sanctioned()                          # outer trusted = {user}
+        [user["totp_secret"] for user in rows]       # inner `user` is rows-element
+
+    The list comprehension's `for user in rows` re-binds `user`
+    locally; the read inside the comprehension body is on the
+    rebound `user`, not the outer one.
+
+    Nested `FunctionDef` / `AsyncFunctionDef` bodies are skipped
+    (they have their own scope, analyzed independently). Lambda
+    bodies are descended into with the lambda's parameters added
+    to `shadowed`. Comprehensions add their generator targets to
+    `shadowed` and recurse into both `elt` (the body) and the
+    generators' iter / ifs / target subtrees."""
     if node is None:
         return True
     consts = string_consts or {}
-    for sub in _walk_local(node):
-        if (
-            isinstance(sub, ast.Subscript)
-            and isinstance(sub.ctx, ast.Load)
-            and _matches_totp_secret_key(sub.slice, consts)
-            and not _is_trusted_totp_receiver(
-                sub.value, trusted, sanctioned_aliases, models_shadowed
-            )
-        ):
-            return False
-        if (
-            isinstance(sub, ast.Call)
-            and isinstance(sub.func, ast.Attribute)
-            and sub.func.attr in {"pop", "get", "setdefault"}
-            and sub.args
-            and _matches_totp_secret_key(sub.args[0], consts)
-            and not _is_trusted_totp_receiver(
-                sub.func.value, trusted, sanctioned_aliases, models_shadowed
-            )
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return True
+    if isinstance(node, ast.Lambda):
+        new_shadowed = shadowed | _lambda_param_names(node)
+        return _check_reads_in_node(
+            node.body,
+            trusted,
+            sanctioned_aliases,
+            models_shadowed,
+            consts,
+            new_shadowed,
+        )
+    if isinstance(node, _COMP_NODES):
+        return _check_comprehension_reads(
+            node, trusted, sanctioned_aliases, models_shadowed, consts, shadowed
+        )
+    if _is_untrusted_totp_subscript_or_call(
+        node, trusted, sanctioned_aliases, models_shadowed, consts, shadowed
+    ):
+        return False
+    for child in ast.iter_child_nodes(node):
+        if not _check_reads_in_node(
+            child, trusted, sanctioned_aliases, models_shadowed, consts, shadowed
         ):
             return False
     return True
+
+
+def _check_comprehension_reads(
+    node: ast.expr,
+    trusted: set[str],
+    sanctioned_aliases: set[str],
+    models_shadowed: bool,
+    consts: dict[str, set[str]],
+    shadowed: frozenset[str],
+) -> bool:
+    """Walk a list / set / dict / generator comprehension, adding
+    the comprehension's generator-target names to `shadowed` for
+    its `elt`, key/value (DictComp), iters, and ifs."""
+    new_shadowed = shadowed | _comprehension_target_names(node)
+    elt_nodes = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+    for elt in elt_nodes:
+        if not _check_reads_in_node(
+            elt, trusted, sanctioned_aliases, models_shadowed, consts, new_shadowed
+        ):
+            return False
+    for gen in node.generators:
+        if not _check_reads_in_node(
+            gen.iter, trusted, sanctioned_aliases, models_shadowed, consts, new_shadowed
+        ):
+            return False
+        for if_clause in gen.ifs:
+            if not _check_reads_in_node(
+                if_clause,
+                trusted,
+                sanctioned_aliases,
+                models_shadowed,
+                consts,
+                new_shadowed,
+            ):
+                return False
+    return True
+
+
+def _is_untrusted_totp_subscript_or_call(
+    node: ast.AST,
+    trusted: set[str],
+    sanctioned_aliases: set[str],
+    models_shadowed: bool,
+    consts: dict[str, set[str]],
+    shadowed: frozenset[str],
+) -> bool:
+    """True iff `node` is a totp_secret read shape (Subscript or
+    `.get` / `.pop` / `.setdefault` call) AND the receiver is NOT
+    trusted at this read site (accounting for `shadowed` from any
+    enclosing comprehension / lambda scope)."""
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.ctx, ast.Load)
+        and _matches_totp_secret_key(node.slice, consts)
+        and not _read_receiver_trusted(
+            node.value, trusted, sanctioned_aliases, models_shadowed, shadowed
+        )
+    ):
+        return True
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"pop", "get", "setdefault"}
+        and bool(node.args)
+        and _matches_totp_secret_key(node.args[0], consts)
+        and not _read_receiver_trusted(
+            node.func.value, trusted, sanctioned_aliases, models_shadowed, shadowed
+        )
+    )
+
+
+def _read_receiver_trusted(
+    recv: ast.AST,
+    trusted: set[str],
+    sanctioned_aliases: set[str],
+    models_shadowed: bool,
+    shadowed: frozenset[str],
+) -> bool:
+    """Like `_is_trusted_totp_receiver`, but excludes Names that are
+    `shadowed` by an enclosing comprehension / lambda scope. A Name
+    in `shadowed` is bound to the comprehension target / lambda
+    parameter at the read site, not to whatever the outer scope's
+    trust set thinks."""
+    if isinstance(recv, ast.Name) and recv.id in shadowed:
+        return False
+    return _is_trusted_totp_receiver(recv, trusted, sanctioned_aliases, models_shadowed)
 
 
 def _names_bound_by_target(target: ast.expr) -> list[str]:
@@ -723,7 +858,7 @@ def _walk_scope_seq(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Thread `(trusted, aliases)` through `stmts` in source order via
     `_check_and_apply_stmt`, returning False on the first read failure
@@ -770,7 +905,7 @@ def _check_and_apply_assign(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Read-check the RHS against pre-stmt state, then apply binding.
     Sanctioned RHS adds each top-level Name target to `trusted`;
@@ -798,7 +933,7 @@ def _check_and_apply_annassign(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """`user: dict = expr` -- behaves like Assign for trust purposes when
     `value` is set. A bare `user: dict` with no `value` doesn't bind at
@@ -826,7 +961,7 @@ def _check_and_apply_if(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Read-check the test, apply walrus bindings, then thread the
     resulting state through body and orelse separately and intersect.
@@ -856,7 +991,7 @@ def _check_and_apply_try(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Three reachable post-Try paths to merge: try-body completes (and
     orelse runs); or any handler runs (from arbitrary point in try
@@ -920,7 +1055,7 @@ def _check_and_apply_loop(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Loop body might not execute at all -- the post-loop state is the
     intersection of pre-state (body skipped) and the body-end state
@@ -955,7 +1090,7 @@ def _check_and_apply_with(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """`with ctx as name:` binds `name` to the context manager's
     `__enter__` return; tuple/list-unpacking forms (`with ctx as
@@ -981,7 +1116,7 @@ def _check_and_apply_match(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """`match X: case <pat>: <body>` (PEP 634, Python 3.10+). The
     subject is read-checked once before any case runs; walrus bindings
@@ -1049,7 +1184,7 @@ def _check_and_apply_stmt(
     trusted: set[str],
     aliases: set[str],
     models_shadowed: bool = False,
-    string_consts: dict[str, str] | None = None,
+    string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
     """Return `(ok, new_trusted, new_aliases)` for one statement.
     `ok` is False iff a `totp_secret` read inside the (recursively-
