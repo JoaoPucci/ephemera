@@ -41,8 +41,12 @@ BCRYPT_ROUNDS = 12
 # before any auth code imports, so `_test_override` is never None
 # during a test run. Production coverage of the False branch is
 # implicit (the env var is unset in prod).
+# Truthy check rather than `is not None` so an empty export
+# (e.g. `EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE=` in a CI shell)
+# falls through to the production default instead of tripping
+# `int("")` at module-import time and breaking app / test startup.
 _test_override = os.environ.get("EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE")
-if _test_override is not None:  # pragma: no branch
+if _test_override:  # pragma: no branch
     BCRYPT_ROUNDS = int(_test_override)
 TOTP_DIGITS = 6
 TOTP_INTERVAL = 30
