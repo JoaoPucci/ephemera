@@ -1180,9 +1180,26 @@ def _check_and_apply_import(
     `aliases`. Conservative direction: even a local re-import from
     the canonical data layer is treated as a fresh local binding and
     revoked. Imports themselves contain no totp_secret reads, so
-    there's no read check."""
+    there's no read check.
+
+    `from X import *` is the case to be careful about. A naive
+    discard-by-`alias.name` would revoke only the literal `"*"`
+    binding (which doesn't exist as a tracked name), leaving every
+    sanctioned getter alias intact -- a wildcard import that
+    *actually* shadows a tracked alias would slip past:
+
+        from attacker import *  # could rebind get_user_with_totp_by_id
+        user = get_user_with_totp_by_id(...)
+        user["totp_secret"]  # silently treated as trusted
+
+    Since we can't statically know which names `X` exposes, the
+    conservative response is to drop every tracked binding -- the
+    wildcard could rebind any of them, so treat them all as
+    untrusted from the wildcard onwards."""
     nt, na = set(trusted), set(aliases)
     for alias in stmt.names:
+        if isinstance(stmt, ast.ImportFrom) and alias.name == "*":
+            return True, set(), set()
         if isinstance(stmt, ast.ImportFrom):
             bound = alias.asname or alias.name
         else:
@@ -1715,8 +1732,8 @@ def test_analytics_events_table_has_a_single_writer():
             for joined in ast.walk(tree):
                 if not isinstance(joined, ast.JoinedStr):
                     continue
-                reconstructed = _reconstruct_joinedstr(joined, file_aliases)
-                if sql_ref.search(reconstructed):
+                candidates = _reconstruct_joinedstr_candidates(joined, file_aliases)
+                if any(sql_ref.search(c) for c in candidates):
                     offender_lineno = joined.lineno
                     break
         if offender_lineno is not None:
@@ -1729,10 +1746,10 @@ def test_analytics_events_table_has_a_single_writer():
     )
 
 
-def _file_level_string_aliases(tree: ast.AST) -> dict[str, str]:
-    """Walk the entire file's AST and return a `Name -> string` map
-    for every `<name> = "literal"` Assign / AnnAssign at any scope.
-    Used by the analytics-table-writer scan to substitute
+def _file_level_string_aliases(tree: ast.AST) -> dict[str, set[str]]:
+    """Walk the entire file's AST and return a `Name -> {string,...}`
+    map for every `<name> = "literal"` Assign / AnnAssign at any
+    scope. Used by the analytics-table-writer scan to substitute
     FormattedValue placeholders inside f-strings with their bound
     values, catching the dynamic-assembly bypass
 
@@ -1740,11 +1757,24 @@ def _file_level_string_aliases(tree: ast.AST) -> dict[str, str]:
         sql = f"INSERT INTO {table} ..."
 
     which the literal-text scan misses (the SQL keyword and the
-    table token live in different string fragments). Last-write-
-    wins because the per-file map only feeds the analytics regex
-    which already accepts the table name in any string position;
-    multi-bind patterns aren't realistic for table-name aliases."""
-    aliases: dict[str, str] = {}
+    table token live in different string fragments).
+
+    Multi-valued (set) rather than single-string. A flat last-write-
+    wins map would let an *unrelated* later binding in another scope
+    overwrite the value used by an earlier offending f-string -- e.g.
+
+        def offender():
+            table = "analytics_events"
+            sql = f"INSERT INTO {table} (...) VALUES (...)"
+
+        def something_else():
+            table = "users"  # later, different scope
+
+    Last-write-wins resolves `{table: "users"}` and the regex misses.
+    Tracking every observed binding for a name and trying each of
+    them at reconstruction time avoids the silent miss without
+    needing per-scope analysis."""
+    aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Assign)
@@ -1753,37 +1783,57 @@ def _file_level_string_aliases(tree: ast.AST) -> dict[str, str]:
         ):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    aliases[target.id] = node.value.value
+                    aliases.setdefault(target.id, set()).add(node.value.value)
         elif (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.value, ast.Constant)
             and isinstance(node.value.value, str)
             and isinstance(node.target, ast.Name)
         ):
-            aliases[node.target.id] = node.value.value
+            aliases.setdefault(node.target.id, set()).add(node.value.value)
     return aliases
 
 
-def _reconstruct_joinedstr(node: ast.JoinedStr, aliases: dict[str, str]) -> str:
-    """Reconstruct a `JoinedStr` (f-string) as a single string with
-    each `FormattedValue` substituted by its bound value if the
-    interpolated expression is a `Name` in `aliases`. Other
-    interpolations become a single-char placeholder so they don't
-    accidentally complete a SQL-keyword-plus-table-name match
-    (could over-flag if we left them empty)."""
-    parts: list[str] = []
+_JOINEDSTR_CARTESIAN_CAP = 32
+
+
+def _reconstruct_joinedstr_candidates(
+    node: ast.JoinedStr, aliases: dict[str, set[str]]
+) -> list[str]:
+    """Reconstruct a `JoinedStr` (f-string) as a list of candidate
+    strings, one per cartesian combination of `FormattedValue`
+    placeholders that bind to a `Name` with one or more known string
+    values in `aliases`. Other interpolations (computed expressions,
+    attribute access, calls) become a single-char `?` so they don't
+    accidentally complete a SQL-keyword-plus-table-name match.
+
+    Cartesian explosion is capped at `_JOINEDSTR_CARTESIAN_CAP`
+    candidates: above the cap, every interpolation collapses to `?`
+    -- preserves the literal-fragment scan but loses the substitution
+    boost. Realistic table-name f-strings have one or two
+    interpolations bound to a small number of string literals, so
+    the cap is comfortably above any honest case."""
+    segments: list[list[str]] = []
     for value in node.values:
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            parts.append(value.value)
+            segments.append([value.value])
         elif isinstance(value, ast.FormattedValue):
             inner = value.value
             if isinstance(inner, ast.Name) and inner.id in aliases:
-                parts.append(aliases[inner.id])
+                segments.append(sorted(aliases[inner.id]))
             else:
-                parts.append("?")
+                segments.append(["?"])
         else:
-            parts.append("?")
-    return "".join(parts)
+            segments.append(["?"])
+    total = 1
+    for seg in segments:
+        total *= len(seg)
+        if total > _JOINEDSTR_CARTESIAN_CAP:
+            return ["".join(seg[0] for seg in segments)]
+    candidates = [""]
+    for seg in segments:
+        candidates = [prev + s for prev in candidates for s in seg]
+    return candidates
 
 
 # ---------------------------------------------------------------------------
