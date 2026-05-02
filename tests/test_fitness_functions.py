@@ -235,8 +235,17 @@ def test_authentication_only_raises_canonical_credential_error():
                 continue
             if not _is_autherror_construction(node, autherror_names):
                 continue
+            # Strict canonical-message contract: exactly one positional
+            # arg (the canonical literal), no keyword args. Extra
+            # positional / keyword content can carry per-factor detail
+            # (`AuthError("invalid credentials", "wrong totp")`,
+            # `AuthError("invalid credentials", reason="totp")`) which
+            # downstream str() / repr() / structured logging can leak
+            # back to the attacker, defeating the canonical-surface
+            # invariant the test pins.
             ok = (
-                node.args
+                len(node.args) == 1
+                and not node.keywords
                 and isinstance(node.args[0], ast.Constant)
                 and node.args[0].value == canonical
             )
@@ -245,8 +254,9 @@ def test_authentication_only_raises_canonical_credential_error():
                 offenders.append(f"{rel}:{node.lineno}")
     assert not offenders, (
         "AuthError must be raised exclusively with the canonical "
-        f"{canonical!r} message (AGENTS.md §5). Per-factor wording leaks "
-        "which credential was wrong.\n  " + "\n  ".join(offenders)
+        f"{canonical!r} message and no extra args (AGENTS.md §5). "
+        "Per-factor wording or auxiliary kwargs leak which credential "
+        "was wrong.\n  " + "\n  ".join(offenders)
     )
 
 
@@ -2589,6 +2599,46 @@ def _is_state_mutating_route_decorator(
     return False
 
 
+def _imperative_dependency_candidates(
+    node: ast.Call,
+    callable_aliases: dict[str, list[ast.expr]] | None,
+) -> list[ast.AST]:
+    """Return every AST subtree that may carry the dependency
+    declarations for `node`, an imperative mutating registration.
+
+    For one-step shapes the registration call itself holds them:
+
+        router.add_api_route("/x", handler,
+                             dependencies=[Depends(verify_same_origin)])
+        router.post("/x",
+                    dependencies=[Depends(verify_same_origin)])(handler)
+
+    For two-step shapes the factory call lives under an alias and
+    `register(handler)` doesn't carry the dependency at all:
+
+        register = router.post("/x",
+                               dependencies=[Depends(verify_same_origin)])
+        register(handler)
+
+    Walking only `register(handler)` would miss the dependency and
+    flag a compliant registration. We additionally include every
+    resolved factory call reachable from `node.func` through the
+    callable-aliases map. Already-walked nodes are de-duplicated
+    via `id()`."""
+    candidates: list[ast.AST] = [node]
+    seen_ids = {id(node)}
+    if callable_aliases is None or not isinstance(node.func, ast.Name):
+        return candidates
+    for resolved in _resolve_callable(node.func, callable_aliases):
+        if not isinstance(resolved, ast.Call):
+            continue
+        if id(resolved) in seen_ids:
+            continue
+        seen_ids.add(id(resolved))
+        candidates.append(resolved)
+    return candidates
+
+
 def _is_imperative_mutating_registration(
     node: ast.AST,
     callable_aliases: dict[str, list[ast.expr]] | None = None,
@@ -2780,9 +2830,16 @@ def test_state_mutating_routes_all_carry_origin_gate():
         for node in ast.walk(tree):
             if not _is_imperative_mutating_registration(node, callable_aliases):
                 continue
+            # For two-step shapes, the dependency lives in the factory
+            # call held under the alias, not in the `register(handler)`
+            # call itself. Walk both -- the registration node AND every
+            # resolved factory call reachable through `callable_aliases`.
             ok = any(
                 _is_origin_dependency(inner, vso_shadowed, depends_shadowed)
-                for inner in ast.walk(node)
+                for candidate in _imperative_dependency_candidates(
+                    node, callable_aliases
+                )
+                for inner in ast.walk(candidate)
             )
             if not ok:
                 rel = py.relative_to(REPO_ROOT)
