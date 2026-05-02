@@ -334,18 +334,20 @@ def _reset_rate_limits():
         lim.reset()
 
 
-# Printable-ASCII content strategy. Avoid empty (the route rejects empty
-# content with a 422 -- the property is about ROUND-TRIP for valid
-# inputs). Keep size modest so each example is one quick request pair.
+# Content strategy: any single Unicode codepoint that's allowed in a
+# JSON string round-trip. Includes NUL (``), TAB, LF, CR, and
+# the rest of the C0 control range, since the docstring claims those
+# are covered and a regression in NUL handling is a documented bug
+# class for stdlib `json` interactions. Surrogate halves (category
+# `Cs`) are dropped because they're not valid Unicode scalars and
+# Python's `json.dumps` rejects them. Avoid empty content (the route
+# returns 422 -- the property is about round-trip for VALID inputs).
 _text_content = st.text(
     min_size=1,
     max_size=200,
     alphabet=st.characters(
-        min_codepoint=0x20,
+        min_codepoint=0x00,
         max_codepoint=0x10FFFF,
-        # Drop surrogate halves (not valid UTF-8) and control characters
-        # below space. The property is about user-typeable content, not
-        # arbitrary binary; control chars are filtered server-side.
         blacklist_categories=("Cs",),
     ),
 )
