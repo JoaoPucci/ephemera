@@ -1408,12 +1408,34 @@ def _check_and_apply_match(
     pre_t, pre_a = _apply_walrus_in_expr(
         stmt.subject, trusted, aliases, models_shadowed
     )
+    subject_sanctioned = _is_sanctioned_or_none_source(
+        stmt.subject, pre_a, models_shadowed
+    )
     case_states: list[tuple[set[str], set[str]]] = [(set(pre_t), set(pre_a))]
     for case in stmt.cases:
         case_t, case_a = set(pre_t), set(pre_a)
         for bound in _pattern_bound_names(case.pattern):
             case_t.discard(bound)
             case_a.discard(bound)
+        # A top-level `MatchAs` capture binds the entire subject
+        # value to its name. If the subject came from a sanctioned
+        # source, the capture inherits that trust -- otherwise
+        # legitimate refactors using `match` lose information that
+        # an equivalent `Assign` would preserve:
+        #
+        #     match models.get_user_with_totp_by_id(uid):
+        #         case user:
+        #             return user["totp_secret"]
+        #
+        # Destructured patterns (Sequence / Mapping / Class / Star)
+        # capture *parts* of the subject, not the whole; trust
+        # doesn't transfer to those names.
+        if (
+            subject_sanctioned
+            and isinstance(case.pattern, ast.MatchAs)
+            and case.pattern.name is not None
+        ):
+            case_t.add(case.pattern.name)
         if case.guard is not None:
             if not _check_reads_in_node(
                 case.guard, case_t, case_a, models_shadowed, string_consts
@@ -1779,7 +1801,47 @@ def _name_is_bound_in_scope(
         return True
     if args.kwarg is not None and args.kwarg.arg == name:
         return True
-    return any(_node_binds_name(node, name, file_path) for node in _walk_local(scope))
+    return any(
+        _node_binds_name(node, name, file_path)
+        for node in _walk_local_for_bindings(scope)
+    )
+
+
+def _walk_local_for_bindings(node: ast.AST):
+    """`ast.walk` variant for the "is `name` shadowed in this scope?"
+    question. Yields the input node + descendants but stops at every
+    nested scope boundary -- `FunctionDef` / `AsyncFunctionDef`
+    (their body is a separate function scope, already covered when
+    the outer test loop reaches the inner def), `Lambda` (PEP 572:
+    a lambda is its own containing scope, so a walrus inside its
+    body binds there, not in the enclosing function), and `ClassDef`
+    (its body binds class attributes, not module / function names).
+
+    Distinct from `_walk_local`: that walker descends into lambda
+    bodies on purpose, so a `lambda r: r["totp_secret"]` inside the
+    enclosing function still counts as a read of the enclosing
+    scope. Read-detection wants the lambda body; binding-shadow
+    detection does NOT, because
+
+        def callsite():
+            f = lambda x: (models := x)
+            return models.get_user_with_totp_by_id(uid)["totp_secret"]
+
+    must not flag `models` as shadowed by the lambda-local walrus
+    (the rebind never escapes the lambda)."""
+    from collections import deque
+
+    queue = deque([(node, True)])
+    while queue:
+        current, is_root = queue.popleft()
+        yield current
+        if not is_root and isinstance(
+            current,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef),
+        ):
+            continue
+        for child in ast.iter_child_nodes(current):
+            queue.append((child, False))
 
 
 def _module_level_rebound_names(
