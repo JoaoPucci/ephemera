@@ -1690,16 +1690,100 @@ def test_analytics_events_table_has_a_single_writer():
         if rel in allowlist:
             continue
         tree = ast.parse(py.read_text())
+        offender_lineno: int | None = None
         for text, lineno in _string_text_outside_docstrings(tree):
             if sql_ref.search(text):
-                offenders.append(f"{rel}:{lineno}")
+                offender_lineno = lineno
                 break
+        if offender_lineno is None:
+            # Pass 2: dynamic table-name assembly. Catches the bypass
+            #
+            #     table = "analytics_events"
+            #     sql = f"INSERT INTO {table} ..."
+            #
+            # which the literal-text scan misses because the SQL
+            # keyword and the table token live in different fragments.
+            # Build a file-scope alias map of `name = "literal"`
+            # bindings, then walk every JoinedStr (f-string) and
+            # reconstruct it with FormattedValue placeholders
+            # substituted by their bound values. Run the regex on the
+            # reconstructed string. Doesn't over-flag the legit
+            # documentation references in app/admin/cli.py or
+            # app/routes/prefs.py -- those are bare string literals
+            # without an f-string + variable-interpolation shape.
+            file_aliases = _file_level_string_aliases(tree)
+            for joined in ast.walk(tree):
+                if not isinstance(joined, ast.JoinedStr):
+                    continue
+                reconstructed = _reconstruct_joinedstr(joined, file_aliases)
+                if sql_ref.search(reconstructed):
+                    offender_lineno = joined.lineno
+                    break
+        if offender_lineno is not None:
+            offenders.append(f"{rel}:{offender_lineno}")
     assert not offenders, (
         "SQL operations on `analytics_events` must live inside the data-"
         "layer allowlist (analytics.py, models/_core.py, "
         "models/migrations/v4.py + v5.py). Any other writer would bypass "
         "the two-gate emit + presence-only invariants.\n  " + "\n  ".join(offenders)
     )
+
+
+def _file_level_string_aliases(tree: ast.AST) -> dict[str, str]:
+    """Walk the entire file's AST and return a `Name -> string` map
+    for every `<name> = "literal"` Assign / AnnAssign at any scope.
+    Used by the analytics-table-writer scan to substitute
+    FormattedValue placeholders inside f-strings with their bound
+    values, catching the dynamic-assembly bypass
+
+        table = "analytics_events"
+        sql = f"INSERT INTO {table} ..."
+
+    which the literal-text scan misses (the SQL keyword and the
+    table token live in different string fragments). Last-write-
+    wins because the per-file map only feeds the analytics regex
+    which already accepts the table name in any string position;
+    multi-bind patterns aren't realistic for table-name aliases."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    aliases[target.id] = node.value.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and isinstance(node.target, ast.Name)
+        ):
+            aliases[node.target.id] = node.value.value
+    return aliases
+
+
+def _reconstruct_joinedstr(node: ast.JoinedStr, aliases: dict[str, str]) -> str:
+    """Reconstruct a `JoinedStr` (f-string) as a single string with
+    each `FormattedValue` substituted by its bound value if the
+    interpolated expression is a `Name` in `aliases`. Other
+    interpolations become a single-char placeholder so they don't
+    accidentally complete a SQL-keyword-plus-table-name match
+    (could over-flag if we left them empty)."""
+    parts: list[str] = []
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+        elif isinstance(value, ast.FormattedValue):
+            inner = value.value
+            if isinstance(inner, ast.Name) and inner.id in aliases:
+                parts.append(aliases[inner.id])
+            else:
+                parts.append("?")
+        else:
+            parts.append("?")
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
