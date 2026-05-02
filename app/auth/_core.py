@@ -28,7 +28,12 @@ BCRYPT_ROUNDS = 12
 # `test_security_constants_are_not_silently_weakened` (in
 # tests/test_fitness_functions.py) AST-pins, so any source-level
 # regression of the production cost still trips the fitness gate.
-if "pytest" in sys.modules:
+# `pragma: no branch` because the False branch is structurally
+# unreachable from inside pytest -- exercising it would require a
+# test process where pytest hasn't been loaded, which is paradoxical.
+# Production coverage of the False branch is implicit (every prod
+# import enters it; no pytest in sys.modules).
+if "pytest" in sys.modules:  # pragma: no branch
     BCRYPT_ROUNDS = 4
 TOTP_DIGITS = 6
 TOTP_INTERVAL = 30
