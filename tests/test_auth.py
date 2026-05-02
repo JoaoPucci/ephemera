@@ -952,11 +952,25 @@ def stored_api_token(provisioned_user):
     return plaintext
 
 
+_printable_ascii = st.text(
+    min_size=0,
+    max_size=80,
+    alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+)
+
+
 @given(
-    raw=st.text(
-        min_size=0,
-        max_size=80,
-        alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+    raw=st.one_of(
+        # Prefix-bearing -- exercises the post-prefix hash + DB-lookup
+        # mismatch branch. Without this arm, sampling uniformly from
+        # printable ASCII gives roughly 200/95**4 expected `eph_`
+        # hits over 200 examples (~zero in practice), so the test
+        # would coverage-only the early-reject path. Pinning explicit
+        # `"eph_"` ensures the hot branch runs every iteration.
+        _printable_ascii.map(lambda body: tokens_mod.TOKEN_PREFIX + body),
+        # Arbitrary -- exercises the early `startswith` reject branch
+        # (empty string, malformed prefixes, accidental near-misses).
+        _printable_ascii,
     )
 )
 @settings(
@@ -968,8 +982,12 @@ def test_property_lookup_api_token_rejects_arbitrary_strings(
     stored_api_token: str, raw: str
 ):
     """For any printable-ASCII string we did NOT mint+store, the
-    lookup returns None. Catches edge cases the unit tests don't
-    enumerate: empty string, prefix-only (`"eph_"`), prefix-prefix
+    lookup returns None. The strategy biases roughly 50/50 between
+    prefix-bearing inputs (which reach the hash+DB-lookup branch and
+    exercise the "stored row, presented value doesn't match" path)
+    and arbitrary printable-ASCII (which exercise the early prefix-
+    reject path). Catches edge cases the unit tests don't enumerate:
+    empty string, prefix-only (`"eph_"`), prefix-prefix
     (`"eph_eph_"`), strings with whitespace / colons / equals signs.
     Skips when hypothesis happens to invent a string that exactly
     matches the real stored token (astronomically unlikely with 192
