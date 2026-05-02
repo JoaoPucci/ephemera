@@ -599,12 +599,33 @@ def _walk_scope_seq(
     `_check_and_apply_stmt`, returning False on the first read failure
     along with the post-failure state (which the caller discards
     anyway). Used inside structural branch handlers to process one
-    branch's body sequentially before joining with siblings."""
+    branch's body sequentially before joining with siblings.
+
+    Stops threading after an unconditional control-transfer at the
+    body's top level -- `Return`, `Raise`, `Break`, `Continue`. The
+    statements after such a transfer are unreachable in this scope,
+    so applying their state changes would re-establish trust that
+    isn't actually visible at any reachable point. Concrete bypass
+    that motivated this:
+
+        try:
+            user = unsanctioned()       # state: revoke
+            raise RuntimeError()        # control transfer
+            user = sanctioned()         # UNREACHABLE
+        except RuntimeError:
+            user["totp_secret"]         # handler entry: pre & try_t
+
+    Without the break, the unreachable re-add brought `user` back
+    into `try_t`, leaking through the `pre & try_t` handler-entry
+    intersection. With it, `try_t` reflects only the reachable
+    prefix and the handler correctly sees `user` revoked."""
     t, a = set(trusted), set(aliases)
     for stmt in stmts:
         ok, t, a = _check_and_apply_stmt(stmt, t, a, models_shadowed)
         if not ok:
             return False, t, a
+        if isinstance(stmt, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+            break
     return True, t, a
 
 
