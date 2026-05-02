@@ -298,14 +298,33 @@ def _string_const_aliases(scope: ast.AST) -> dict[str, set[str]]:
 
 
 def _matches_totp_secret_key(node: ast.AST, string_consts: dict[str, set[str]]) -> bool:
-    """True iff `node` is the literal `"totp_secret"` constant or a
-    `Name` whose alias set in `string_consts` contains "totp_secret".
-    Used by both the scope-level read detector and the per-statement
-    read check inside the structural walker."""
+    """True iff `node` resolves statically to the string
+    `"totp_secret"`. Four shapes are recognised:
+
+      Constant         `"totp_secret"`                 (literal)
+      Name             `key`  with `string_consts[key]` containing
+                       `"totp_secret"` (indirect alias)
+      JoinedStr        `f"totp_secret"`                (f-string)
+      BinOp(Add, ...)  `"totp_" + "secret"`            (concat)
+      Call(`.format`)  `"totp_{}".format("secret")`    (template)
+
+    The string-assembly shapes are reconstructed via
+    `_string_assembly_segments` (the same helper the analytics SQL
+    scan uses) and run through `_candidates_from_segments`. Any
+    candidate equal to `"totp_secret"` flags the key as a real
+    secret read. Without the assembly arms, computed equivalents
+    like `row["totp_" + "secret"]` and `row[f"totp_secret"]`
+    bypass the quarantine entirely (the read-detector wouldn't
+    see them as `totp_secret` reads at all)."""
     if isinstance(node, ast.Constant) and node.value == "totp_secret":
         return True
     if isinstance(node, ast.Name):
         return "totp_secret" in string_consts.get(node.id, set())
+    if _is_string_assembly_node(node):
+        candidates = _candidates_from_segments(
+            _string_assembly_segments(node, string_consts)
+        )
+        return "totp_secret" in candidates
     return False
 
 
