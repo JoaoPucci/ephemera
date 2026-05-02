@@ -171,15 +171,19 @@ describe('sender.js — user button sign-out two-click confirm', () => {
   // never reached -- jsdom's reload is non-configurable and can't be spied
   // on cleanly, and we only need to verify the fetch was fired. Hanging the
   // promise is the same trick tracked-cancel's existing tests would use.
+  // Static URL → response map; the `/api/secrets` endpoint is the only
+  // dynamic one (it dispatches to a per-test handler), so it stays
+  // outside the table.
+  const SENDER_FIXTURES = new Map([
+    ['/send/logout', () => new Promise(() => {})], // hang to avoid reload
+    ['/api/me', () => Promise.resolve(jsonResponse({ id: 1, username: 'admin', email: null }))],
+    ['/api/secrets/tracked', () => Promise.resolve(jsonResponse({ items: [] }))],
+  ]);
+
   function stubSenderFetchWithLogout(createHandler) {
     return vi.fn((url, opts) => {
-      if (url === '/send/logout') return new Promise(() => {}); // hang
-      if (url === '/api/me') {
-        return Promise.resolve(jsonResponse({ id: 1, username: 'admin', email: null }));
-      }
-      if (url === '/api/secrets/tracked') {
-        return Promise.resolve(jsonResponse({ items: [] }));
-      }
+      const fixture = SENDER_FIXTURES.get(url);
+      if (fixture) return fixture();
       if (url === '/api/secrets') {
         return createHandler ? createHandler(opts) : new Promise(() => {});
       }

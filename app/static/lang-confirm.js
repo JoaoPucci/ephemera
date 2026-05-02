@@ -162,6 +162,24 @@
     ).filter((el) => !el.hasAttribute('disabled'));
   }
 
+  // Focus trap: Tab from the last focusable wraps to the first;
+  // Shift+Tab from the first wraps to the last. With aria-modal set
+  // to true on the dialog and this trap in place, AT users can't
+  // navigate to controls behind the dialog.
+  function handleDialogTab(e) {
+    const focusables = dialogFocusables();
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   // Capture-phase keydown listener so we see Escape and Tab BEFORE
   // chrome-menu.js's own document-level Escape handler can close the
   // drawer as a side effect of cancelling the language switch.
@@ -177,23 +195,7 @@
         cancel();
         return;
       }
-      // Focus trap: Tab from the last focusable wraps to the first;
-      // Shift+Tab from the first wraps to the last. With aria-modal
-      // set to true on the dialog and this trap in place, AT users
-      // can't navigate to controls behind the dialog.
-      if (e.key === 'Tab') {
-        const focusables = dialogFocusables();
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
+      if (e.key === 'Tab') handleDialogTab(e);
     },
     true
   );

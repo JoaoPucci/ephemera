@@ -48,18 +48,22 @@ import { bindTwoClickConfirm } from './two-click.js';
   const isTouchPrimary =
     typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 
-  function setOpen(open) {
+  // aria-label swaps to match the action a tap would take (SR users
+  // hear "close menu" while the drawer is open, "open menu" when
+  // closed). Template stashes both strings in data attributes so the
+  // locale is resolved at render time, not JS time.
+  function applyOpenAttributes(open) {
     if (open) root.dataset.chromeMenuOpen = 'true';
     else delete root.dataset.chromeMenuOpen;
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    // aria-label swaps to match the action a tap would take (SR users
-    // hear "close menu" while the drawer is open, "open menu" when
-    // closed). Template stashes both strings in data attributes so the
-    // locale is resolved at render time, not JS time.
     const nextLabel = open ? btn.dataset.labelOpen : btn.dataset.labelClosed;
     if (nextLabel) btn.setAttribute('aria-label', nextLabel);
     if (panel) panel.setAttribute('aria-hidden', open ? 'false' : 'true');
     if (scrim) scrim.setAttribute('aria-hidden', open ? 'false' : 'true');
+  }
+
+  function setOpen(open) {
+    applyOpenAttributes(open);
     if (open && !isTouchPrimary) {
       // Move focus into the panel so screen readers start there and Esc
       // works without the user having to tab in first. Skipped on touch
@@ -83,6 +87,23 @@ import { bindTwoClickConfirm } from './two-click.js';
     scrim.addEventListener('click', () => setOpen(false));
   }
 
+  // Minimal focus trap: Tab out of the last element wraps to the first,
+  // and Shift+Tab out of the first wraps to the last.
+  function handlePanelTab(e) {
+    if (!panel) return;
+    const items = focusableInPanel();
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   // Esc closes and returns focus to the trigger.
   document.addEventListener('keydown', (e) => {
     if (root.dataset.chromeMenuOpen !== 'true') return;
@@ -92,21 +113,7 @@ import { bindTwoClickConfirm } from './two-click.js';
       btn.focus();
       return;
     }
-    // Minimal focus trap: Tab out of the last element wraps to the first,
-    // and Shift+Tab out of the first wraps to the last.
-    if (e.key === 'Tab' && panel) {
-      const items = focusableInPanel();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
+    if (e.key === 'Tab') handlePanelTab(e);
   });
 
   // ---- User name mirror ----
