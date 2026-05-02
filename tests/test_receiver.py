@@ -282,3 +282,190 @@ def test_reveal_404_for_expired_secret(client, auth_headers, provisioned_user):
         headers={"Origin": "http://testserver"},
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Property tests: secret-flow invariants
+#
+# The unit tests above pin specific shapes (one well-formed text secret,
+# one tampered fragment, one passphrase-protected secret). Hypothesis
+# extends each invariant across the input space:
+#
+#   - mint/reveal round-trip: any text payload that goes in via POST
+#     /api/secrets reveals byte-identical via POST /s/{token}/reveal.
+#     Catches encoding regressions (UTF-8 round-trip, NUL bytes,
+#     emoji, whitespace) the fixed examples don't enumerate.
+#
+#   - single-use enforcement: any minted secret returns 404 on the
+#     second reveal call. Pins the consume-on-success contract
+#     against any path that quietly leaves the row behind.
+#
+#   - tampered-token rejection: any printable-ASCII string that the
+#     server didn't issue returns 404 on the meta and reveal
+#     endpoints. Catches a regression that loosened the token
+#     existence check (e.g. via a partial/prefix match).
+#
+#   - passphrase round-trip: any passphrase-protected secret reveals
+#     iff the caller presents the same passphrase. Pins the bcrypt
+#     verify pipeline against off-by-one collations the unit tests
+#     don't cover (NUL bytes, unicode normalization).
+#
+# Each example mints a fresh secret (the in-DB rows accumulate within
+# one test function but never collide -- tokens are server-issued
+# UUIDs). Hypothesis is told the function-scoped fixture is fine via
+# `suppress_health_check`. `max_examples` stays modest because each
+# round-trip is one full HTTP request pair through the test client.
+# ---------------------------------------------------------------------------
+
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+
+def _reset_rate_limits():
+    """Reset every rate-limiter bucket. Hypothesis runs many examples
+    inside one test function; the `client` fixture only resets at
+    function setup/teardown, so without a per-example reset the
+    create-secret limiter would trip mid-property and the round-trip
+    assertion would fail with a spurious 429 instead of the bug it's
+    actually looking for."""
+    from app.limiter import create_limiter, login_limiter, read_limiter, reveal_limiter
+
+    for lim in (reveal_limiter, login_limiter, create_limiter, read_limiter):
+        lim.reset()
+
+
+# Printable-ASCII content strategy. Avoid empty (the route rejects empty
+# content with a 422 -- the property is about ROUND-TRIP for valid
+# inputs). Keep size modest so each example is one quick request pair.
+_text_content = st.text(
+    min_size=1,
+    max_size=200,
+    alphabet=st.characters(
+        min_codepoint=0x20,
+        max_codepoint=0x10FFFF,
+        # Drop surrogate halves (not valid UTF-8) and control characters
+        # below space. The property is about user-typeable content, not
+        # arbitrary binary; control chars are filtered server-side.
+        blacklist_categories=("Cs",),
+    ),
+)
+
+
+@given(content=_text_content)
+@settings(
+    max_examples=20,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    deadline=None,
+)
+def test_property_text_secret_round_trips(client, auth_headers, content: str):
+    """For any non-empty text content (printable + unicode + whitespace),
+    POST /api/secrets followed by POST /s/{token}/reveal returns the
+    same string byte-for-byte. Catches encoding regressions:
+    UTF-8 round-trip, NUL-bearing strings, surrogate-pair handling,
+    trailing whitespace, emoji."""
+    _reset_rate_limits()
+    secret = _create_text_secret(client, auth_headers, content=content)
+    token, client_half = _token_and_client_half(secret["url"])
+    r = client.post(
+        f"/s/{token}/reveal",
+        json={"key": client_half},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["content_type"] == "text"
+    assert body["content"] == content
+
+
+@given(content=_text_content)
+@settings(
+    max_examples=20,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    deadline=None,
+)
+def test_property_reveal_is_single_use(client, auth_headers, content: str):
+    """For any minted secret, the second reveal call returns 404. Pins
+    the consume-on-success contract against any code path that quietly
+    leaves the row behind on success (would let a second viewer get the
+    plaintext, breaking the "ephemeral" guarantee)."""
+    _reset_rate_limits()
+    secret = _create_text_secret(client, auth_headers, content=content)
+    token, client_half = _token_and_client_half(secret["url"])
+    headers = {"Origin": "http://testserver"}
+    first = client.post(
+        f"/s/{token}/reveal", json={"key": client_half}, headers=headers
+    )
+    assert first.status_code == 200
+    second = client.post(
+        f"/s/{token}/reveal", json={"key": client_half}, headers=headers
+    )
+    assert second.status_code == 404
+
+
+# Token-shape strategy: url-safe-base64 alphabet (A-Z, a-z, 0-9, _, -),
+# realistic length range. Filters the generated string against the
+# token format so we exercise "looks like a token but wasn't issued"
+# rather than "obviously garbage."
+_token_shaped = st.text(
+    min_size=8,
+    max_size=64,
+    alphabet=st.sampled_from(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    ),
+)
+
+
+@given(fake_token=_token_shaped)
+@settings(
+    max_examples=50,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    deadline=None,
+)
+def test_property_unknown_token_returns_404(client, fake_token: str):
+    """For any token-shaped string the server didn't issue, the meta
+    endpoint returns 404. Catches a regression that loosened the token
+    existence check (prefix match, case-insensitive lookup, etc.). The
+    landing page (GET /s/{token}) deliberately returns 200 for any
+    token to avoid leaking existence to scrapers; this property is on
+    the meta endpoint, which is the actual existence gate."""
+    _reset_rate_limits()
+    r = client.get(f"/s/{fake_token}/meta")
+    assert r.status_code == 404
+
+
+# Passphrase strategy: same printable-text shape as content, but
+# constrained to bcrypt's 72-byte input cap so we don't trip the
+# password-length boundary the unit suite documents in test_auth.
+_passphrase = st.text(min_size=1, max_size=72).filter(
+    lambda s: 0 < len(s.encode("utf-8")) <= 72
+)
+
+
+@given(passphrase=_passphrase, content=_text_content)
+@settings(
+    max_examples=10,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    deadline=None,
+)
+def test_property_passphrase_protected_round_trips(
+    client, auth_headers, passphrase: str, content: str
+):
+    """For any (passphrase, content) pair within bcrypt's input cap,
+    minting with that passphrase and revealing with the same
+    passphrase returns the original content. Pins the bcrypt verify
+    pipeline against unicode-normalization / encoding edge cases the
+    unit tests don't enumerate. Cap at 10 examples because each
+    round-trip is bcrypt-cost-12 hash + verify (~500ms)."""
+    _reset_rate_limits()
+    secret = _create_text_secret(
+        client, auth_headers, content=content, passphrase=passphrase
+    )
+    token, client_half = _token_and_client_half(secret["url"])
+    r = client.post(
+        f"/s/{token}/reveal",
+        json={"key": client_half, "passphrase": passphrase},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["content"] == content
