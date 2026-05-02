@@ -1354,7 +1354,62 @@ def _kwargs_contain_mutating_method(keywords: list[ast.keyword]) -> bool:
     return False
 
 
-def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
+def _module_level_callable_aliases(tree: ast.AST) -> dict[str, ast.expr]:
+    """Return a `Name -> expr` map for module-scope `<name> = <expr>`
+    assignments where `<expr>` is one of the shapes we statically
+    follow when resolving aliased decorator references:
+
+      Name      `post = router_post_alias`
+      Attribute `post = router.post`
+      Call      `register = router.post("/x")` -- decorator-factory
+                  application that's later invoked on a handler
+
+    Used by `_resolve_callable` to follow `Name` decorators back to
+    their original Attribute/Call before the route-mutating
+    detectors check the shape. Module scope only (function-local
+    `def f(): post = router.post; @post(...)` is rare; the realistic
+    bypass is a top-level rebind)."""
+    aliases: dict[str, ast.expr] = {}
+    if not isinstance(tree, ast.Module):
+        return aliases
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name) and isinstance(
+                    stmt.value, (ast.Name, ast.Attribute, ast.Call)
+                ):
+                    aliases[target.id] = stmt.value
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.value is not None
+            and isinstance(stmt.value, (ast.Name, ast.Attribute, ast.Call))
+        ):
+            aliases[stmt.target.id] = stmt.value
+    return aliases
+
+
+def _resolve_callable(
+    node: ast.expr,
+    aliases: dict[str, ast.expr] | None,
+    depth: int = 0,
+) -> ast.expr:
+    """If `node` is a `Name` recorded in `aliases`, follow the
+    chain to its underlying expression. Caps at depth 4 to bail on
+    cycles (`a = b; b = a`). Returns `node` unchanged when it isn't
+    a Name or no alias applies, so callers use the result as a
+    drop-in replacement."""
+    if depth > 4 or aliases is None:
+        return node
+    if isinstance(node, ast.Name) and node.id in aliases:
+        return _resolve_callable(aliases[node.id], aliases, depth + 1)
+    return node
+
+
+def _is_state_mutating_route_decorator(
+    deco: ast.expr,
+    callable_aliases: dict[str, ast.expr] | None = None,
+) -> bool:
     """True iff `deco` registers a state-mutating HTTP handler. Two
     FastAPI shapes count:
 
@@ -1369,12 +1424,18 @@ def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
       neutral. The earlier verb-only detector skipped this shape, so
       a write endpoint registered through `api_route` could ship
       without the CSRF gate while the test still passed.
+
+    `callable_aliases` resolves a Name-callee decorator back to its
+    underlying Attribute. Without it, `post = router.post` followed
+    by `@post("/x")` would slip past since the Call's `func` is a
+    bare Name rather than an Attribute.
     """
     if not isinstance(deco, ast.Call):
         return False
-    if not isinstance(deco.func, ast.Attribute):
+    func = _resolve_callable(deco.func, callable_aliases)
+    if not isinstance(func, ast.Attribute):
         return False
-    attr = deco.func.attr
+    attr = func.attr
     if attr in _MUTATING_VERBS:
         return True
     if attr == "api_route":
@@ -1382,22 +1443,29 @@ def _is_state_mutating_route_decorator(deco: ast.expr) -> bool:
     return False
 
 
-def _is_imperative_mutating_registration(node: ast.AST) -> bool:
+def _is_imperative_mutating_registration(
+    node: ast.AST,
+    callable_aliases: dict[str, ast.expr] | None = None,
+) -> bool:
     """True iff `node` is an imperative state-mutating route registration.
-    FastAPI exposes two function-call equivalents of the decorator API:
+    FastAPI exposes three function-call equivalents of the decorator API:
 
     - **add_api_route**: `router.add_api_route(path, endpoint,
       methods=[...], ...)` -- the explicit imperative shape. Counts
       when `methods=` contains a state-mutating verb.
 
-    - **Call-style decorator**: `router.post("/x")(handler)`,
+    - **Call-style decorator (one-step)**: `router.post("/x")(handler)`,
       `router.delete("/x")(handler)`, `router.api_route("/x",
       methods=["POST"])(handler)`. Equivalent to writing
       `@router.post("/x") def handler():` -- a Call whose function
-      is itself a Call that the decorator detector recognises. The
-      verb-only detector skipped this shape entirely, so a write
-      endpoint registered through the call-style decorator could
-      miss the CSRF gate while the test stayed green."""
+      is itself a Call that the decorator detector recognises.
+
+    - **Call-style decorator (two-step)**: `register =
+      router.post("/x"); register(handler)`. The factory call is
+      stored under a Name and applied later. We resolve `node.func`
+      (a Name) through `callable_aliases` to recover the
+      decorator-factory Call and check the same shape.
+    """
     if not isinstance(node, ast.Call):
         return False
     if (
@@ -1406,8 +1474,9 @@ def _is_imperative_mutating_registration(node: ast.AST) -> bool:
         and _kwargs_contain_mutating_method(node.keywords)
     ):
         return True
-    return isinstance(node.func, ast.Call) and _is_state_mutating_route_decorator(
-        node.func
+    resolved = _resolve_callable(node.func, callable_aliases)
+    return isinstance(resolved, ast.Call) and _is_state_mutating_route_decorator(
+        resolved, callable_aliases
     )
 
 
@@ -1499,6 +1568,11 @@ def test_state_mutating_routes_all_carry_origin_gate():
         rebound = _module_level_rebound_names(tree, py)
         vso_shadowed = "verify_same_origin" in rebound
         depends_shadowed = "Depends" in rebound
+        # `post = router.post; @post(...)` and `register = router.post(...);
+        # register(handler)` are both equivalent to direct decorator /
+        # call-style registrations once the alias is followed. Compute
+        # the alias map once per file; both detectors thread it.
+        callable_aliases = _module_level_callable_aliases(tree)
         # Pass 1: decorator-style registrations on FunctionDef /
         # AsyncFunctionDef. Both sync `def` and `async def` shapes
         # are valid FastAPI handlers (e.g. app/routes/sender.py::
@@ -1507,7 +1581,9 @@ def test_state_mutating_routes_all_carry_origin_gate():
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             mutating_decos = [
-                d for d in node.decorator_list if _is_state_mutating_route_decorator(d)
+                d
+                for d in node.decorator_list
+                if _is_state_mutating_route_decorator(d, callable_aliases)
             ]
             if not mutating_decos:
                 continue
@@ -1532,20 +1608,27 @@ def test_state_mutating_routes_all_carry_origin_gate():
                 )
                 if not (deco_has_dep or sig_has_dep):
                     rel = py.relative_to(REPO_ROOT)
-                    offenders.append(
-                        f"{rel}:{deco.lineno} {node.name} (.{deco.func.attr})"
+                    # Resolve through the alias map for the printout so
+                    # an aliased `@post(...)` reports the underlying
+                    # `.post` rather than crashing on `deco.func.attr`
+                    # (which doesn't exist when `deco.func` is a Name).
+                    resolved = _resolve_callable(deco.func, callable_aliases)
+                    attr = (
+                        resolved.attr
+                        if isinstance(resolved, ast.Attribute)
+                        else getattr(deco.func, "id", "?")
                     )
+                    offenders.append(f"{rel}:{deco.lineno} {node.name} (.{attr})")
         # Pass 2: imperative `<expr>.add_api_route(path, endpoint,
-        # methods=[...])` calls anywhere in the module. We can't
-        # follow the endpoint reference to its signature statically,
-        # so the gate must be wired in the call's own keyword args
-        # (the standard `dependencies=[Depends(verify_same_origin)]`
-        # placement). A call that sneaks the dependency only into
-        # the endpoint's signature is an accepted miss -- a rare
-        # enough shape that we'd catch it in review rather than
-        # carry import-resolution machinery here.
+        # methods=[...])` calls anywhere in the module, plus call-style
+        # decorator applications (`router.post("/x")(handler)`,
+        # `register = router.post("/x"); register(handler)`). The endpoint
+        # reference can't be followed to its signature statically, so the
+        # gate must be wired in the call's own keyword args -- a
+        # registration that sneaks the dependency only into the endpoint's
+        # signature is an accepted miss.
         for node in ast.walk(tree):
-            if not _is_imperative_mutating_registration(node):
+            if not _is_imperative_mutating_registration(node, callable_aliases):
                 continue
             ok = any(
                 _is_origin_dependency(inner, vso_shadowed, depends_shadowed)
