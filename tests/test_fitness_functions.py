@@ -1037,30 +1037,43 @@ def _check_and_apply_try(
 ) -> tuple[bool, set[str], set[str]]:
     """Three reachable post-Try paths to merge: try-body completes (and
     orelse runs); or any handler runs (from arbitrary point in try
-    body); or `finally` ends the construct. Each handler's entry
-    state is the INTERSECTION of the pre-Try state and the try-body-
-    end state -- not just the pre-Try state. The handler can fire at
-    any point during the try body, so a name that survives both
-    sides is the conservative "trusted at handler entry" set:
+    body); or `finally` ends the construct.
+
+    Each handler's entry state is the INTERSECTION of the pre-Try
+    state with the state observed at EVERY point inside the try
+    body, not just the try-body-end state. A handler can fire after
+    any statement in the body (any statement can throw), so a name
+    that's revoked mid-body must be considered untrusted at handler
+    entry even if a later statement in the body would re-bless it:
 
       pre = {user}
       try:
-          user = unsanctioned()    # try-body-end revokes user
-          raise
+          user = unsanctioned()    # interim revokes user
+          risky()                  # could throw HERE -- handler
+                                   # would enter with user revoked
+          user = sanctioned()      # late re-bless; only reaches
+                                   # handler if we never threw
       except:
-          user["totp_secret"]      # handler entry: pre & try_t = {}
+          user["totp_secret"]      # entry: pre ∩ all-interim = {}
 
-    Without the intersection, `user` would still be marked trusted
-    at handler entry from the pre-Try copy and the read would slip
-    through. (The opposite case -- name added in try body, handler
-    fires before the add -- is also rejected by the intersection
-    since the pre-Try set wouldn't have it.) `finally` always runs
-    after the merged state; threaded through that."""
-    body_ok, try_t, try_a = _walk_scope_seq(
-        stmt.body, trusted, aliases, models_shadowed, string_consts
-    )
-    if not body_ok:
-        return False, try_t, try_a
+    Walking the body step-by-step and accumulating the running
+    intersection captures this correctly. The previous shape used
+    the post-body `try_t` only, which over-trusted any name that
+    happened to be re-blessed before the try body completed.
+
+    `finally` always runs after the merged state; threaded through
+    that."""
+    running_t, running_a = set(trusted), set(aliases)
+    interim_t, interim_a = set(trusted), set(aliases)
+    for s in stmt.body:
+        body_ok, running_t, running_a = _check_and_apply_stmt(
+            s, running_t, running_a, models_shadowed, string_consts
+        )
+        if not body_ok:
+            return False, running_t, running_a
+        interim_t &= running_t
+        interim_a &= running_a
+    try_t, try_a = running_t, running_a
     else_ok, else_t, else_a = _walk_scope_seq(
         stmt.orelse, try_t, try_a, models_shadowed, string_consts
     )
@@ -1068,8 +1081,8 @@ def _check_and_apply_try(
         return False, else_t, else_a
     merged_t, merged_a = else_t, else_a
     for handler in stmt.handlers:
-        h_t = set(trusted) & try_t
-        h_a = set(aliases) & try_a
+        h_t = set(interim_t)
+        h_a = set(interim_a)
         if handler.name is not None:
             h_t.discard(handler.name)
             h_a.discard(handler.name)
@@ -1539,6 +1552,25 @@ def _module_level_rebound_names(
     later `Depends(verify_same_origin)` must not pass the
     origin-gate check.
 
+    Module-scope walk descends into top-level compound containers
+    (`if` / `try` / `with` / `for` / `while` / `match`) so a rebind
+    nested inside a conditional or guarded import still counts:
+
+        if flag:
+            verify_same_origin = fake_origin_gate
+        try:
+            from attacker import models
+        except ImportError:
+            ...
+
+    These are still module-scope bindings -- the `if` / `try` / etc.
+    only conditionalises whether the rebind happens, not where the
+    name lands -- so they shadow just like a plain top-level
+    `verify_same_origin = ...` would. The walk stops at nested
+    `FunctionDef` / `AsyncFunctionDef` / `ClassDef` / `Lambda`
+    bodies, since names bound inside those are local to the nested
+    scope and don't shadow at module level.
+
     Without the import channel, a malicious-or-mistaken
     `from attacker import models` / `from attacker import
     verify_same_origin` would still satisfy the TOTP-quarantine and
@@ -1551,21 +1583,45 @@ def _module_level_rebound_names(
     names: set[str] = set()
     if not isinstance(tree, ast.Module):
         return names
-    for stmt in tree.body:
-        if isinstance(stmt, ast.Assign):
-            for target in stmt.targets:
+    for node in _walk_module_scope(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
                 names.update(_names_bound_by_target(target))
-        elif isinstance(stmt, ast.AnnAssign):
-            names.update(_names_bound_by_target(stmt.target))
-        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(stmt.name)
-        elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+        elif isinstance(node, ast.AnnAssign):
+            names.update(_names_bound_by_target(node.target))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for tracked_name in _CANONICAL_IMPORT_SOURCES:
                 if _import_binds_name_from_non_canonical_source(
-                    stmt, tracked_name, file_path
+                    node, tracked_name, file_path
                 ):
                     names.add(tracked_name)
     return names
+
+
+def _walk_module_scope(node: ast.AST):
+    """`ast.walk` variant for module-scope rebound detection. Yields
+    the input node + descendants but does NOT descend into nested
+    `FunctionDef` / `AsyncFunctionDef` / `ClassDef` / `Lambda`
+    bodies -- those are separate scopes; their internal Assigns /
+    AnnAssigns / Imports don't shadow at module level. The walker
+    DOES descend into module-level compound containers (`if`,
+    `try`, `with`, `for`, `while`, `match`), so a rebind nested
+    inside one of those is still picked up as module-scope."""
+    from collections import deque
+
+    queue = deque([(node, True)])
+    while queue:
+        current, is_root = queue.popleft()
+        yield current
+        if not is_root and isinstance(
+            current,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
+        ):
+            continue
+        for child in ast.iter_child_nodes(current):
+            queue.append((child, False))
 
 
 def _scope_totp_reads_are_quarantined(
