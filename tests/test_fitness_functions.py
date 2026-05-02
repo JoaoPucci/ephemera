@@ -2337,24 +2337,137 @@ def _string_assembly_segments(
             return [sorted(aliases[node.id])]
         return [["?"]]
     if isinstance(node, ast.JoinedStr):
-        out: list[list[str]] = []
-        for value in node.values:
-            if isinstance(value, ast.FormattedValue):
-                out.extend(_string_assembly_segments(value.value, aliases))
-            elif isinstance(value, ast.Constant) and isinstance(value.value, str):
-                out.append([value.value])
-            else:
-                out.append(["?"])
-        return out
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _string_assembly_segments(
-            node.left, aliases
-        ) + _string_assembly_segments(node.right, aliases)
+        return _joinedstr_segments(node, aliases)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Add):
+            return _string_assembly_segments(
+                node.left, aliases
+            ) + _string_assembly_segments(node.right, aliases)
+        if isinstance(node.op, ast.Mod):
+            pct_segments = _percent_format_segments(node, aliases)
+            if pct_segments is not None:
+                return pct_segments
     if isinstance(node, ast.Call):
         fmt_segments = _format_call_segments(node, aliases)
         if fmt_segments is not None:
             return fmt_segments
     return [["?"]]
+
+
+def _joinedstr_segments(
+    node: ast.JoinedStr, aliases: dict[str, set[str]]
+) -> list[list[str]]:
+    """Per-`value` flattening of a JoinedStr -- string Constants
+    pass through, FormattedValue's inner expr recurses through
+    `_string_assembly_segments`, anything else collapses to `?`."""
+    out: list[list[str]] = []
+    for value in node.values:
+        if isinstance(value, ast.FormattedValue):
+            out.extend(_string_assembly_segments(value.value, aliases))
+        elif isinstance(value, ast.Constant) and isinstance(value.value, str):
+            out.append([value.value])
+        else:
+            out.append(["?"])
+    return out
+
+
+_PERCENT_PLACEHOLDER_RE = re.compile(
+    r"%(?:\(([^)]+)\))?[#0\- +]*\d*(?:\.\d+)?[hlL]?([sdiouxXeEfFgGcra%])"
+)
+
+
+def _percent_format_segments(
+    node: ast.BinOp, aliases: dict[str, set[str]]
+) -> list[list[str]] | None:
+    """Reconstruct segments from `template % args` (the `%`-style
+    formatting, parsed as `BinOp(Mod, Constant, args)`). Catches
+    the bypasses
+
+        table = "analytics_events"
+        sql = "INSERT INTO %s (event_type, payload) VALUES (?, ?)" % table
+        row["%s_%s" % ("totp", "secret")]
+
+    which slip past the JoinedStr / Add / `.format` arms entirely.
+
+    Three RHS shapes:
+
+      template % name        -> name's segments fill the single
+                                 non-`%(...)` placeholder
+      template % (a, b, ...)  -> elts[i] fills positional placeholder i
+      template % {"k": v}     -> v fills `%(k)s`-named placeholder
+
+    Returns None if the LHS isn't a string Constant -- the caller
+    falls back to a single-`?` placeholder. Anything we can't
+    statically resolve (computed args, missing key, more
+    placeholders than args) collapses to `?` so an unrelated
+    BinOp(Mod) doesn't accidentally complete a SQL-keyword + table-
+    name match."""
+    if not (isinstance(node.left, ast.Constant) and isinstance(node.left.value, str)):
+        return None
+    template = node.left.value
+    positional, named = _percent_args_extract(node.right)
+    segments: list[list[str]] = []
+    pos = 0
+    auto_idx = 0
+    for match in _PERCENT_PLACEHOLDER_RE.finditer(template):
+        if match.start() > pos:
+            segments.append([template[pos : match.start()]])
+        placeholder, auto_idx = _percent_placeholder_segments(
+            match, auto_idx, positional, named, aliases
+        )
+        segments.extend(placeholder)
+        pos = match.end()
+    if pos < len(template):
+        segments.append([template[pos:]])
+    return segments
+
+
+def _percent_args_extract(
+    rhs: ast.expr,
+) -> tuple[list[ast.expr], dict[str, ast.expr]]:
+    """Split a `%`-format RHS into `(positional, named)`. Tuple
+    -> positional list. Dict with string-Constant keys -> named map.
+    Anything else is treated as a single positional value."""
+    if isinstance(rhs, ast.Tuple):
+        return list(rhs.elts), {}
+    if isinstance(rhs, ast.Dict):
+        named: dict[str, ast.expr] = {}
+        for key_node, value_node in zip(rhs.keys, rhs.values, strict=False):
+            if (
+                isinstance(key_node, ast.Constant)
+                and isinstance(key_node.value, str)
+                and value_node is not None
+            ):
+                named[key_node.value] = value_node
+        return [], named
+    return [rhs], {}
+
+
+def _percent_placeholder_segments(
+    match: re.Match[str],
+    auto_idx: int,
+    positional: list[ast.expr],
+    named: dict[str, ast.expr],
+    aliases: dict[str, set[str]],
+) -> tuple[list[list[str]], int]:
+    """Resolve one `%...` placeholder to its segments + the
+    bumped positional counter. `%%` becomes a literal `%`; named
+    placeholders look up `named[key]`; positional placeholders
+    consume the next entry in `positional`. Anything not
+    statically resolvable collapses to `?`."""
+    spec = match.group(2)
+    if spec == "%":
+        return [["%"]], auto_idx
+    key = match.group(1)
+    if key is not None:
+        if key in named:
+            return _string_assembly_segments(named[key], aliases), auto_idx
+        return [["?"]], auto_idx
+    if auto_idx < len(positional):
+        segs = _string_assembly_segments(positional[auto_idx], aliases)
+    else:
+        segs = [["?"]]
+    return segs, auto_idx + 1
 
 
 def _format_call_segments(
@@ -2470,14 +2583,20 @@ def _candidates_from_segments(segments: list[list[str]]) -> list[str]:
 
 def _is_string_assembly_node(node: ast.AST) -> bool:
     """True for the AST shapes whose reconstruction the analytics SQL
-    scan walks: `JoinedStr` (f-string), `BinOp` with `Add`, or a
-    `<str>.format(...)` Call on a string-shaped receiver. Other
-    expression shapes don't compose strings out of multiple
-    fragments and so can't carry the keyword + table-name bypass
-    on their own."""
+    scan walks:
+
+      JoinedStr           f-strings              `f"..."`
+      BinOp(Add, ...)     concat                 `"..." + name + "..."`
+      BinOp(Mod, ...)     %-format               `"INSERT INTO %s" % table`
+      Call(`.format`)     template Call          `"...{}".format(table)`
+
+    Numeric modulo (`5 % 2`) lands in the BinOp(Mod) bucket too
+    but its segments collapse to `?` placeholders that don't
+    match either the SQL or the totp_secret regex, so the
+    coarse filter is harmless."""
     if isinstance(node, ast.JoinedStr):
         return True
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod)):
         return True
     return (
         isinstance(node, ast.Call)
