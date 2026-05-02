@@ -2673,6 +2673,17 @@ def _is_imperative_mutating_registration(
     ):
         return True
     for resolved in _resolve_callable(node.func, callable_aliases):
+        # Aliased `add = router.add_api_route; add("/x", handler,
+        # methods=["POST"])`. The resolved alias is an Attribute,
+        # not a Call -- the kwargs (and therefore the methods=)
+        # live on the registration call itself, so check `node`'s
+        # keywords against the resolved attr name.
+        if (
+            isinstance(resolved, ast.Attribute)
+            and resolved.attr == "add_api_route"
+            and _kwargs_contain_mutating_method(node.keywords)
+        ):
+            return True
         if isinstance(resolved, ast.Call) and _is_state_mutating_route_decorator(
             resolved, callable_aliases
         ):
