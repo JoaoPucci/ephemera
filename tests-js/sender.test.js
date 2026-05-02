@@ -159,6 +159,113 @@ describe('sender.js — create-secret in-flight guard', () => {
     expect(createCalls.length).toBe(0);
     expect(document.getElementById('sender-error').hidden).toBe(false);
   });
+
+  // Localized error message via the modern `{detail: {code, message}}` shape.
+  // The `error.<code>` lookup either hits the catalog (returns the localized
+  // string) or falls back to the server's English `message`. The existing
+  // 4xx test exercises the older `detail: <string>` shape; this one pins the
+  // structured-detail branch so the lookup logic doesn't rot.
+  it('shows server error.<code> message for the structured detail shape', async () => {
+    const fetchMock = stubSenderFetch(() =>
+      Promise.resolve(
+        jsonResponse({ detail: { code: 'rate_limited_create', message: 'Too many secrets' } }, 429)
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    const err = document.getElementById('sender-error');
+    expect(err.hidden).toBe(false);
+    // i18n shim returns the key itself on miss, which `parseErrorMessage`
+    // interprets as "no localized form -> use the server's English message"
+    // -> we see "Too many secrets" in the toast.
+    expect(err.textContent).toBe('Too many secrets');
+  });
+
+  // 401 on submit means the session expired between page load and click.
+  // The handler reloads the page so the user lands on the login form
+  // instead of a stale compose surface. jsdom's `location.reload` is
+  // non-configurable, so we replace the whole `window.location` object
+  // with a stub that records the reload call.
+  it('reloads the page when the create POST returns 401', async () => {
+    const fetchMock = stubSenderFetch(() => Promise.resolve(new Response(null, { status: 401 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const reload = vi.fn();
+    const origLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { ...origLocation, reload },
+    });
+    try {
+      await loadModule('sender');
+      await flushAsync();
+
+      submitForm();
+      await flushAsync();
+      await flushAsync();
+
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        writable: true,
+        value: origLocation,
+      });
+    }
+  });
+
+  // Image-tab submit: this path serializes the upload as multipart/
+  // form-data via `buildImageFormData`. The default tab is text; flip
+  // to image, attach a file via the input, dispatch submit, and assert
+  // the fetch went out as FormData (no JSON header) with the file +
+  // expires_in fields. Catches a regression that broke the image
+  // serializer or its tab-routing in `submitSecret`.
+  it('serializes the image-tab submit as multipart/form-data', async () => {
+    let capturedOpts = null;
+    const fetchMock = stubSenderFetch((opts) => {
+      capturedOpts = opts;
+      return Promise.resolve(
+        jsonResponse({
+          url: 'https://example/s/img#key',
+          id: 'imgid',
+          expires_at: '2099-01-01T00:00:00Z',
+        })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await loadModule('sender');
+    await flushAsync();
+
+    // Switch to the image tab.
+    document.querySelector('.tab[data-tab="image"]').click();
+    // Attach a synthetic file. jsdom's File works with FormData.
+    const file = new File(['fake-png-bytes'], 'a.png', { type: 'image/png' });
+    const fileInput = document.getElementById('file');
+    Object.defineProperty(fileInput, 'files', {
+      configurable: true,
+      value: [file],
+    });
+
+    submitForm();
+    await flushAsync();
+    await flushAsync();
+
+    expect(capturedOpts).not.toBeNull();
+    expect(capturedOpts.method).toBe('POST');
+    // FormData carries the file (and ancillary fields). No JSON header
+    // -- the test for that is the absence of a `Content-Type` set
+    // explicitly, since FormData causes fetch to set its own multipart
+    // header at the network layer.
+    expect(capturedOpts.body).toBeInstanceOf(FormData);
+    expect(capturedOpts.body.get('file')).toBe(file);
+    expect(capturedOpts.body.get('expires_in')).toBe('3600');
+  });
 });
 
 describe('sender.js — user button sign-out two-click confirm', () => {

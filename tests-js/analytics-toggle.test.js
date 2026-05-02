@@ -290,6 +290,33 @@ describe('analytics-toggle.js — opt-OUT is instant + acknowledged (asymmetric)
     const tip = document.getElementById('analytics-toggle-ack-tip');
     expect(tip.classList.contains('is-visible')).toBe(false);
   });
+
+  // RTL desktop ack tip: in LTR the tip is anchored to the right edge of
+  // the chrome row (`right: ...; left: auto`); in RTL it flips to the
+  // left edge (`left: ...; right: auto`). The default jsdom direction is
+  // ltr so the LTR branch is exercised by the test above; this one flips
+  // `documentElement.dir` to `rtl` so the inverse anchor branch runs too.
+  it('positions the desktop ack tip from the LEFT edge in RTL direction', async () => {
+    document.documentElement.dir = 'rtl';
+    try {
+      const fetchMock = stubAnalyticsFetch({ initialOptIn: true, patchOptIn: false });
+      vi.stubGlobal('fetch', fetchMock);
+      await loadModule('analytics-toggle');
+      await flushAsync();
+
+      document.getElementById('analytics-toggle').click();
+      await flushAsync();
+      await flushAsync();
+
+      const tip = document.getElementById('analytics-toggle-ack-tip');
+      expect(tip.classList.contains('is-visible')).toBe(true);
+      // RTL branch: left positioned, right cleared.
+      expect(tip.style.left).not.toBe('');
+      expect(tip.style.right).toBe('auto');
+    } finally {
+      document.documentElement.dir = '';
+    }
+  });
 });
 
 describe('analytics-toggle.js — opt-OUT ack timer cleanup', () => {
