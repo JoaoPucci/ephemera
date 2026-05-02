@@ -1173,10 +1173,34 @@ def _check_and_apply_loop(
     models_shadowed: bool,
     string_consts: dict[str, set[str]] | None = None,
 ) -> tuple[bool, set[str], set[str]]:
-    """Loop body might not execute at all -- the post-loop state is the
-    intersection of pre-state (body skipped) and the body-end state
-    (body ran ≥ once and completed). Walrus bindings in the header
-    apply to the pre-state."""
+    """Loop post-state has up to three reachable shapes:
+
+      A. Body never ran (empty iter / `while False`) -> orelse runs
+         from `pre`.
+      B. Body ran and fell through normally (no `break`) -> orelse
+         runs from `body_end`.
+      C. Body broke out via `break` -> orelse is SKIPPED.
+
+    The previous shape walked orelse from `body_end` and intersected
+    with `pre`, which conflates A/B with C: the orelse re-bless
+    runs in A and B but not in C, so a break path that exits with
+    a name revoked is silently re-blessed by the orelse-merge:
+
+        user = sanctioned()
+        for x in iterable:
+            user = unsanctioned()
+            break
+        else:
+            user = sanctioned()
+        return user["totp_secret"]   # SHOULD flag (break path
+                                     # exits with user revoked)
+
+    Now: collect state-at-break for every `break` that targets
+    THIS loop (`_collect_break_states` recurses into compound
+    shapes but stops at nested loops -- their breaks target the
+    inner loop). Post-loop = pre & else_t & every break state.
+    pre keeps path A, else_t keeps path B, and intersecting in
+    each break state keeps path C."""
     header = stmt.test if isinstance(stmt, ast.While) else stmt.iter
     if not _check_reads_in_node(
         header, trusted, aliases, models_shadowed, string_consts
@@ -1198,7 +1222,116 @@ def _check_and_apply_loop(
     )
     if not else_ok:
         return False, else_t, else_a
-    return True, set(pre_t) & else_t, set(pre_a) & else_a
+    post_t, post_a = set(pre_t) & else_t, set(pre_a) & else_a
+    body_entry_t, body_entry_a = set(pre_t), set(pre_a)
+    if isinstance(stmt, (ast.For, ast.AsyncFor)):
+        for bound in _names_bound_by_target(stmt.target):
+            body_entry_t.discard(bound)
+            body_entry_a.discard(bound)
+    for br_t, br_a in _collect_break_states(
+        stmt.body, body_entry_t, body_entry_a, models_shadowed, string_consts
+    ):
+        post_t &= br_t
+        post_a &= br_a
+    return True, post_t, post_a
+
+
+def _collect_break_states(
+    stmts: list[ast.stmt],
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+    string_consts: dict[str, set[str]] | None,
+) -> list[tuple[set[str], set[str]]]:
+    """Walk `stmts` step-by-step and return every `(trusted, aliases)`
+    snapshot taken at a `break` statement that targets the
+    enclosing loop. Recurses into compound shapes (`if` / `try`
+    / `try*` / `with` / `match`) so a `break` nested under one of
+    those still counts. Stops at nested loops (`for` / `while` /
+    `async for`) because their `break`s target the inner loop,
+    not us.
+
+    Read-failures during the running-state walk return an empty
+    list: the outer `_check_and_apply_loop` already runs
+    `_walk_scope_seq` on the same body, which surfaces the same
+    failure with proper diagnostics. This helper is best-effort
+    -- if the running state can't be threaded cleanly we just
+    don't contribute extra break states, which never produces a
+    false positive."""
+    cur_t, cur_a = set(trusted), set(aliases)
+    breaks: list[tuple[set[str], set[str]]] = []
+    for s in stmts:
+        if isinstance(s, ast.Break):
+            breaks.append((set(cur_t), set(cur_a)))
+            return breaks
+        breaks.extend(
+            _collect_breaks_in_compound(s, cur_t, cur_a, models_shadowed, string_consts)
+        )
+        ok, cur_t, cur_a = _check_and_apply_stmt(
+            s, cur_t, cur_a, models_shadowed, string_consts
+        )
+        if not ok:
+            return breaks
+        if _always_terminates(s):
+            break
+    return breaks
+
+
+def _collect_breaks_in_compound(
+    stmt: ast.AST,
+    trusted: set[str],
+    aliases: set[str],
+    models_shadowed: bool,
+    string_consts: dict[str, set[str]] | None,
+) -> list[tuple[set[str], set[str]]]:
+    """Recurse into the compound shapes whose internal `break`
+    statements target the SAME enclosing loop as their outer
+    statement. Nested loops absorb their own breaks and return [].
+
+    The branch-entry states for `if` / `match` / etc. apply walrus
+    rebinds from the header -- mirroring what
+    `_check_and_apply_*` does -- so a `break` reached after
+    `(user := unsanctioned())` in an `if` test sees the rebound
+    state, not the pre-If snapshot."""
+    if isinstance(stmt, ast.If):
+        post_t, post_a = _apply_walrus_in_expr(
+            stmt.test, trusted, aliases, models_shadowed
+        )
+        return _collect_break_states(
+            stmt.body, post_t, post_a, models_shadowed, string_consts
+        ) + _collect_break_states(
+            stmt.orelse, post_t, post_a, models_shadowed, string_consts
+        )
+    if isinstance(stmt, (ast.Try, ast.TryStar)):
+        breaks = _collect_break_states(
+            stmt.body, trusted, aliases, models_shadowed, string_consts
+        )
+        breaks += _collect_break_states(
+            stmt.orelse, trusted, aliases, models_shadowed, string_consts
+        )
+        for handler in stmt.handlers:
+            breaks += _collect_break_states(
+                handler.body, trusted, aliases, models_shadowed, string_consts
+            )
+        breaks += _collect_break_states(
+            stmt.finalbody, trusted, aliases, models_shadowed, string_consts
+        )
+        return breaks
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return _collect_break_states(
+            stmt.body, trusted, aliases, models_shadowed, string_consts
+        )
+    if isinstance(stmt, ast.Match):
+        post_t, post_a = _apply_walrus_in_expr(
+            stmt.subject, trusted, aliases, models_shadowed
+        )
+        breaks: list[tuple[set[str], set[str]]] = []
+        for case in stmt.cases:
+            breaks += _collect_break_states(
+                case.body, post_t, post_a, models_shadowed, string_consts
+            )
+        return breaks
+    return []
 
 
 def _check_and_apply_with(
