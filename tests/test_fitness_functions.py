@@ -1826,28 +1826,32 @@ def test_analytics_events_table_has_a_single_writer():
                 offender_lineno = lineno
                 break
         if offender_lineno is None:
-            # Pass 2: dynamic table-name assembly. Catches the bypass
+            # Pass 2: dynamic table-name assembly. Catches the
+            # f-string and concat bypasses
             #
             #     table = "analytics_events"
             #     sql = f"INSERT INTO {table} ..."
+            #     sql = "INSERT INTO " + table + " ..."
             #
             # which the literal-text scan misses because the SQL
             # keyword and the table token live in different fragments.
             # Build a file-scope alias map of `name = "literal"`
             # bindings, then walk every JoinedStr (f-string) and
-            # reconstruct it with FormattedValue placeholders
-            # substituted by their bound values. Run the regex on the
-            # reconstructed string. Doesn't over-flag the legit
-            # documentation references in app/admin/cli.py or
-            # app/routes/prefs.py -- those are bare string literals
-            # without an f-string + variable-interpolation shape.
+            # BinOp(Add, ...) (concat chain) and reconstruct each
+            # with Name placeholders substituted by their bound
+            # values. Run the regex on the reconstructed string.
+            # Doesn't over-flag the legit documentation references
+            # in app/admin/cli.py or app/routes/prefs.py -- those
+            # are bare string literals without an f-string or
+            # concat shape.
             file_aliases = _file_level_string_aliases(tree)
-            for joined in ast.walk(tree):
-                if not isinstance(joined, ast.JoinedStr):
+            for node in ast.walk(tree):
+                if not _is_string_assembly_node(node):
                     continue
-                candidates = _reconstruct_joinedstr_candidates(joined, file_aliases)
+                segments = _string_assembly_segments(node, file_aliases)
+                candidates = _candidates_from_segments(segments)
                 if any(sql_ref.search(c) for c in candidates):
-                    offender_lineno = joined.lineno
+                    offender_lineno = node.lineno
                     break
         if offender_lineno is not None:
             offenders.append(f"{rel}:{offender_lineno}")
@@ -1907,46 +1911,89 @@ def _file_level_string_aliases(tree: ast.AST) -> dict[str, set[str]]:
     return aliases
 
 
-_JOINEDSTR_CARTESIAN_CAP = 32
+_STRING_ASSEMBLY_CARTESIAN_CAP = 32
 
 
-def _reconstruct_joinedstr_candidates(
-    node: ast.JoinedStr, aliases: dict[str, set[str]]
-) -> list[str]:
-    """Reconstruct a `JoinedStr` (f-string) as a list of candidate
-    strings, one per cartesian combination of `FormattedValue`
-    placeholders that bind to a `Name` with one or more known string
-    values in `aliases`. Other interpolations (computed expressions,
-    attribute access, calls) become a single-char `?` so they don't
-    accidentally complete a SQL-keyword-plus-table-name match.
+def _string_assembly_segments(
+    node: ast.AST, aliases: dict[str, set[str]]
+) -> list[list[str]]:
+    """Flatten `node` into a list of concat segments. Each segment is
+    a list of candidate strings; the caller takes the cartesian
+    product to enumerate the possible assembled strings. Handles
+    four shapes recursively:
 
-    Cartesian explosion is capped at `_JOINEDSTR_CARTESIAN_CAP`
-    candidates: above the cap, every interpolation collapses to `?`
-    -- preserves the literal-fragment scan but loses the substitution
-    boost. Realistic table-name f-strings have one or two
-    interpolations bound to a small number of string literals, so
-    the cap is comfortably above any honest case."""
-    segments: list[list[str]] = []
-    for value in node.values:
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            segments.append([value.value])
-        elif isinstance(value, ast.FormattedValue):
-            inner = value.value
-            if isinstance(inner, ast.Name) and inner.id in aliases:
-                segments.append(sorted(aliases[inner.id]))
+      - `Constant` str:  one segment with one literal candidate.
+      - `Name`:          one segment with every known string binding
+                         (or a single `?` if the name isn't in
+                         `aliases`).
+      - `JoinedStr`:     each `value` becomes a sub-segment list,
+                         expanded recursively (so a `FormattedValue`
+                         wrapping a Name is resolved through
+                         `aliases`).
+      - `BinOp` `Add`:   `segments(left) ++ segments(right)`. Catches
+                         non-f-string concat assembly:
+
+                             table = "analytics_events"
+                             sql = "INSERT INTO " + table + " VALUES ..."
+
+                         Each `+` flattens left-to-right, so the
+                         reconstructed candidate has the keyword and
+                         table token adjacent and the regex matches.
+
+    Anything else collapses to a single `?` placeholder, which keeps
+    us from accidentally completing a SQL-keyword-plus-table-name
+    match across an unresolved interpolation."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [[node.value]]
+    if isinstance(node, ast.Name):
+        if node.id in aliases:
+            return [sorted(aliases[node.id])]
+        return [["?"]]
+    if isinstance(node, ast.JoinedStr):
+        out: list[list[str]] = []
+        for value in node.values:
+            if isinstance(value, ast.FormattedValue):
+                out.extend(_string_assembly_segments(value.value, aliases))
+            elif isinstance(value, ast.Constant) and isinstance(value.value, str):
+                out.append([value.value])
             else:
-                segments.append(["?"])
-        else:
-            segments.append(["?"])
+                out.append(["?"])
+        return out
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _string_assembly_segments(
+            node.left, aliases
+        ) + _string_assembly_segments(node.right, aliases)
+    return [["?"]]
+
+
+def _candidates_from_segments(segments: list[list[str]]) -> list[str]:
+    """Cartesian product of `segments` capped at
+    `_STRING_ASSEMBLY_CARTESIAN_CAP`. Above the cap, every segment
+    collapses to its first candidate -- preserves the literal-
+    fragment scan but loses the substitution boost. Realistic
+    table-name assemblies have one or two interpolations bound to a
+    small number of string literals, so the cap is comfortably above
+    any honest case."""
     total = 1
     for seg in segments:
         total *= len(seg)
-        if total > _JOINEDSTR_CARTESIAN_CAP:
+        if total > _STRING_ASSEMBLY_CARTESIAN_CAP:
             return ["".join(seg[0] for seg in segments)]
     candidates = [""]
     for seg in segments:
         candidates = [prev + s for prev in candidates for s in seg]
     return candidates
+
+
+def _is_string_assembly_node(node: ast.AST) -> bool:
+    """True for the AST shapes whose reconstruction the analytics SQL
+    scan walks: `JoinedStr` (f-string) or `BinOp` with an `Add`
+    operator. Other expression shapes don't compose strings out of
+    multiple fragments and so can't carry the keyword + table-name
+    bypass on their own."""
+    if isinstance(node, ast.JoinedStr):
+        return True
+    return isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
 
 
 # ---------------------------------------------------------------------------
@@ -1994,10 +2041,10 @@ def _kwargs_contain_mutating_method(keywords: list[ast.keyword]) -> bool:
     return False
 
 
-def _module_level_callable_aliases(tree: ast.AST) -> dict[str, ast.expr]:
-    """Return a `Name -> expr` map for module-scope `<name> = <expr>`
-    assignments where `<expr>` is one of the shapes we statically
-    follow when resolving aliased decorator references:
+def _module_level_callable_aliases(tree: ast.AST) -> dict[str, list[ast.expr]]:
+    """Return a `Name -> [expr,...]` map for module-scope assignments
+    where the RHS is one of the shapes we statically follow when
+    resolving aliased decorator references:
 
       Name      `post = router_post_alias`
       Attribute `post = router.post`
@@ -2006,49 +2053,83 @@ def _module_level_callable_aliases(tree: ast.AST) -> dict[str, ast.expr]:
 
     Used by `_resolve_callable` to follow `Name` decorators back to
     their original Attribute/Call before the route-mutating
-    detectors check the shape. Module scope only (function-local
-    `def f(): post = router.post; @post(...)` is rare; the realistic
-    bypass is a top-level rebind)."""
-    aliases: dict[str, ast.expr] = {}
+    detectors check the shape.
+
+    Multi-valued (list of bindings) rather than last-write-wins: a
+    later, unrelated reassignment in another branch must not silently
+    overwrite an earlier binding that was used as a decorator. For
+    example,
+
+        post = router.post
+        @post('/x')
+        def handler(): ...
+        post = something_else_unrelated   # last-write would clobber
+
+    The earlier `post = router.post` is what `@post('/x')` actually
+    references. Tracking every observed RHS keeps the resolver from
+    losing it.
+
+    Walk via `_walk_module_scope` instead of just `tree.body` so a
+    rebind nested in a top-level `if` / `try` / etc. still counts:
+
+        if True:
+            post = router.post
+        @post('/x')
+        def handler(): ...
+
+    `if True` is still a module-scope binding -- the conditional
+    only gates whether the rebind happens, not the scope it lands
+    in."""
+    aliases: dict[str, list[ast.expr]] = {}
     if not isinstance(tree, ast.Module):
         return aliases
-    for stmt in tree.body:
-        if isinstance(stmt, ast.Assign):
-            for target in stmt.targets:
+    for node in _walk_module_scope(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
                 if isinstance(target, ast.Name) and isinstance(
-                    stmt.value, (ast.Name, ast.Attribute, ast.Call)
+                    node.value, (ast.Name, ast.Attribute, ast.Call)
                 ):
-                    aliases[target.id] = stmt.value
+                    aliases.setdefault(target.id, []).append(node.value)
         elif (
-            isinstance(stmt, ast.AnnAssign)
-            and isinstance(stmt.target, ast.Name)
-            and stmt.value is not None
-            and isinstance(stmt.value, (ast.Name, ast.Attribute, ast.Call))
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+            and isinstance(node.value, (ast.Name, ast.Attribute, ast.Call))
         ):
-            aliases[stmt.target.id] = stmt.value
+            aliases.setdefault(node.target.id, []).append(node.value)
     return aliases
 
 
 def _resolve_callable(
     node: ast.expr,
-    aliases: dict[str, ast.expr] | None,
+    aliases: dict[str, list[ast.expr]] | None,
     depth: int = 0,
-) -> ast.expr:
-    """If `node` is a `Name` recorded in `aliases`, follow the
-    chain to its underlying expression. Caps at depth 4 to bail on
-    cycles (`a = b; b = a`). Returns `node` unchanged when it isn't
-    a Name or no alias applies, so callers use the result as a
-    drop-in replacement."""
+) -> list[ast.expr]:
+    """Resolve `node` through `aliases`, returning a list of every
+    underlying expression it can reach. If `node` is a `Name`
+    recorded in `aliases`, follow each binding (multi-valued, since
+    the same Name can be reassigned at module scope) and recurse
+    until depth 4 or until the binding isn't itself a tracked Name.
+
+    Returns `[node]` unchanged when the input isn't a tracked Name,
+    so callers can iterate the result and check each candidate
+    shape in turn. Conservative direction: a name with multiple
+    bindings flags as state-mutating if ANY binding resolves to a
+    mutating decorator -- a later reassignment doesn't get to
+    silently disarm an earlier one."""
     if depth > 4 or aliases is None:
-        return node
+        return [node]
     if isinstance(node, ast.Name) and node.id in aliases:
-        return _resolve_callable(aliases[node.id], aliases, depth + 1)
-    return node
+        out: list[ast.expr] = []
+        for sub in aliases[node.id]:
+            out.extend(_resolve_callable(sub, aliases, depth + 1))
+        return out or [node]
+    return [node]
 
 
 def _is_state_mutating_route_decorator(
     deco: ast.expr,
-    callable_aliases: dict[str, ast.expr] | None = None,
+    callable_aliases: dict[str, list[ast.expr]] | None = None,
 ) -> bool:
     """True iff `deco` registers a state-mutating HTTP handler. Two
     FastAPI shapes count:
@@ -2068,24 +2149,24 @@ def _is_state_mutating_route_decorator(
     `callable_aliases` resolves a Name-callee decorator back to its
     underlying Attribute. Without it, `post = router.post` followed
     by `@post("/x")` would slip past since the Call's `func` is a
-    bare Name rather than an Attribute.
-    """
+    bare Name rather than an Attribute. Returns True if ANY resolved
+    binding for that Name is a mutating shape."""
     if not isinstance(deco, ast.Call):
         return False
-    func = _resolve_callable(deco.func, callable_aliases)
-    if not isinstance(func, ast.Attribute):
-        return False
-    attr = func.attr
-    if attr in _MUTATING_VERBS:
-        return True
-    if attr == "api_route":
-        return _kwargs_contain_mutating_method(deco.keywords)
+    for func in _resolve_callable(deco.func, callable_aliases):
+        if not isinstance(func, ast.Attribute):
+            continue
+        attr = func.attr
+        if attr in _MUTATING_VERBS:
+            return True
+        if attr == "api_route" and _kwargs_contain_mutating_method(deco.keywords):
+            return True
     return False
 
 
 def _is_imperative_mutating_registration(
     node: ast.AST,
-    callable_aliases: dict[str, ast.expr] | None = None,
+    callable_aliases: dict[str, list[ast.expr]] | None = None,
 ) -> bool:
     """True iff `node` is an imperative state-mutating route registration.
     FastAPI exposes three function-call equivalents of the decorator API:
@@ -2104,7 +2185,9 @@ def _is_imperative_mutating_registration(
       router.post("/x"); register(handler)`. The factory call is
       stored under a Name and applied later. We resolve `node.func`
       (a Name) through `callable_aliases` to recover the
-      decorator-factory Call and check the same shape.
+      decorator-factory Call and check the same shape. Conservative
+      direction: True if ANY binding for the Name resolves to a
+      mutating Call.
     """
     if not isinstance(node, ast.Call):
         return False
@@ -2114,10 +2197,12 @@ def _is_imperative_mutating_registration(
         and _kwargs_contain_mutating_method(node.keywords)
     ):
         return True
-    resolved = _resolve_callable(node.func, callable_aliases)
-    return isinstance(resolved, ast.Call) and _is_state_mutating_route_decorator(
-        resolved, callable_aliases
-    )
+    for resolved in _resolve_callable(node.func, callable_aliases):
+        if isinstance(resolved, ast.Call) and _is_state_mutating_route_decorator(
+            resolved, callable_aliases
+        ):
+            return True
+    return False
 
 
 def _is_origin_dependency(
