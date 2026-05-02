@@ -589,6 +589,64 @@ def _apply_walrus_in_expr(
 # ---------------------------------------------------------------------------
 
 
+def _stmts_terminate(stmts: list[ast.stmt]) -> bool:
+    """True iff `stmts` (as a sequential block) reaches an always-
+    terminating statement -- i.e., control unconditionally transfers
+    out of the block before falling through. Returns False for an
+    empty list (no terminator)."""
+    return any(_always_terminates(s) for s in stmts)
+
+
+def _always_terminates(stmt: ast.stmt) -> bool:
+    """True iff `stmt` ALWAYS transfers control out of the enclosing
+    block -- every reachable path through it returns / raises / breaks /
+    continues. Conservative: returns False whenever static analysis
+    can't prove termination on every path.
+
+    Recognised compound shapes:
+
+      `If`         -- both `body` and `orelse` always terminate, AND
+                      orelse is non-empty (a missing-else branch
+                      falls through, so the if doesn't always
+                      terminate).
+      `Try`        -- finalbody always terminates (overrides), OR
+                      every handler always terminates AND
+                      (body always terminates OR orelse always
+                      terminates).
+      `With` /     -- body always terminates. The `__exit__` method
+      `AsyncWith`     could in theory swallow an exception (return
+                      truthy), but our codebase never relies on that
+                      shape; treating with-statements as transparent
+                      to control flow matches the rest of the test
+                      posture.
+
+    For / While / Match are NOT recognised: a loop with an empty iter
+    skips the body entirely (no termination), and a match with no
+    matching case falls through. Both are reachable post-statement
+    paths the static analysis can't statically rule out."""
+    if isinstance(stmt, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+        return True
+    if isinstance(stmt, ast.If):
+        if not stmt.orelse:
+            return False
+        return _stmts_terminate(stmt.body) and _stmts_terminate(stmt.orelse)
+    if isinstance(stmt, ast.Try):
+        if stmt.finalbody and _stmts_terminate(stmt.finalbody):
+            return True
+        if not all(_stmts_terminate(h.body) for h in stmt.handlers):
+            return False
+        # Body terminating means orelse never runs (orelse runs after a
+        # successful body completion, which doesn't happen if body
+        # terminates). Otherwise the body's normal-completion path goes
+        # through orelse, which must terminate.
+        return _stmts_terminate(stmt.body) or (
+            bool(stmt.orelse) and _stmts_terminate(stmt.orelse)
+        )
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return _stmts_terminate(stmt.body)
+    return False
+
+
 def _walk_scope_seq(
     stmts: list[ast.stmt],
     trusted: set[str],
@@ -601,30 +659,36 @@ def _walk_scope_seq(
     anyway). Used inside structural branch handlers to process one
     branch's body sequentially before joining with siblings.
 
-    Stops threading after an unconditional control-transfer at the
-    body's top level -- `Return`, `Raise`, `Break`, `Continue`. The
-    statements after such a transfer are unreachable in this scope,
-    so applying their state changes would re-establish trust that
-    isn't actually visible at any reachable point. Concrete bypass
-    that motivated this:
+    Stops threading after an always-terminating statement (literal
+    `Return` / `Raise` / `Break` / `Continue`, or a compound stmt
+    where every reachable path through it transfers control out --
+    e.g. `if cond: raise else: raise`, or a try with always-raising
+    body + every handler raising). The statements after such a
+    terminator are unreachable in this scope, so applying their state
+    changes would re-establish trust that isn't visible at any
+    reachable point. Concrete bypass that motivated this:
 
         try:
-            user = unsanctioned()       # state: revoke
-            raise RuntimeError()        # control transfer
+            user = unsanctioned()
+            if cond:
+                raise RuntimeError()
+            else:
+                raise RuntimeError()
             user = sanctioned()         # UNREACHABLE
         except RuntimeError:
             user["totp_secret"]         # handler entry: pre & try_t
 
-    Without the break, the unreachable re-add brought `user` back
-    into `try_t`, leaking through the `pre & try_t` handler-entry
-    intersection. With it, `try_t` reflects only the reachable
-    prefix and the handler correctly sees `user` revoked."""
+    Without the recursive terminator check, the unreachable re-add
+    brought `user` back into `try_t`, leaking through the `pre &
+    try_t` handler-entry intersection. `_always_terminates` recurses
+    through If / Try / With shapes so it catches both the literal
+    `raise` and the every-branch-raises forms."""
     t, a = set(trusted), set(aliases)
     for stmt in stmts:
         ok, t, a = _check_and_apply_stmt(stmt, t, a, models_shadowed)
         if not ok:
             return False, t, a
-        if isinstance(stmt, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+        if _always_terminates(stmt):
             break
     return True, t, a
 
