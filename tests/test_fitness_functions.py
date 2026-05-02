@@ -678,10 +678,26 @@ def _check_and_apply_try(
     stmt: ast.Try, trusted: set[str], aliases: set[str], models_shadowed: bool
 ) -> tuple[bool, set[str], set[str]]:
     """Three reachable post-Try paths to merge: try-body completes (and
-    orelse runs); or any handler runs (from arbitrary point in try body
-    -- conservative pre-state is the original pre-Try state, with any
-    `as <name>` excluded from trust). `finally` always runs after the
-    merged state."""
+    orelse runs); or any handler runs (from arbitrary point in try
+    body); or `finally` ends the construct. Each handler's entry
+    state is the INTERSECTION of the pre-Try state and the try-body-
+    end state -- not just the pre-Try state. The handler can fire at
+    any point during the try body, so a name that survives both
+    sides is the conservative "trusted at handler entry" set:
+
+      pre = {user}
+      try:
+          user = unsanctioned()    # try-body-end revokes user
+          raise
+      except:
+          user["totp_secret"]      # handler entry: pre & try_t = {}
+
+    Without the intersection, `user` would still be marked trusted
+    at handler entry from the pre-Try copy and the read would slip
+    through. (The opposite case -- name added in try body, handler
+    fires before the add -- is also rejected by the intersection
+    since the pre-Try set wouldn't have it.) `finally` always runs
+    after the merged state; threaded through that."""
     body_ok, try_t, try_a = _walk_scope_seq(
         stmt.body, trusted, aliases, models_shadowed
     )
@@ -694,7 +710,8 @@ def _check_and_apply_try(
         return False, else_t, else_a
     merged_t, merged_a = else_t, else_a
     for handler in stmt.handlers:
-        h_t, h_a = set(trusted), set(aliases)
+        h_t = set(trusted) & try_t
+        h_a = set(aliases) & try_a
         if handler.name is not None:
             h_t.discard(handler.name)
             h_a.discard(handler.name)
@@ -1152,7 +1169,14 @@ def _scope_totp_reads_are_quarantined(
     # user = get_user_with_totp_by_id(uid); user["totp_secret"]` would
     # bypass -- the Name still appears in the (immutable) module-level
     # alias set even though the local name resolves elsewhere.
-    local_sanctioned = set(sanctioned_aliases)
+    # Module-level rebinds revoke the sanctioned-alias trust before
+    # this function even runs. A `from app.models import
+    # get_user_with_totp_by_id` followed by a top-level
+    # `get_user_with_totp_by_id = attacker_fn` shadows the canonical
+    # name for every function in the file. `_module_level_rebound_names`
+    # already records that, so subtract it from the per-function
+    # alias set up front.
+    local_sanctioned = set(sanctioned_aliases) - (module_rebound or set())
     # Function parameters shadow module-level imports of the same name
     # for the body of this function. `def f(get_user_with_totp_by_id):
     # ...` makes the parameter resolve to whatever the caller passed,
