@@ -94,7 +94,13 @@ def _resolve_user(username: str | None) -> dict:
         print("no users yet — run `init <username>` first.", file=sys.stderr)
         sys.exit(1)
     if len(users) == 1:
-        return models.get_user_by_id(users[0]["id"])
+        # `get_user_by_id` is annotated `dict | None` but the row we just
+        # got from `list_users()` is the same one we're looking up, so the
+        # None branch is unreachable here. The assert documents the
+        # invariant and gives mypy the narrowing it needs.
+        only = models.get_user_by_id(users[0]["id"])
+        assert only is not None
+        return only
     # Multiple users, no flag. Ask.
     print("Multiple users exist; specify --user <name>. Known users:", file=sys.stderr)
     for u in users:

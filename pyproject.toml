@@ -113,19 +113,17 @@ precision = 1
 # ---------------------------------------------------------------------------
 # Mypy
 #
-# Strategy B per-module ratchet. Mypy runs in CI as a parallel job under
-# .github/workflows/lint.yml. The baseline below allows the current
-# codebase's ~21 type errors via per-module `ignore_errors = true` so
-# the CI gate lands green; subsequent PRs remove entries from the
-# overrides list as each module's type debt gets cleaned up. When the
-# overrides list is empty, this block flips to `strict = true` globally
-# and the ratchet retires.
+# Runs in CI as a parallel job under .github/workflows/lint.yml. Every
+# `app/` module currently passes the non-strict baseline -- the
+# per-module `ignore_errors = true` ratchet that bootstrapped this
+# config has been retired. The next tightening step is flipping
+# `strict = true` below, which surfaces a fresh wave of stricter-mode
+# errors (untyped function defs, implicit Optional, unreachable
+# branches) and is left for a follow-up rather than blocking the
+# baseline-clean milestone.
 #
-# Order of cleanup follows security leverage: the `app/auth/` and
-# `app/dependencies.py` paths are already clean (no entries below); the
-# small / surgical modules go next, the larger / lower-stakes ones
-# last. Tests aren't yet in scope (mypy targets `app/` only via
-# `files`); extending to `tests/` is a later PR once `app/` is clean.
+# Tests aren't yet in scope (`files` targets `app/` only). Extending
+# to `tests/` is its own later step once strict mode is in place.
 # ---------------------------------------------------------------------------
 
 [tool.mypy]
@@ -147,22 +145,12 @@ warn_redundant_casts = true
 module = "qrcode.*"
 ignore_missing_imports = true
 
-# Per-module ratchet: each entry tolerates the module's existing type
-# errors so the baseline is green. Each subsequent PR removes one or
-# more modules from this list, fixes the underlying types, and lets
-# mypy enforce them going forward. Intentionally listed long-form
-# rather than wildcarded: a future contributor adding a new module
-# gets type-checked from day one (no implicit baseline-tolerance for
-# new code), and the diff to remove an entry is loud-and-visible.
-#
-# Last cleanup wave:
-#   app.admin.{_core,cli,diagnostics}            (CLI; lower stakes)
-# After those clear this entire `[[tool.mypy.overrides]]` block goes
-# away and the `[tool.mypy]` config flips to `strict = true`.
-[[tool.mypy.overrides]]
-module = [
-  "app.admin._core",
-  "app.admin.cli",
-  "app.admin.diagnostics",
-]
-ignore_errors = true
+# Per-module ratchet retired: every previously-tolerated module's type
+# errors have been fixed. The next mypy-tightening step is flipping
+# `strict = true` on `[tool.mypy]` above, which surfaces a fresh wave
+# of stricter-mode errors (untyped function defs, implicit Optional,
+# unreachable branches). That wave is significant on a codebase this
+# size and is left for a follow-up rather than bundled into the same
+# diff that retired the previous baseline. Until then the project
+# runs in non-strict mode with no per-module exceptions for `app/`
+# itself; only the third-party-stub case below remains.
