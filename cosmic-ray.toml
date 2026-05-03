@@ -23,10 +23,14 @@
 #
 # Scope is the security-leverage set: encrypt/decrypt + key
 # derivation in app/crypto.py, the auth flow under app/auth/,
-# input validation in app/validation.py, and the dependency
-# helpers (session-cookie HMAC, origin check, API-token verify)
-# in app/dependencies.py. The rest of app/ is untouched for v1 --
-# expand once we know what one full run costs in CI minutes.
+# input validation in app/validation.py, the dependency helpers
+# (session-cookie HMAC, origin check, API-token verify) in
+# app/dependencies.py, the sliding-window rate limiter in
+# app/limiter.py (load-bearing for brute-force defenses), and the
+# structured audit log in app/security_log.py (the source-of-
+# truth for "what events did we record about this request"). The
+# rest of app/ stays excluded -- routes are integration-level
+# already, models are mostly generated SQL, templates are Jinja.
 
 [cosmic-ray]
 # `module-path` is the directory cosmic-ray walks looking for
@@ -37,38 +41,45 @@
 # fragment the report across multiple session DBs.
 module-path = "app/"
 # Per-mutant test-command timeout in seconds. ephemera's test
-# suite uses bcrypt at cost 12 (deliberate, see app/auth/
-# password.py). Empirically (queried across 14 recent successful
-# `test-suite / Python tests (pytest)` jobs on
-# `actions/runs?per_page=100`):
-#   min 15m27s, median 17m4s, max 19m5s
+# suite uses bcrypt at the conftest-set cost 4 (production keeps
+# 12, source-pinned by `test_security_constants_are_not_silently_weakened`;
+# see PR #131 + EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE in
+# tests/conftest.py for the gating mechanism). Empirically the
+# full suite finishes in ~14s locally and ~25s on CI's shared
+# 2-vCPU runners.
 #
-# Two prior weekly runs failed at the baseline gate with
-# timeouts that were too low (initial 30s, then 720s = 12m). The
-# 12-min value was based on a wrong "~10 min" estimate of the
-# pytest job's runtime; the actual distribution is 15-19 min.
-# 1800s (30 min) gives ~10 min of headroom over the observed
-# max, which absorbs runner variance (GitHub-hosted runners are
-# load-dependent shared CPUs).
+# 300s (5 min) is the timeout for the abnormal case -- a mutation
+# that introduces an infinite loop, where `timeout` is cosmic-ray's
+# only signal to declare the mutant killed-by-timeout. ~12x
+# headroom over the realistic CI baseline absorbs runner variance.
 #
-# With -x in the test-command, killed mutants exit fast
-# (whenever the first test fails); only survived mutants pay
-# the full sweep cost. The timeout caps each invocation -- not
-# the typical runtime -- so a survivor completing normally
-# takes ~17 min, NOT 30. The 30-min cap exists for the abnormal
-# case (e.g. a mutation introducing an infinite loop), where
-# `timeout` is cosmic-ray's only signal to declare the mutant
-# killed-by-timeout.
+# Per-mutant runtime distribution from the post-#131 weekly run
+# (692 mutants, run 25258909279):
+#   min 2.0s, p50 6.0s, p75 21.5s, p90 22.5s, p99 23.2s, max 23.5s
+# (excluding one infrastructure-only outlier that hit 1139.5s --
+# see `test_bcrypt_test_override_actually_applies_to_runtime_constant`
+# in tests/test_auth.py for how that mutation is now killed in
+# milliseconds at the assertion layer instead of surviving 19min
+# at cost-12 baseline).
 #
-# This is also what `cosmic-ray baseline` runs against -- the
-# unmutated full sweep must finish under this ceiling. If
-# baseline starts crowding 30 min, the suite is genuinely
-# slower than the empirical range and the right next step is
-# investigating why (pytest-xdist? a slow new fixture?), not
-# raising this further. NOT narrowing test-command to a subset
-# of test files -- that would hide real catches by tests
-# outside the narrow set (see prior thread on PR #117).
-timeout = 1800.0
+# `cosmic-ray baseline` runs against this same ceiling on the
+# unmutated suite. If baseline starts crowding 5 min, the suite
+# is genuinely slower than the new empirical range and the right
+# next step is investigating why (a slow new fixture? cost-12
+# accidentally re-enabled? a hypothesis property test exploring
+# worst-case-N?), not raising this further. NOT narrowing
+# test-command to a subset of test files -- that would hide real
+# catches by tests outside the narrow set (see prior thread on
+# PR #117).
+#
+# Prior shape (kept for context): the cost-12 timeout was 1800s
+# (30 min) with rationale anchored on an empirical 15-19min suite
+# range queried across 14 successful test-suite jobs. With cost-4
+# in tests the realistic max drops by ~30x, so the timeout shrinks
+# accordingly -- both to keep the run snappy and so an actual
+# infinite-loop mutation is declared killed-by-timeout in 5min
+# rather than 30min.
+timeout = 300.0
 # Each entry is a filesystem glob (passed to `glob.glob(p,
 # recursive=True)` by cosmic-ray's modules.filter_paths) -- NOT a
 # dotted module path. Patterns like `app.admin.*` would silently
@@ -91,12 +102,10 @@ excluded-modules = [
   "app/config.py",
   "app/errors.py",
   "app/i18n.py",
-  "app/limiter.py",
   "app/models/**/*.py",
   "app/routes/**/*.py",
   "app/schemas.py",
   "app/security_headers.py",
-  "app/security_log.py",
   "app/version.py",
 ]
 # `test-command` runs once per mutant. Cosmic-ray spawns it as a
