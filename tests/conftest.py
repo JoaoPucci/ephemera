@@ -30,6 +30,52 @@ TEST_USERNAME = "alice"
 TEST_PASSWORD = "test-password-xyz"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _verify_bcrypt_test_override_applied():
+    """Session-level safety net for the bcrypt test-mode override.
+
+    Conftest's module-level `os.environ.setdefault` above sets
+    `EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE=4`; `app/auth/_core.py`
+    reads it at import time and rebinds `BCRYPT_ROUNDS` to 4. A
+    mutation that disables the override gate -- flipping the
+    `if _test_override:` condition, blanking the
+    `os.environ.get(...)` read, deleting the assignment line --
+    silently reverts to cost-12. The suite still passes, just
+    very slowly; cosmic-ray would flag the mutation as SURVIVED
+    only after a 19-min cost-12 run per affected mutant.
+
+    Asserting at session start instead of inside a regular test
+    means cosmic-ray declares such mutants KILLED at <1s instead
+    of waiting ~2min for pytest's collection order to reach
+    `test_auth.py`. Empirically: the post-#133 weekly run
+    (run 25267652770) had one cost-4-gate mutation surviving for
+    124.7s before the in-test assertion fired; with this fixture
+    the same mutation is killed by the first attempted test's
+    fixture setup.
+
+    Pins the runtime-resolved value, complementing
+    `test_security_constants_are_not_silently_weakened` in
+    `test_fitness_functions.py` (which AST-pins the source-level
+    `BCRYPT_ROUNDS = 12` literal). Different question, different
+    layer: source pin guarantees production cost; this pin
+    guarantees the test-mode override is wired correctly."""
+    from app.auth._core import BCRYPT_ROUNDS
+
+    override = os.environ.get("EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE")
+    assert override, (
+        "EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE not set -- the "
+        "module-level `os.environ.setdefault` above this fixture "
+        "is expected to set it before any test runs."
+    )
+    assert int(override) == BCRYPT_ROUNDS, (
+        f"BCRYPT_ROUNDS = {BCRYPT_ROUNDS}, expected {override}; "
+        "the override gate in app/auth/_core.py is not applying. "
+        "If a mutation flipped the gate condition, this fixture "
+        "kills it in milliseconds instead of surviving a 19-min "
+        "cost-12 suite run."
+    )
+
+
 @pytest.fixture
 def tmp_db_path(tmp_path, monkeypatch):
     """Isolated SQLite DB file, wired in via env vars and settings cache reset."""

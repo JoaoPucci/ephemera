@@ -1,7 +1,6 @@
 """Tests for app.auth: password, TOTP skew+replay, backup codes, lockout, users, tokens."""
 
 import json
-import os
 import time
 from datetime import UTC
 
@@ -10,42 +9,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from app import auth, models
-from app.auth import _core as auth_core
 from app.auth import tokens as tokens_mod
-
-
-def test_bcrypt_test_override_actually_applies_to_runtime_constant():
-    """`tests/conftest.py` sets `EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE=4`
-    at module-load time so the suite drops from ~10min (cost 12) to
-    ~14s (cost 4); see PR #131 for the gating mechanism. Without this
-    assertion, a mutation that disables the override gate -- flipping
-    `if _test_override:` to `if not _test_override:`, blanking the
-    `os.environ.get(...)` read, deleting the assignment line, etc. --
-    silently reverts to cost-12. The suite still passes, just very
-    slowly; cosmic-ray would flag the mutation as SURVIVED only after
-    a 19-min cost-12 run per affected mutant. This assertion catches
-    the same regression in milliseconds and lets cosmic-ray's per-
-    mutant timeout in cosmic-ray.toml stay tight (300s, headroom
-    over the cost-4 baseline) without losing kill signal.
-
-    Pins the runtime-resolved value, complementing
-    `test_security_constants_are_not_silently_weakened` in
-    `test_fitness_functions.py` (which AST-pins the source-level
-    `BCRYPT_ROUNDS = 12` literal). Different question, different
-    layer: source pin guarantees production cost; this pin
-    guarantees the test-mode override is wired correctly."""
-    override = os.environ.get("EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE")
-    assert override, (
-        "EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE not set -- the test "
-        "harness is expected to set this in tests/conftest.py."
-    )
-    assert int(override) == auth_core.BCRYPT_ROUNDS, (
-        f"BCRYPT_ROUNDS = {auth_core.BCRYPT_ROUNDS}, expected "
-        f"{override}; the override gate in app/auth/_core.py is not "
-        "applying. If a mutation flipped the gate condition, this "
-        "assertion kills it in milliseconds instead of surviving "
-        "a 19-min cost-12 suite run."
-    )
 
 
 def test_hash_and_verify_password_roundtrip():
