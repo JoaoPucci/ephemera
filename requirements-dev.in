@@ -42,3 +42,11 @@ radon>=6.0
 cosmic-ray>=8.4
 httpx>=0.27
 pip-tools>=7.4
+# mypy runs in CI under .github/workflows/lint.yml as a separate
+# `mypy` job (parallel to ruff / biome). Strategy is the per-module
+# ratchet documented in pyproject.toml's `[tool.mypy]` block: the
+# baseline tolerates current type errors via per-module
+# `ignore_errors = true`, and subsequent PRs remove modules from the
+# overrides list as their type debt is cleaned up. When the list is
+# empty we flip to global strict mode.
+mypy>=1.20
