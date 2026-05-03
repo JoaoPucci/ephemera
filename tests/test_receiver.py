@@ -348,7 +348,7 @@ _text_content = st.text(
     alphabet=st.characters(
         min_codepoint=0x00,
         max_codepoint=0x10FFFF,
-        blacklist_categories=("Cs",),
+        blacklist_categories=("Cs",),  # type: ignore[arg-type]
     ),
 )
 

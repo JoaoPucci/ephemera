@@ -30,6 +30,7 @@ spec rather than growing this surface.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -62,7 +63,7 @@ router = APIRouter(prefix="/_test", include_in_schema=False)
     "/limiter/reset",
     dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
 )
-def reset_limiters() -> dict:
+def reset_limiters() -> dict[str, Any]:
     """Clear all in-memory rate-limiter state."""
     for lim in (reveal_limiter, login_limiter, create_limiter, read_limiter):
         lim.reset()
@@ -73,7 +74,7 @@ def reset_limiters() -> dict:
     "/secret/{token}/expire-now",
     dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
 )
-def expire_secret_now(token: str) -> dict:
+def expire_secret_now(token: str) -> dict[str, Any]:
     """Force a secret's `expires_at` to a past timestamp so the next
     reveal lookup sees it as expired. Returns 404 if no row matches
     the token -- avoids a silent no-op when the spec misnames a

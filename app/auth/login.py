@@ -2,6 +2,8 @@
 lockout enforcement, and success-path side effects (step bump, code
 consumption, counter reset)."""
 
+from typing import Any
+
 import bcrypt
 
 from .. import models
@@ -31,7 +33,7 @@ _DUMMY_BCRYPT_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS
 
 def authenticate(
     username: str, password: str, code: str, client_ip: str = "cli"
-) -> dict:
+) -> dict[str, Any]:
     """Verify username + password + (TOTP code OR backup code).
 
     Returns the authenticated user dict on success. Raises AuthError on any
@@ -138,7 +140,7 @@ def authenticate(
             )
         raise AuthError("invalid credentials")
 
-    updates: dict = {}
+    updates: dict[str, Any] = {}
     if totp_step is not None:
         updates["totp_last_step"] = totp_step
     if consumed_backup_json is not None:

@@ -6,6 +6,8 @@ a user as well. A request is "authenticated as user X" if either credential
 resolves to a user row; dependencies below return that row (or raise 401).
 """
 
+from typing import Any
+
 from fastapi import Header, Request
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
 
@@ -78,7 +80,7 @@ def is_logged_in(request: Request) -> bool:
 def verify_api_token_or_session(
     request: Request,
     authorization: str | None = Header(default=None),
-) -> dict:
+) -> dict[str, Any]:
     """Accept either a valid DB-issued API token OR a valid session cookie,
     and return the authenticated user row."""
     if authorization and authorization.lower().startswith("bearer "):

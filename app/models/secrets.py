@@ -4,6 +4,7 @@ expire, purge, and the tracked-list views."""
 import secrets as _secrets  # stdlib; aliased to avoid shadowing this module's name
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from ._core import _connect, _iso, _row_to_dict, _utcnow
 
@@ -19,7 +20,7 @@ def create_secret(
     track: bool,
     expires_in: int,
     label: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     now = _utcnow()
     sid = str(uuid.uuid4())
     token = _secrets.token_urlsafe(16)
@@ -57,7 +58,7 @@ def create_secret(
     }
 
 
-def get_by_token(token: str) -> dict | None:
+def get_by_token(token: str) -> dict[str, Any] | None:
     """Lookup by the URL-facing token. Intentionally not user-scoped: the receiver
     has no user identity and must be able to reach their secret via the link."""
     with _connect() as conn:
@@ -65,7 +66,7 @@ def get_by_token(token: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def get_by_id(sid: str, user_id: int) -> dict | None:
+def get_by_id(sid: str, user_id: int) -> dict[str, Any] | None:
     """Lookup by server UUID, scoped to one user.
 
     user_id is required (was Optional with a None-bypass before; a future
@@ -187,7 +188,7 @@ def increment_attempts(sid: str) -> int:
     return int(row["attempts"]) if row else 0
 
 
-def get_status(sid: str, user_id: int) -> dict | None:
+def get_status(sid: str, user_id: int) -> dict[str, Any] | None:
     """Return status metadata for a tracked secret that belongs to this user."""
     with _connect() as conn:
         row = conn.execute(
@@ -205,7 +206,7 @@ def get_status(sid: str, user_id: int) -> dict | None:
     }
 
 
-def is_expired(row: dict) -> bool:
+def is_expired(row: dict[str, Any]) -> bool:
     expires_at = datetime.strptime(row["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
         tzinfo=UTC
     )
@@ -238,7 +239,7 @@ def _force_viewed_at(sid: str, viewed_at: str) -> None:
         conn.execute("UPDATE secrets SET viewed_at = ? WHERE id = ?", (viewed_at, sid))
 
 
-def list_tracked_secrets(user_id: int) -> list[dict]:
+def list_tracked_secrets(user_id: int) -> list[dict[str, Any]]:
     """Return all tracked secrets owned by user_id, newest first."""
     now_iso = _iso(_utcnow())
     with _connect() as conn:

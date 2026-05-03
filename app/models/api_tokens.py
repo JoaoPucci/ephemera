@@ -1,9 +1,11 @@
 """Operations on the `api_tokens` table."""
 
+from typing import Any
+
 from ._core import _connect, _iso, _row_to_dict, _utcnow
 
 
-def list_tokens(user_id: int) -> list[dict]:
+def list_tokens(user_id: int) -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute(
             """SELECT id, user_id, name, created_at, last_used_at, revoked_at
@@ -33,7 +35,7 @@ def revoke_token(user_id: int, name: str) -> bool:
     return (cur.rowcount or 0) > 0
 
 
-def get_active_token_by_hash(token_hash: str) -> dict | None:
+def get_active_token_by_hash(token_hash: str) -> dict[str, Any] | None:
     """Return the token row with its user_id. Not user-scoped because this IS
     how we find the user from the token."""
     with _connect() as conn:

@@ -8,6 +8,7 @@ on per-table CRUD. Siblings under this package import `_connect`,
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ..config import get_settings
 
@@ -172,7 +173,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
     }
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict:
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     # `row.keys()` is load-bearing here. Iterating a sqlite3.Row yields the
     # *values*, not the column names -- `for k in row` would make `k` a
     # value, and `row[value]` then raises IndexError. Ruff's SIM118 rule

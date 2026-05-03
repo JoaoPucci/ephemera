@@ -6,6 +6,7 @@ helper is private to this module: no other command needs it.
 """
 
 import sys
+from typing import Any
 
 from .. import models
 from . import _core
@@ -79,7 +80,7 @@ def cmd_remove_user(username: str, force: bool = False) -> None:
     print(f"User '{username}' and all their data deleted.")
 
 
-def _reauth_for_force_removal(target: dict) -> None:
+def _reauth_for_force_removal(target: dict[str, Any]) -> None:
     """Re-auth as any user OTHER than the one being removed."""
     print(f"Force mode. Re-authenticate as a user OTHER than '{target['username']}':")
     auth_username = input("Your username: ").strip()
