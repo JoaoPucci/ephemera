@@ -37,7 +37,7 @@ def run_once() -> tuple[int, int, int]:
     return expired, tracked, evicted
 
 
-async def cleanup_loop():
+async def cleanup_loop() -> None:
     settings = get_settings()
     while True:
         try:

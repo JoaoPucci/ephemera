@@ -17,6 +17,8 @@ text. Routing translation through the JS layer keeps the server's JSON
 shape locale-independent.
 """
 
+from typing import Any
+
 from fastapi import HTTPException
 
 ERROR_MESSAGES: dict[str, str] = {
@@ -59,7 +61,7 @@ def http_error(
     code: str,
     *,
     message: str | None = None,
-    **extra,
+    **extra: Any,
 ) -> HTTPException:
     """Build an HTTPException with the standard {code, message, **extra}
     detail shape.

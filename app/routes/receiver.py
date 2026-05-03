@@ -1,8 +1,10 @@
 """Receiver routes: landing, metadata, reveal."""
 
 import base64
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 
 from .. import crypto, models, security_log
 from ..config import Settings, get_settings
@@ -25,7 +27,7 @@ def _gone() -> HTTPException:
     return http_error(404, "gone")
 
 
-def _load_live_row(token: str):
+def _load_live_row(token: str) -> dict[str, Any] | None:
     row = models.get_by_token(token)
     if row is None:
         return None
@@ -37,7 +39,7 @@ def _load_live_row(token: str):
 
 
 @router.get("/s/{token}")
-def landing_page(token: str, request: Request):
+def landing_page(token: str, request: Request) -> Response:
     from .. import TEMPLATES
 
     # chrome_variant="receiver" strips the language picker from the chrome
@@ -55,7 +57,7 @@ def landing_page(token: str, request: Request):
     response_model=LandingMetaResponse,
     dependencies=[Depends(read_rate_limit)],
 )
-def landing_meta(token: str):
+def landing_meta(token: str) -> LandingMetaResponse:
     row = _load_live_row(token)
     if row is None:
         raise _gone()
@@ -72,7 +74,7 @@ def reveal(
     token: str,
     body: RevealBody,
     settings: Settings = Depends(get_settings),
-):
+) -> RevealResponse:
     ip = security_log.client_ip(request)
     row = _load_live_row(token)
     if row is None:

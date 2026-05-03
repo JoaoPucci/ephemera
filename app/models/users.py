@@ -187,7 +187,7 @@ _ALLOWED_UPDATE_COLUMNS = frozenset(
 )
 
 
-def update_user(user_id: int, **fields) -> None:
+def update_user(user_id: int, **fields: Any) -> None:
     if not fields:
         return
     unknown = set(fields) - _ALLOWED_UPDATE_COLUMNS

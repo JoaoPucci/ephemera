@@ -48,7 +48,9 @@ class LanguagePatch(BaseModel):
     response_model=ApiMeResponse,
     dependencies=[Depends(read_rate_limit)],
 )
-def api_me(user: dict[str, Any] = Depends(verify_api_token_or_session)):
+def api_me(
+    user: dict[str, Any] = Depends(verify_api_token_or_session),
+) -> ApiMeResponse:
     """Return a minimal view of the authenticated user (for header UI etc.)."""
     return ApiMeResponse(
         id=user["id"],
@@ -67,7 +69,7 @@ def update_preferences(
     body: UpdatePreferencesBody,
     request: Request,
     user: dict[str, Any] = Depends(verify_api_token_or_session),
-):
+) -> ApiMeResponse:
     """Flip user-scoped preferences. Today's only knob is `analytics_opt_in`
     (per-user telemetry consent); the route is shaped as a generic
     preferences mutation so future user-scoped settings can join without
@@ -119,8 +121,8 @@ def update_preferences(
 def patch_language(
     body: LanguagePatch,
     request: Request,
-    _origin=Depends(verify_same_origin),
-    _rate=Depends(read_rate_limit),
+    _origin: None = Depends(verify_same_origin),
+    _rate: None = Depends(read_rate_limit),
 ) -> Response:
     """Persist the user's preferred UI language (BCP-47 tag). None clears
     the preference so resolution falls back to cookie / Accept-Language /

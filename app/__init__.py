@@ -13,18 +13,19 @@ the route + static mounts. Concerns broken out into siblings:
 """
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import cleanup, models
-from .config import get_settings
+from .config import Settings, get_settings
 from .dependencies import verify_api_token_or_session
 from .i18n import locale_middleware
 from .routes import prefs, receiver, sender
@@ -43,7 +44,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 
-def _build_pwa_manifest(settings) -> dict[str, Any]:
+def _build_pwa_manifest(settings: Settings) -> dict[str, Any]:
     """PWA manifest, with deployment-label-aware name and icon list.
 
     Empty `deployment_label` is the prod posture: name="ephemera" and
@@ -105,7 +106,7 @@ TEMPLATES.env.add_extension("jinja2.ext.i18n")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     models.init_db()
     task = asyncio.create_task(cleanup.cleanup_loop())
     try:
@@ -156,18 +157,18 @@ def create_app() -> FastAPI:
     # this specific path while every other /static/* request falls
     # through to StaticFiles as usual.
 
-    def _manifest_response():
+    def _manifest_response() -> JSONResponse:
         return JSONResponse(
             _build_pwa_manifest(get_settings()),
             media_type="application/manifest+json",
         )
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
-    def manifest():
+    def manifest() -> JSONResponse:
         return _manifest_response()
 
     @app.get("/static/manifest.webmanifest", include_in_schema=False)
-    def manifest_legacy_path():
+    def manifest_legacy_path() -> JSONResponse:
         return _manifest_response()
 
     # ---- Health probe -----------------------------------------------------
@@ -181,7 +182,7 @@ def create_app() -> FastAPI:
     # of /docs and /openapi.json (no unauth-visible surface advertisement).
 
     @app.get("/healthz", include_in_schema=False)
-    def healthz():
+    def healthz() -> JSONResponse:
         settings = get_settings()
         if not settings.secret_key:
             return JSONResponse(
@@ -204,13 +205,18 @@ def create_app() -> FastAPI:
     # served by default, just wrapped in an auth check.
 
     @app.get("/openapi.json", include_in_schema=False)
-    def openapi_json(_user=Depends(verify_api_token_or_session)):
+    def openapi_json(
+        _user: dict[str, Any] = Depends(verify_api_token_or_session),
+    ) -> JSONResponse:
         return JSONResponse(
             get_openapi(title=app.title, version=app.version, routes=app.routes),
         )
 
     @app.get("/docs", include_in_schema=False)
-    def swagger_ui(request: Request, _user=Depends(verify_api_token_or_session)):
+    def swagger_ui(
+        request: Request,
+        _user: dict[str, Any] = Depends(verify_api_token_or_session),
+    ) -> Response:
         return TEMPLATES.TemplateResponse(request, "_docs.html")
 
     app.include_router(sender.router)

@@ -58,7 +58,7 @@ _MAX_PASSPHRASE_LEN = 200  # matches CreateTextSecret.passphrase in schemas.py
 _MAX_LABEL_LEN = 60  # matches CreateTextSecret.label
 
 
-def _clean_label(raw) -> str | None:
+def _clean_label(raw: object) -> str | None:
     if raw is None:
         return None
     s = str(raw).strip()
@@ -79,7 +79,7 @@ def _build_url(token: str, client_half: bytes) -> str:
 
 
 @router.get("/send")
-def send_page(request: Request):
+def send_page(request: Request) -> Response:
     from .. import TEMPLATES
 
     page = "sender.html" if is_logged_in(request) else "login.html"
@@ -111,7 +111,7 @@ def send_login(
     password: str = Form(...),
     code: str = Form(...),
     settings: Settings = Depends(get_settings),
-):
+) -> LoginResponse:
     # Reject oversized form fields before spending bcrypt on them. Normal
     # values are well under these caps; anything above is either a typo at
     # the extreme or abuse.
@@ -162,7 +162,9 @@ def send_login(
     response_model=LogoutResponse,
     dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
 )
-def send_logout(response: Response, settings: Settings = Depends(get_settings)):
+def send_logout(
+    response: Response, settings: Settings = Depends(get_settings)
+) -> LogoutResponse:
     response.delete_cookie(
         settings.session_cookie_name,
         # Must match the SameSite used by set_cookie above; some browsers
@@ -192,7 +194,7 @@ async def create_secret(  # noqa: C901
     request: Request,
     user: dict[str, Any] = Depends(verify_api_token_or_session),
     settings: Settings = Depends(get_settings),
-):
+) -> CreateSecretResponse:
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
 
     label: str | None = None
@@ -329,7 +331,7 @@ async def create_secret(  # noqa: C901
 )
 def secret_status(
     sid: str, user: dict[str, Any] = Depends(verify_api_token_or_session)
-):
+) -> dict[str, Any]:
     status_row = models.get_status(sid, user["id"])
     if status_row is None:
         raise http_error(404, "not_found")
@@ -341,7 +343,9 @@ def secret_status(
     response_model=TrackedListResponse,
     dependencies=[Depends(read_rate_limit)],
 )
-def list_tracked(user: dict[str, Any] = Depends(verify_api_token_or_session)):
+def list_tracked(
+    user: dict[str, Any] = Depends(verify_api_token_or_session),
+) -> TrackedListResponse:
     """List all tracked secrets owned by the authenticated user."""
     # `list_tracked_secrets` returns `list[dict]` from the data layer;
     # pydantic auto-coerces dicts at the model boundary, but mypy
@@ -361,7 +365,9 @@ def list_tracked(user: dict[str, Any] = Depends(verify_api_token_or_session)):
     response_model=ClearTrackedResponse,
     dependencies=[Depends(verify_same_origin), Depends(create_rate_limit)],
 )
-def clear_tracked_history(user: dict[str, Any] = Depends(verify_api_token_or_session)):
+def clear_tracked_history(
+    user: dict[str, Any] = Depends(verify_api_token_or_session),
+) -> ClearTrackedResponse:
     """Batch-delete every non-pending tracked row for the caller.
 
     Scope matches what the UI shows as "not pending": viewed, burned,
@@ -384,7 +390,7 @@ def clear_tracked_history(user: dict[str, Any] = Depends(verify_api_token_or_ses
 )
 def cancel_secret(
     sid: str, user: dict[str, Any] = Depends(verify_api_token_or_session)
-):
+) -> Response:
     """Sender revokes a pending secret. Receiver's URL stops working immediately.
 
     On a currently-live secret: wipes the ciphertext/keys and flags status as
@@ -407,7 +413,7 @@ def cancel_secret(
 )
 def untrack_secret(
     sid: str, user: dict[str, Any] = Depends(verify_api_token_or_session)
-):
+) -> Response:
     """Remove a secret from the authenticated user's tracked list.
 
     Scoped to user_id so one user cannot untrack another's secrets. If still
