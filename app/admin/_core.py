@@ -13,6 +13,7 @@ monkeypatching wouldn't reach.
 import getpass
 import io
 import sys
+from typing import Any
 
 import qrcode
 
@@ -81,7 +82,7 @@ def _parse_user_flag(args: list[str]) -> tuple[str | None, list[str]]:
     return username, out
 
 
-def _resolve_user(username: str | None) -> dict:
+def _resolve_user(username: str | None) -> dict[str, Any]:
     """Pick the target user: explicit flag, or the only user, or prompt."""
     if username:
         user = models.get_user_by_username(username)
@@ -108,7 +109,7 @@ def _resolve_user(username: str | None) -> dict:
     sys.exit(1)
 
 
-def _reauth(user: dict) -> None:
+def _reauth(user: dict[str, Any]) -> None:
     """Re-authenticate as `user` before any sensitive action.
 
     Returns on success, exits non-zero on failure. No return value --

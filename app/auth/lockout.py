@@ -2,6 +2,7 @@
 the account is locked for LOCKOUT_DURATION_SECONDS; any success resets."""
 
 from datetime import timedelta
+from typing import Any
 
 from .. import models
 from ._core import (
@@ -13,14 +14,14 @@ from ._core import (
 )
 
 
-def check_not_locked(user: dict) -> None:
+def check_not_locked(user: dict[str, Any]) -> None:
     if user.get("lockout_until"):
         until = _parse_iso(user["lockout_until"])
         if _utcnow() < until:
             raise LockoutError(user["lockout_until"])
 
 
-def record_failure(user: dict) -> str | None:
+def record_failure(user: dict[str, Any]) -> str | None:
     """Tick the failure counter; if it crosses MAX_FAILURES, lock the account
     and return the ISO `lockout_until` string. Returns None otherwise.
 
@@ -42,7 +43,7 @@ def record_failure(user: dict) -> str | None:
     return lockout_until
 
 
-def record_success(user_id: int, updates: dict) -> None:
+def record_success(user_id: int, updates: dict[str, Any]) -> None:
     updates["failed_attempts"] = 0
     updates["lockout_until"] = None
     models.update_user(user_id, **updates)

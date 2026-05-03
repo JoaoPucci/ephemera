@@ -3,6 +3,7 @@
 
 import sys
 from collections.abc import Callable
+from typing import Any
 
 from .. import models
 from . import _core
@@ -84,7 +85,7 @@ def main(argv: list[str] | None = None) -> None:
     rest = argv[1:]
     # Some commands take optional boolean flags that we strip here before
     # the arity check so they don't count as positional arguments.
-    extra_kwargs: dict = {}
+    extra_kwargs: dict[str, Any] = {}
     if argv[0] == "remove-user" and "--force" in rest:
         rest = [a for a in rest if a != "--force"]
         extra_kwargs["force"] = True

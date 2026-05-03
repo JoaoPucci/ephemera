@@ -129,7 +129,9 @@ class AnalyticsValidationError(ValueError):
     """Raised when a record_event() call doesn't conform to the registry."""
 
 
-def _validate_payload(event_type: str, payload: dict | None) -> dict:  # noqa: C901
+def _validate_payload(  # noqa: C901
+    event_type: str, payload: dict[str, Any] | None
+) -> dict[str, Any]:
     """Pure function -- no DB. Validates payload against EVENT_REGISTRY
     and returns the validated copy. Raises AnalyticsValidationError on
     any deviation (unknown event type, unknown keys, wrong types, nested
@@ -243,7 +245,7 @@ def record_event(
     event_type: str,
     *,
     user: object,
-    payload: dict | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> None:
     """Append a row to analytics_events after validating the payload AND
     confirming both gates (operator env + per-user opt-in) are open. If
@@ -275,7 +277,7 @@ def record_event_standalone(
     event_type: str,
     *,
     user: object,
-    payload: dict | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> None:
     """Convenience wrapper that opens a fresh connection, records one event,
     commits, and closes. Use this when the call site has no transaction of

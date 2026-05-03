@@ -19,6 +19,8 @@ chrome-menu drawer toggle) and aren't part of the create / track / cancel
 flow that owns `/api/secrets*`.
 """
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel
 
@@ -46,7 +48,7 @@ class LanguagePatch(BaseModel):
     response_model=ApiMeResponse,
     dependencies=[Depends(read_rate_limit)],
 )
-def api_me(user: dict = Depends(verify_api_token_or_session)):
+def api_me(user: dict[str, Any] = Depends(verify_api_token_or_session)):
     """Return a minimal view of the authenticated user (for header UI etc.)."""
     return ApiMeResponse(
         id=user["id"],
@@ -64,7 +66,7 @@ def api_me(user: dict = Depends(verify_api_token_or_session)):
 def update_preferences(
     body: UpdatePreferencesBody,
     request: Request,
-    user: dict = Depends(verify_api_token_or_session),
+    user: dict[str, Any] = Depends(verify_api_token_or_session),
 ):
     """Flip user-scoped preferences. Today's only knob is `analytics_opt_in`
     (per-user telemetry consent); the route is shaped as a generic

@@ -1,6 +1,7 @@
 """Sender routes: login, logout, secret creation, status lookup."""
 
 import logging
+from typing import Any
 
 import bcrypt
 from fastapi import (
@@ -189,7 +190,7 @@ def send_logout(response: Response, settings: Settings = Depends(get_settings)):
 )
 async def create_secret(  # noqa: C901
     request: Request,
-    user: dict = Depends(verify_api_token_or_session),
+    user: dict[str, Any] = Depends(verify_api_token_or_session),
     settings: Settings = Depends(get_settings),
 ):
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -326,7 +327,9 @@ async def create_secret(  # noqa: C901
     response_model=SecretStatusResponse,
     dependencies=[Depends(read_rate_limit)],
 )
-def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
+def secret_status(
+    sid: str, user: dict[str, Any] = Depends(verify_api_token_or_session)
+):
     status_row = models.get_status(sid, user["id"])
     if status_row is None:
         raise http_error(404, "not_found")
@@ -338,7 +341,7 @@ def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
     response_model=TrackedListResponse,
     dependencies=[Depends(read_rate_limit)],
 )
-def list_tracked(user: dict = Depends(verify_api_token_or_session)):
+def list_tracked(user: dict[str, Any] = Depends(verify_api_token_or_session)):
     """List all tracked secrets owned by the authenticated user."""
     # `list_tracked_secrets` returns `list[dict]` from the data layer;
     # pydantic auto-coerces dicts at the model boundary, but mypy
@@ -358,7 +361,7 @@ def list_tracked(user: dict = Depends(verify_api_token_or_session)):
     response_model=ClearTrackedResponse,
     dependencies=[Depends(verify_same_origin), Depends(create_rate_limit)],
 )
-def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
+def clear_tracked_history(user: dict[str, Any] = Depends(verify_api_token_or_session)):
     """Batch-delete every non-pending tracked row for the caller.
 
     Scope matches what the UI shows as "not pending": viewed, burned,
@@ -379,7 +382,9 @@ def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
     "/api/secrets/{sid}/cancel",
     dependencies=[Depends(verify_same_origin), Depends(create_rate_limit)],
 )
-def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
+def cancel_secret(
+    sid: str, user: dict[str, Any] = Depends(verify_api_token_or_session)
+):
     """Sender revokes a pending secret. Receiver's URL stops working immediately.
 
     On a currently-live secret: wipes the ciphertext/keys and flags status as
@@ -400,7 +405,9 @@ def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
     "/api/secrets/{sid}",
     dependencies=[Depends(verify_same_origin), Depends(create_rate_limit)],
 )
-def untrack_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
+def untrack_secret(
+    sid: str, user: dict[str, Any] = Depends(verify_api_token_or_session)
+):
     """Remove a secret from the authenticated user's tracked list.
 
     Scoped to user_id so one user cannot untrack another's secrets. If still

@@ -21,6 +21,8 @@ read path, so a future log line or error handler that dumps a user dict
 can't leak it.
 """
 
+from typing import Any
+
 from ..crypto import (
     AtRestDecryptionError,
     decrypt_at_rest,
@@ -42,7 +44,7 @@ _USER_COLUMNS_NO_TOTP = (
 )
 
 
-def _decrypt_totp(row_dict: dict) -> dict:
+def _decrypt_totp(row_dict: dict[str, Any]) -> dict[str, Any]:
     """Decrypt totp_secret in a row dict. Legacy rows that haven't migrated
     yet (is_at_rest_ciphertext == False) pass through unchanged, which keeps
     the service up through the first boot on a legacy DB -- the migration in
@@ -74,7 +76,7 @@ def user_count() -> int:
     return int(n)
 
 
-def get_user_by_id(user_id: int) -> dict | None:
+def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     """Fetch a user row WITHOUT `totp_secret`. See module docstring."""
     with _connect() as conn:
         row = conn.execute(
@@ -84,7 +86,7 @@ def get_user_by_id(user_id: int) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def get_user_by_username(username: str) -> dict | None:
+def get_user_by_username(username: str) -> dict[str, Any] | None:
     """Fetch a user row WITHOUT `totp_secret`. See module docstring."""
     with _connect() as conn:
         row = conn.execute(
@@ -94,7 +96,7 @@ def get_user_by_username(username: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def get_user_with_totp_by_id(user_id: int) -> dict | None:
+def get_user_with_totp_by_id(user_id: int) -> dict[str, Any] | None:
     """Fetch a user row INCLUDING the decrypted TOTP plaintext. Use only
     from code that actually has to verify a TOTP code."""
     with _connect() as conn:
@@ -102,7 +104,7 @@ def get_user_with_totp_by_id(user_id: int) -> dict | None:
     return _decrypt_totp(_row_to_dict(row)) if row else None
 
 
-def get_user_with_totp_by_username(username: str) -> dict | None:
+def get_user_with_totp_by_username(username: str) -> dict[str, Any] | None:
     """Fetch a user row INCLUDING the decrypted TOTP plaintext. Use only
     from code that actually has to verify a TOTP code."""
     with _connect() as conn:
@@ -112,7 +114,7 @@ def get_user_with_totp_by_username(username: str) -> dict | None:
     return _decrypt_totp(_row_to_dict(row)) if row else None
 
 
-def list_users() -> list[dict]:
+def list_users() -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, username, email, created_at, updated_at FROM users ORDER BY id"

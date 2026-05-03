@@ -113,29 +113,43 @@ precision = 1
 # ---------------------------------------------------------------------------
 # Mypy
 #
-# Runs in CI as a parallel job under .github/workflows/lint.yml. Every
-# `app/` module currently passes the non-strict baseline -- the
-# per-module `ignore_errors = true` ratchet that bootstrapped this
-# config has been retired. The next tightening step is flipping
-# `strict = true` below, which surfaces a fresh wave of stricter-mode
-# errors (untyped function defs, implicit Optional, unreachable
-# branches) and is left for a follow-up rather than blocking the
-# baseline-clean milestone.
-#
-# Tests aren't yet in scope (`files` targets `app/` only). Extending
-# to `tests/` is its own later step once strict mode is in place.
+# Runs in CI as a parallel job under .github/workflows/lint.yml against
+# both `app/` and `tests/`. The flag set below is mypy's high-value
+# strict subset (no_implicit_optional, warn_return_any, strict_equality,
+# warn_redundant_casts, warn_unused_configs); full `strict = true`
+# additionally turns on `disallow_untyped_defs` and
+# `disallow_any_generics` which surface ~50 mostly-mechanical
+# annotation additions across `app/routes/`, `app/__init__.py`, and a
+# handful of helpers -- left as a follow-up so this baseline stays
+# focused on the substantive type signal.
 # ---------------------------------------------------------------------------
 
 [tool.mypy]
 python_version = "3.12"
-files = ["app/"]
-# Catches dead per-module overrides as the ratchet progresses; without
-# it a stale override stays silent and we'd accumulate cruft.
+files = ["app/", "tests/"]
+# Catches dead per-module overrides (already-cleaned modules with a
+# stale `ignore_errors` would otherwise stay silent).
 warn_unused_configs = true
-# Casts that became unnecessary as types tightened are the kind of rot
-# the per-module ratchet is meant to clean up; this nudges contributors
-# to drop them as they become redundant.
+# Casts that became unnecessary as types tightened are the kind of
+# rot we'd rather not accumulate.
 warn_redundant_casts = true
+# Implicit Optional was always a footgun: a `def f(x: int = None)`
+# silently accepted None at runtime even though the annotation said
+# otherwise. mypy 0.980+ defaults this off; pinning explicitly so a
+# future config refactor can't silently re-enable it.
+no_implicit_optional = true
+# Catches "the function was annotated `-> str` but actually returned
+# `Any` because of an untyped helper call" -- one of the higher-
+# value strict flags.
+warn_return_any = true
+# `if user.id == "1":` where `user.id` is int catches subtle
+# comparison bugs that survive at runtime as silent False.
+strict_equality = true
+# Full `strict = true` (which also turns on disallow_untyped_defs,
+# disallow_any_generics, disallow_untyped_calls, etc.) is the next
+# tightening step. It surfaces ~50 mostly-mechanical annotation
+# additions on top of this baseline -- separate PR-shaped arc, not
+# bundled here.
 
 # qrcode (used by app/admin/_core.py) doesn't ship type stubs and isn't
 # worth chasing -- it's a CLI-only branch. Other third-party deps

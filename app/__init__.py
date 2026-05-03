@@ -15,6 +15,7 @@ the route + static mounts. Concerns broken out into siblings:
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
@@ -42,7 +43,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 
-def _build_pwa_manifest(settings) -> dict:
+def _build_pwa_manifest(settings) -> dict[str, Any]:
     """PWA manifest, with deployment-label-aware name and icon list.
 
     Empty `deployment_label` is the prod posture: name="ephemera" and

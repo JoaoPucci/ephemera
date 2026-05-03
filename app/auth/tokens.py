@@ -3,6 +3,7 @@ EPHEMERA_API_KEY env var. Only SHA-256(plaintext) is stored server-side."""
 
 import hashlib
 import secrets
+from typing import Any
 
 from .. import models
 
@@ -17,7 +18,7 @@ def mint_api_token() -> tuple[str, str]:
     return plaintext, digest
 
 
-def lookup_api_token(plaintext: str) -> dict | None:
+def lookup_api_token(plaintext: str) -> dict[str, Any] | None:
     """Return the token row (with user_id) if valid; None otherwise.
 
     On hit, touches last_used_at.

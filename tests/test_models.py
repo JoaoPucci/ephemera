@@ -28,7 +28,10 @@ def _mk(user_id: int, **overrides) -> dict:
         expires_in=3600,
     )
     params.update(overrides)
-    return models.create_secret(user_id=user_id, **params)
+    # `params` is built as a generic `dict[str, ...]` for compactness;
+    # the per-field types match `create_secret`'s signature at call
+    # time but mypy can't narrow through the `**params` unpacking.
+    return models.create_secret(user_id=user_id, **params)  # type: ignore[arg-type]
 
 
 def test_init_db_creates_secrets_users_and_tokens_tables(tmp_db_path):

@@ -705,7 +705,7 @@ def _check_reads_in_node(
 
 
 def _check_comprehension_reads(
-    node: ast.expr,
+    node: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp,
     trusted: set[str],
     sanctioned_aliases: set[str],
     models_shadowed: bool,
@@ -1410,12 +1410,12 @@ def _collect_breaks_in_compound(
         post_t, post_a = _apply_walrus_in_expr(
             stmt.subject, trusted, aliases, models_shadowed
         )
-        breaks: list[tuple[set[str], set[str]]] = []
+        case_breaks: list[tuple[set[str], set[str]]] = []
         for case in stmt.cases:
-            breaks += _collect_break_states(
+            case_breaks += _collect_break_states(
                 case.body, post_t, post_a, models_shadowed, string_consts
             )
-        return breaks
+        return case_breaks
     return []
 
 

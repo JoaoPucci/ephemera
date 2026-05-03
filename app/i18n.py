@@ -34,6 +34,7 @@ import json
 from collections.abc import Callable
 from functools import cache, lru_cache
 from pathlib import Path
+from typing import Any
 
 from babel import Locale
 from babel.core import UnknownLocaleError
@@ -301,7 +302,7 @@ def get_locale(request: Request) -> str:
     """FastAPI dependency. Returns the locale the middleware stashed on
     request.state, or resolves from scratch when the middleware hasn't run
     (unit tests that bypass the app stack, and only those)."""
-    cached = getattr(request.state, "locale", None)
+    cached: str | None = getattr(request.state, "locale", None)
     if cached:
         return cached
     return resolve_locale(request)
@@ -349,7 +350,7 @@ def lazy_gettext(message: str) -> LazyProxy:
 
 
 @cache
-def js_catalog(locale: str) -> dict:
+def js_catalog(locale: str) -> dict[str, Any]:
     """Load the JS-side JSON catalog for a locale, falling back to an empty
     dict when the file is missing or malformed. The English catalog is the
     source of truth for JS strings; every other locale is an overlay --
@@ -362,12 +363,13 @@ def js_catalog(locale: str) -> dict:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return loaded
     except json.JSONDecodeError:
         return {}
 
 
-def template_context(request: Request) -> dict:
+def template_context(request: Request) -> dict[str, Any]:
     """Base context dict for every Jinja2 TemplateResponse. Provides
     `request` (required by FastAPI's Jinja2 integration), the current
     `locale` (for the <html lang=""> attribute and conditional rendering),
