@@ -3386,6 +3386,113 @@ def test_state_mutating_routes_all_carry_rate_limiter():
     )
 
 
+def _ordered_dep_classifications(
+    deps_list: list[ast.expr],
+    rate_limit_shadowed: frozenset[str],
+    depends_shadowed: bool,
+    vso_shadowed: bool,
+) -> list[str]:
+    """Classify each entry of a `dependencies=[...]` list as
+    `"origin"`, `"rate"`, or `"other"`, in source order. Used by the
+    order-pinning fitness test below to assert that an origin gate
+    (when present) precedes any rate-limit dep in the same list."""
+    out: list[str] = []
+    for entry in deps_list:
+        if _is_origin_dependency(entry, vso_shadowed, depends_shadowed):
+            out.append("origin")
+        elif _is_rate_limit_dependency(entry, rate_limit_shadowed, depends_shadowed):
+            out.append("rate")
+        else:
+            out.append("other")
+    return out
+
+
+def test_origin_gate_precedes_rate_limit_when_both_present():
+    """Within a single `dependencies=[...]` list (or parameter-default
+    chain) that declares BOTH `verify_same_origin` and a rate-limit
+    callable, the origin dep MUST appear first.
+
+    FastAPI evaluates the entries in source order; the first to raise
+    short-circuits the rest. With rate-first, a cross-origin request
+    that the gate would 403 still increments the limiter counter
+    before being rejected. For a session-keyed limiter
+    (`create_rate_limit`) that means an attacker forging cross-site
+    POSTs from a victim's browser can burn the victim's per-session
+    quota until legit same-origin requests start returning 429
+    without ever passing the CSRF check. For an IP-keyed limiter
+    (`reveal_rate_limit`, `login_rate_limit`, `read_rate_limit`)
+    it's a softer DoS on shared IPs, but the same shape.
+
+    Origin-first means: rejected requests don't count -- the limiter
+    only meters traffic that passed the same-origin (or bearer-token)
+    attestation. Brute-force credential stuffing with a legit-shaped
+    Origin still hits rate-limit normally; pure probe spam without an
+    Origin gets 403 without consuming budget from legitimate users.
+
+    Pins the order in `dependencies=[...]` AND in the
+    parameter-default form (FastAPI evaluates parameter deps first,
+    then the decorator's `dependencies=[...]`, both in source order).
+    """
+    offenders: list[str] = []
+    for py in _py_files(APP_DIR):
+        tree = ast.parse(py.read_text())
+        rebound = _module_level_rebound_names(tree, py)
+        depends_shadowed = "Depends" in rebound
+        vso_shadowed = "verify_same_origin" in rebound
+        rate_limit_shadowed = frozenset(rebound & _RATE_LIMIT_DEP_NAMES)
+        callable_aliases = _module_level_callable_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            mutating_decos = [
+                d
+                for d in node.decorator_list
+                if _is_state_mutating_route_decorator(d, callable_aliases)
+            ]
+            if not mutating_decos:
+                continue
+            arg_defaults = [d for d in (node.args.defaults or []) if d is not None]
+            sig_classes = _ordered_dep_classifications(
+                arg_defaults, rate_limit_shadowed, depends_shadowed, vso_shadowed
+            )
+            for deco in mutating_decos:
+                deco_classes: list[str] = []
+                for cand in _decorator_dependency_candidates(deco, callable_aliases):
+                    if isinstance(cand, ast.Call):
+                        for kw in cand.keywords:
+                            if kw.arg == "dependencies" and isinstance(
+                                kw.value, ast.List
+                            ):
+                                deco_classes.extend(
+                                    _ordered_dep_classifications(
+                                        kw.value.elts,
+                                        rate_limit_shadowed,
+                                        depends_shadowed,
+                                        vso_shadowed,
+                                    )
+                                )
+                # FastAPI evaluates parameter defaults first, then
+                # the decorator's `dependencies=[...]`. Combined
+                # order is what determines actual short-circuit.
+                combined = sig_classes + deco_classes
+                if (
+                    "origin" in combined
+                    and "rate" in combined
+                    and combined.index("origin") > combined.index("rate")
+                ):
+                    rel = py.relative_to(REPO_ROOT)
+                    attr = _decorator_print_attr(deco, callable_aliases)
+                    offenders.append(f"{rel}:{deco.lineno} {node.name} (.{attr})")
+    assert not offenders, (
+        "When a state-mutating route declares both `verify_same_origin` "
+        "and a rate-limit dependency, origin must come first so a "
+        "cross-origin request short-circuits before incrementing the "
+        "limiter. Otherwise a CSRF-probing attacker can burn legit "
+        "users' session-keyed quota (or shared-IP budget) without ever "
+        "passing the gate.\n  " + "\n  ".join(offenders)
+    )
+
+
 # ---------------------------------------------------------------------------
 # F. No print() in app/ (use security_log.emit / structured logging instead)
 # ---------------------------------------------------------------------------

@@ -93,7 +93,7 @@ def send_page(request: Request):
 @router.post(
     "/send/login",
     response_model=LoginResponse,
-    dependencies=[Depends(login_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(login_rate_limit)],
 )
 def send_login(
     request: Request,
@@ -151,7 +151,7 @@ def send_login(
 @router.post(
     "/send/logout",
     response_model=LogoutResponse,
-    dependencies=[Depends(read_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
 )
 def send_logout(response: Response, settings: Settings = Depends(get_settings)):
     response.delete_cookie(

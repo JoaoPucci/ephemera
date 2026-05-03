@@ -60,7 +60,7 @@ router = APIRouter(prefix="/_test", include_in_schema=False)
 
 @router.post(
     "/limiter/reset",
-    dependencies=[Depends(read_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
 )
 def reset_limiters() -> dict:
     """Clear all in-memory rate-limiter state."""
@@ -71,7 +71,7 @@ def reset_limiters() -> dict:
 
 @router.post(
     "/secret/{token}/expire-now",
-    dependencies=[Depends(read_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(read_rate_limit)],
 )
 def expire_secret_now(token: str) -> dict:
     """Force a secret's `expires_at` to a past timestamp so the next

@@ -65,7 +65,7 @@ def landing_meta(token: str):
 @router.post(
     "/s/{token}/reveal",
     response_model=RevealResponse,
-    dependencies=[Depends(reveal_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(reveal_rate_limit)],
 )
 def reveal(
     request: Request,
