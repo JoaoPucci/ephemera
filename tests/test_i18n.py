@@ -477,6 +477,60 @@ def test_js_catalog_non_en_locales_are_populated():
         assert cat["button"]["creating"]
 
 
+def test_js_catalog_returns_empty_dict_for_unknown_locale(tmp_path, monkeypatch):
+    """Locales without a `<tag>.json` file under the catalog dir get
+    an empty dict, not a 500. The shim's fallback chain re-resolves
+    against English on miss, so a tag with no shipped catalog still
+    renders correctly."""
+    import app.i18n as i18n_mod
+
+    monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", tmp_path)
+    assert i18n_mod.js_catalog("xx-NOT-A-REAL-LOCALE") == {}
+
+
+def test_js_catalog_returns_empty_dict_for_malformed_json(tmp_path, monkeypatch):
+    """A truncated / corrupted `.json` catalog returns `{}` rather
+    than letting the JSONDecodeError propagate. Ensures a partial
+    deploy or a hand-edit-gone-wrong doesn't 500 the page."""
+    import app.i18n as i18n_mod
+
+    (tmp_path / "broken.json").write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr(i18n_mod, "_JS_CATALOG_DIR", tmp_path)
+    assert i18n_mod.js_catalog("broken") == {}
+
+
+def test_get_locale_resolves_when_middleware_did_not_run():
+    """`get_locale` is the FastAPI dependency the route handlers use.
+    The locale_middleware normally stashes the resolved tag on
+    `request.state.locale` so this dependency just hands back the
+    cache. When that middleware hasn't run -- unit tests that bypass
+    the app stack -- the dependency falls through to a fresh
+    `resolve_locale(request)` call. Pin both branches so a future
+    refactor that drops the fallback gets caught."""
+    from types import SimpleNamespace
+
+    import app.i18n as i18n_mod
+
+    # Cached path: middleware already resolved.
+    cached_request = SimpleNamespace(
+        state=SimpleNamespace(locale="es"),
+        cookies={},
+        headers={},
+        query_params={},
+    )
+    assert i18n_mod.get_locale(cached_request) == "es"
+
+    # Fallback path: no cache, resolve_locale runs and returns the
+    # default for an empty Accept-Language / no-cookie request.
+    bare_request = SimpleNamespace(
+        state=SimpleNamespace(),
+        cookies={},
+        headers={},
+        query_params={},
+    )
+    assert i18n_mod.get_locale(bare_request) == i18n_mod.DEFAULT
+
+
 # ---------------------------------------------------------------------------
 # Locale resolution via the HTTP stack (middleware + dependency)
 # ---------------------------------------------------------------------------
