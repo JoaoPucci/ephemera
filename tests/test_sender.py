@@ -578,6 +578,59 @@ def test_post_multipart_with_non_preset_expires_in_returns_422(
     assert r.status_code == 422
 
 
+def test_post_multipart_with_upload_in_expires_in_field_returns_422(
+    client, auth_headers, sample_png_bytes
+):
+    """`expires_in` is a string field; uploading a file under that name
+    is malformed input. The handler narrows via `isinstance(...,
+    str)` and rejects loudly rather than coercing the upload object
+    into a string and tripping `int()` with a confusing error."""
+    r = client.post(
+        "/api/secrets",
+        files={
+            "file": ("pic.png", sample_png_bytes, "image/png"),
+            "expires_in": ("expires.bin", b"3600", "application/octet-stream"),
+        },
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
+def test_post_multipart_with_upload_in_passphrase_field_returns_422(
+    client, auth_headers, sample_png_bytes
+):
+    """Same defensive narrow as above, this time on the passphrase
+    field. A FormData caller that mis-attached a `Blob` instead of a
+    string would otherwise reach the bcrypt path with a non-string
+    object."""
+    r = client.post(
+        "/api/secrets",
+        files={
+            "file": ("pic.png", sample_png_bytes, "image/png"),
+            "passphrase": ("pass.bin", b"hunter2", "application/octet-stream"),
+        },
+        data={"expires_in": "3600"},
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
+def test_post_multipart_with_upload_in_label_field_returns_422(
+    client, auth_headers, sample_png_bytes
+):
+    """Same defensive narrow, this time on the label field."""
+    r = client.post(
+        "/api/secrets",
+        files={
+            "file": ("pic.png", sample_png_bytes, "image/png"),
+            "label": ("label.bin", b"my-label", "application/octet-stream"),
+        },
+        data={"expires_in": "3600"},
+        headers={k: v for k, v in auth_headers.items() if k != "Content-Type"},
+    )
+    assert r.status_code == 422
+
+
 def test_post_multipart_rejects_oversized_passphrase(
     client, auth_headers, sample_png_bytes
 ):
