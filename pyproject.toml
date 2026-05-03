@@ -108,3 +108,69 @@ exclude_lines = [
 ]
 show_missing = true
 precision = 1
+
+
+# ---------------------------------------------------------------------------
+# Mypy
+#
+# Strategy B per-module ratchet. Mypy runs in CI as a parallel job under
+# .github/workflows/lint.yml. The baseline below allows the current
+# codebase's ~21 type errors via per-module `ignore_errors = true` so
+# the CI gate lands green; subsequent PRs remove entries from the
+# overrides list as each module's type debt gets cleaned up. When the
+# overrides list is empty, this block flips to `strict = true` globally
+# and the ratchet retires.
+#
+# Order of cleanup follows security leverage: the `app/auth/` and
+# `app/dependencies.py` paths are already clean (no entries below); the
+# small / surgical modules go next, the larger / lower-stakes ones
+# last. Tests aren't yet in scope (mypy targets `app/` only via
+# `files`); extending to `tests/` is a later PR once `app/` is clean.
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app/"]
+# Catches dead per-module overrides as the ratchet progresses; without
+# it a stale override stays silent and we'd accumulate cruft.
+warn_unused_configs = true
+# Casts that became unnecessary as types tightened are the kind of rot
+# the per-module ratchet is meant to clean up; this nudges contributors
+# to drop them as they become redundant.
+warn_redundant_casts = true
+
+# qrcode (used by app/admin/_core.py) doesn't ship type stubs and isn't
+# worth chasing -- it's a CLI-only branch. Other third-party deps
+# (bcrypt, itsdangerous, pyotp, sqlite3, fastapi, pydantic-settings)
+# ship usable stubs and don't need overrides.
+[[tool.mypy.overrides]]
+module = "qrcode.*"
+ignore_missing_imports = true
+
+# Per-module ratchet: each entry tolerates the module's existing type
+# errors so the baseline is green. Each subsequent PR removes one or
+# more modules from this list, fixes the underlying types, and lets
+# mypy enforce them going forward. Intentionally listed long-form
+# rather than wildcarded: a future contributor adding a new module
+# gets type-checked from day one (no implicit baseline-tolerance for
+# new code), and the diff to remove an entry is loud-and-visible.
+#
+# Suggested cleanup order (smallest blast radius first):
+#   1. app.security_log, app.i18n, app.limiter   (1-2 errors each)
+#   2. app.auth.lockout                          (auth surface)
+#   3. app.models.users                          (data layer)
+#   4. app.routes.sender                         (UploadFile typing)
+#   5. app.admin.{_core,cli,diagnostics}         (CLI; lower stakes)
+[[tool.mypy.overrides]]
+module = [
+  "app.admin._core",
+  "app.admin.cli",
+  "app.admin.diagnostics",
+  "app.auth.lockout",
+  "app.i18n",
+  "app.limiter",
+  "app.models.users",
+  "app.routes.sender",
+  "app.security_log",
+]
+ignore_errors = true
