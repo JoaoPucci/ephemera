@@ -23,6 +23,12 @@ def cmd_diagnose(username: str | None, show_secret: bool = False) -> None:
     # explicitly re-fetch the with-TOTP variant.
     resolved = _core._resolve_user(username)
     user = models.get_user_with_totp_by_id(resolved["id"])
+    # `_resolve_user` already exited on missing-user; the with-TOTP
+    # variant returns the same row we just resolved, so None is
+    # unreachable here. The assert narrows for mypy and surfaces a
+    # loud failure if the data layer ever stops returning a row for
+    # a freshly-resolved id.
+    assert user is not None
     secret = user["totp_secret"]
     totp = pyotp.TOTP(secret, digits=auth.TOTP_DIGITS, interval=auth.TOTP_INTERVAL)
 
@@ -81,6 +87,7 @@ def cmd_verify(username: str | None) -> None:
     # Verifies TOTP against the stored seed -- fetch the with-TOTP variant.
     resolved = _core._resolve_user(username)
     user = models.get_user_with_totp_by_id(resolved["id"])
+    assert user is not None
     password = getpass.getpass("Password: ")
     code = input("6-digit code: ").strip()
 

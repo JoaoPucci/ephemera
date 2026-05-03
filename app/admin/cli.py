@@ -2,6 +2,7 @@
 `python -m app.admin <name> ...` entry point reaches into."""
 
 import sys
+from collections.abc import Callable
 
 from .. import models
 from . import _core
@@ -49,7 +50,12 @@ User-selection rules:
 - Sensitive commands re-authenticate against the target user before mutating.
 """
 
-COMMANDS = {
+# Each value is `(fn, positional_arity, takes_user_flag)`. The function
+# signatures vary across commands (some take `username`, some take
+# `event_type`, some take a trailing `--user` resolved at dispatch time);
+# `Callable[..., None]` accepts the heterogeneous shape so mypy doesn't
+# choke on the `fn(*rest, ...)` call below.
+COMMANDS: dict[str, tuple[Callable[..., None], int, bool]] = {
     # name: (fn, positional_arity, takes_user_flag)
     "init": (cmd_init, 1, False),
     "add-user": (cmd_add_user, 1, False),
