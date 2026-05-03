@@ -240,7 +240,9 @@ async def create_secret(  # noqa: C901
             raise http_error(422, "expires_in_not_preset")
         raw_passphrase = form.get("passphrase")
         if raw_passphrase is not None and not isinstance(raw_passphrase, str):
-            raise http_error(422, "invalid_passphrase")
+            raise http_error(
+                422, "validation_error", message="passphrase must be a string"
+            )
         passphrase = raw_passphrase or None
         if passphrase is not None and len(passphrase) > _MAX_PASSPHRASE_LEN:
             raise http_error(422, "passphrase_too_long")
@@ -253,7 +255,7 @@ async def create_secret(  # noqa: C901
         )
         raw_label = form.get("label")
         if raw_label is not None and not isinstance(raw_label, str):
-            raise http_error(422, "invalid_label")
+            raise http_error(422, "validation_error", message="label must be a string")
         if raw_label is not None and len(raw_label) > _MAX_LABEL_LEN:
             raise http_error(422, "label_too_long")
         label = _clean_label(raw_label)
