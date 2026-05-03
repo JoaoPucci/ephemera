@@ -440,6 +440,14 @@ _CANONICAL_IMPORT_SOURCES: dict[str, frozenset[str]] = {
     # non-FastAPI source shadows the real one, so a literal
     # `Depends(verify_same_origin)` would no longer wire the gate.
     "Depends": frozenset({"fastapi"}),
+    # Rate-limiter dependency callables. Same shadowing concern as
+    # `verify_same_origin`: a rebind or a non-canonical import means
+    # the literal `Depends(<name>)` no longer wires the real
+    # rate-limit check, even though the AST still spells the token.
+    "reveal_rate_limit": frozenset({"app.limiter"}),
+    "login_rate_limit": frozenset({"app.limiter"}),
+    "create_rate_limit": frozenset({"app.limiter"}),
+    "read_rate_limit": frozenset({"app.limiter"}),
 }
 
 
@@ -3232,6 +3240,256 @@ def test_state_mutating_routes_all_carry_origin_gate():
         "`Depends(verify_same_origin)` -- either inline in the "
         "registration's `dependencies=` or as a function-parameter "
         "default.\n  " + "\n  ".join(offenders)
+    )
+
+
+_RATE_LIMIT_DEP_NAMES = frozenset(
+    {
+        "reveal_rate_limit",
+        "login_rate_limit",
+        "create_rate_limit",
+        "read_rate_limit",
+    }
+)
+
+
+def _is_rate_limit_dependency(
+    node: ast.AST,
+    rate_limit_shadowed: frozenset[str] = frozenset(),
+    depends_shadowed: bool = False,
+) -> bool:
+    """True iff `node` is a real `Depends(<rate-limit-fn>)` call --
+    a Call whose function is the bare name `Depends` and whose first
+    positional or `dependency=`-keyword argument is one of the
+    canonical rate-limit dependency callables defined in
+    `app/limiter.py` (per `_RATE_LIMIT_DEP_NAMES`).
+
+    Mirrors `_is_origin_dependency` for the origin gate. Rejects:
+
+      - shadowing of `Depends` (then a literal `Depends(...)` no
+        longer wires a FastAPI dependency at all);
+      - shadowing of the specific rate-limit name being passed in
+        (then the Name resolves to something other than the real
+        rate-limit check). Per-name shadowing is tracked via the
+        `rate_limit_shadowed` set rather than a single boolean
+        because the four rate-limit deps are distinct symbols and
+        shadowing one shouldn't taint the others.
+    """
+    if depends_shadowed:
+        return False
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Name) or node.func.id != "Depends":
+        return False
+    arg_name: str | None = None
+    if node.args:
+        first = node.args[0]
+        if isinstance(first, ast.Name):
+            arg_name = first.id
+    if arg_name is None:
+        for kw in node.keywords:
+            if kw.arg == "dependency" and isinstance(kw.value, ast.Name):
+                arg_name = kw.value.id
+                break
+    if arg_name is None or arg_name not in _RATE_LIMIT_DEP_NAMES:
+        return False
+    return arg_name not in rate_limit_shadowed
+
+
+def test_state_mutating_routes_all_carry_rate_limiter():
+    """Every POST/PUT/PATCH/DELETE handler under app/ must depend on
+    one of the canonical rate-limit dependencies in `app/limiter.py`
+    (`reveal_rate_limit`, `login_rate_limit`, `create_rate_limit`,
+    `read_rate_limit`), either inside the registration's
+    `dependencies=[...]` keyword or as a function-parameter default.
+    Same posture as `test_state_mutating_routes_all_carry_origin_gate`
+    -- and same helper architecture (`_module_level_callable_aliases`,
+    `_decorator_dependency_candidates`,
+    `_imperative_dependency_candidates`,
+    `_module_level_rebound_names`) -- just looking for a different
+    `Depends(...)` argument.
+
+    AGENTS.md §5 declares the policy: "Every state-mutating HTTP
+    route ... must carry a rate-limiter `Depends(...)`." Rationale
+    there; this test is the source-level pin.
+
+    Pick the rate limiter that matches the endpoint's cost shape:
+    `reveal_rate_limit` for receiver reveal probes (10/min/IP),
+    `login_rate_limit` for unauthenticated POSTs that pay bcrypt
+    (10/min/IP), `create_rate_limit` for authenticated state-
+    mutating ops with persistent side effects (60/hr/session, and
+    falls back to IP if unauthenticated), `read_rate_limit` for
+    cheap PATCH/POST ops where the goal is just a sanity ceiling
+    (300/min/IP). A new RateLimiter alongside them is fine if none
+    of the existing four fits -- add the dep callable to
+    `app/limiter.py` and append its name to `_RATE_LIMIT_DEP_NAMES`
+    above so this test recognises it.
+    """
+    offenders: list[str] = []
+    for py in _py_files(APP_DIR):
+        tree = ast.parse(py.read_text())
+        rebound = _module_level_rebound_names(tree, py)
+        depends_shadowed = "Depends" in rebound
+        rate_limit_shadowed = frozenset(rebound & _RATE_LIMIT_DEP_NAMES)
+        callable_aliases = _module_level_callable_aliases(tree)
+        # Pass 1: decorator-style registrations on FunctionDef /
+        # AsyncFunctionDef.
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            mutating_decos = [
+                d
+                for d in node.decorator_list
+                if _is_state_mutating_route_decorator(d, callable_aliases)
+            ]
+            if not mutating_decos:
+                continue
+            sig_has_dep = any(
+                _is_rate_limit_dependency(inner, rate_limit_shadowed, depends_shadowed)
+                for inner in ast.walk(node.args)
+            )
+            for deco in mutating_decos:
+                deco_has_dep = any(
+                    _is_rate_limit_dependency(
+                        inner, rate_limit_shadowed, depends_shadowed
+                    )
+                    for cand in _decorator_dependency_candidates(deco, callable_aliases)
+                    for inner in ast.walk(cand)
+                )
+                if not (deco_has_dep or sig_has_dep):
+                    rel = py.relative_to(REPO_ROOT)
+                    attr = _decorator_print_attr(deco, callable_aliases)
+                    offenders.append(f"{rel}:{deco.lineno} {node.name} (.{attr})")
+        # Pass 2: imperative `<expr>.add_api_route(...)` calls and
+        # call-style decorator applications.
+        for node in ast.walk(tree):
+            if not _is_imperative_mutating_registration(node, callable_aliases):
+                continue
+            ok = any(
+                _is_rate_limit_dependency(inner, rate_limit_shadowed, depends_shadowed)
+                for candidate in _imperative_dependency_candidates(
+                    node, callable_aliases
+                )
+                for inner in ast.walk(candidate)
+            )
+            if not ok:
+                rel = py.relative_to(REPO_ROOT)
+                offenders.append(f"{rel}:{node.lineno} add_api_route(...)")
+    assert not offenders, (
+        "State-mutating routes (POST/PUT/PATCH/DELETE), whether registered "
+        "via a decorator or `<router>.add_api_route(...)`, must carry one "
+        "of the canonical rate-limit dependencies (`reveal_rate_limit`, "
+        "`login_rate_limit`, `create_rate_limit`, `read_rate_limit`) -- "
+        "either inline in the registration's `dependencies=` or as a "
+        "function-parameter default. AGENTS.md §5 declares the policy.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def _ordered_dep_classifications(
+    deps_list: list[ast.expr],
+    rate_limit_shadowed: frozenset[str],
+    depends_shadowed: bool,
+    vso_shadowed: bool,
+) -> list[str]:
+    """Classify each entry of a `dependencies=[...]` list as
+    `"origin"`, `"rate"`, or `"other"`, in source order. Used by the
+    order-pinning fitness test below to assert that an origin gate
+    (when present) precedes any rate-limit dep in the same list."""
+    out: list[str] = []
+    for entry in deps_list:
+        if _is_origin_dependency(entry, vso_shadowed, depends_shadowed):
+            out.append("origin")
+        elif _is_rate_limit_dependency(entry, rate_limit_shadowed, depends_shadowed):
+            out.append("rate")
+        else:
+            out.append("other")
+    return out
+
+
+def test_origin_gate_precedes_rate_limit_when_both_present():
+    """Within a single `dependencies=[...]` list (or parameter-default
+    chain) that declares BOTH `verify_same_origin` and a rate-limit
+    callable, the origin dep MUST appear first.
+
+    FastAPI evaluates the entries in source order; the first to raise
+    short-circuits the rest. With rate-first, a cross-origin request
+    that the gate would 403 still increments the limiter counter
+    before being rejected. For a session-keyed limiter
+    (`create_rate_limit`) that means an attacker forging cross-site
+    POSTs from a victim's browser can burn the victim's per-session
+    quota until legit same-origin requests start returning 429
+    without ever passing the CSRF check. For an IP-keyed limiter
+    (`reveal_rate_limit`, `login_rate_limit`, `read_rate_limit`)
+    it's a softer DoS on shared IPs, but the same shape.
+
+    Origin-first means: rejected requests don't count -- the limiter
+    only meters traffic that passed the same-origin (or bearer-token)
+    attestation. Brute-force credential stuffing with a legit-shaped
+    Origin still hits rate-limit normally; pure probe spam without an
+    Origin gets 403 without consuming budget from legitimate users.
+
+    Pins the order in `dependencies=[...]` AND in the
+    parameter-default form (FastAPI evaluates parameter deps first,
+    then the decorator's `dependencies=[...]`, both in source order).
+    """
+    offenders: list[str] = []
+    for py in _py_files(APP_DIR):
+        tree = ast.parse(py.read_text())
+        rebound = _module_level_rebound_names(tree, py)
+        depends_shadowed = "Depends" in rebound
+        vso_shadowed = "verify_same_origin" in rebound
+        rate_limit_shadowed = frozenset(rebound & _RATE_LIMIT_DEP_NAMES)
+        callable_aliases = _module_level_callable_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            mutating_decos = [
+                d
+                for d in node.decorator_list
+                if _is_state_mutating_route_decorator(d, callable_aliases)
+            ]
+            if not mutating_decos:
+                continue
+            arg_defaults = [d for d in (node.args.defaults or []) if d is not None]
+            sig_classes = _ordered_dep_classifications(
+                arg_defaults, rate_limit_shadowed, depends_shadowed, vso_shadowed
+            )
+            for deco in mutating_decos:
+                deco_classes: list[str] = []
+                for cand in _decorator_dependency_candidates(deco, callable_aliases):
+                    if isinstance(cand, ast.Call):
+                        for kw in cand.keywords:
+                            if kw.arg == "dependencies" and isinstance(
+                                kw.value, ast.List
+                            ):
+                                deco_classes.extend(
+                                    _ordered_dep_classifications(
+                                        kw.value.elts,
+                                        rate_limit_shadowed,
+                                        depends_shadowed,
+                                        vso_shadowed,
+                                    )
+                                )
+                # FastAPI evaluates parameter defaults first, then
+                # the decorator's `dependencies=[...]`. Combined
+                # order is what determines actual short-circuit.
+                combined = sig_classes + deco_classes
+                if (
+                    "origin" in combined
+                    and "rate" in combined
+                    and combined.index("origin") > combined.index("rate")
+                ):
+                    rel = py.relative_to(REPO_ROOT)
+                    attr = _decorator_print_attr(deco, callable_aliases)
+                    offenders.append(f"{rel}:{deco.lineno} {node.name} (.{attr})")
+    assert not offenders, (
+        "When a state-mutating route declares both `verify_same_origin` "
+        "and a rate-limit dependency, origin must come first so a "
+        "cross-origin request short-circuits before incrementing the "
+        "limiter. Otherwise a CSRF-probing attacker can burn legit "
+        "users' session-keyed quota (or shared-IP budget) without ever "
+        "passing the gate.\n  " + "\n  ".join(offenders)
     )
 
 
