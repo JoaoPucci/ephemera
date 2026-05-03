@@ -203,6 +203,24 @@ credential was rejected. "Invalid credentials" is the canonical surface;
 per-factor wording (wrong password vs. wrong TOTP vs. unknown user)
 gives an attacker a free oracle.
 
+Every state-mutating HTTP route (POST / PUT / PATCH / DELETE) must
+carry a rate-limiter `Depends(...)` — either inline in the
+registration's `dependencies=` or as a function-parameter default. The
+same invariant applies to the imperative shapes
+(`router.add_api_route`, the call-style `router.post('/x')(handler)`
+factory). Brute force is a category of attack that gets cheaper every
+year; once a route ships without a per-IP / per-session ceiling, the
+only thing standing between an attacker and the endpoint's cost is
+whatever external infrastructure happens to sit in front of it. The
+pinned rate-limiter dependencies live in `app/limiter.py`
+(`reveal_rate_limit`, `login_rate_limit`, `create_rate_limit`,
+`read_rate_limit`); pick the one that matches the endpoint's cost
+shape, or define a new `RateLimiter` next to them if none of the
+existing ones fit. The fitness test
+`test_state_mutating_routes_all_carry_rate_limiter` in
+`tests/test_fitness_functions.py` pins this at AST level so a future
+state-mutating route can't ship without one.
+
 ---
 
 ## 6. Personal information deserves a conversation

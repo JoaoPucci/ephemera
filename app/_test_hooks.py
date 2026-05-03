@@ -34,21 +34,34 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 
 from .dependencies import verify_same_origin
-from .limiter import create_limiter, login_limiter, read_limiter, reveal_limiter
+from .limiter import (
+    create_limiter,
+    login_limiter,
+    read_limiter,
+    read_rate_limit,
+    reveal_limiter,
+)
 from .models._core import _connect
 
 # Both routes carry `Depends(verify_same_origin)` so the
 # `test_state_mutating_routes_all_carry_origin_gate` fitness invariant
 # stays universal -- no allowlist carve-outs for "test-only" surfaces.
-# The CSRF concern still applies in test mode (a hostile page in a
-# parallel browser context could otherwise reset the limiter mid-spec
-# or expire a tracked secret), and Playwright's `request` fixture
-# sends the Origin header explicitly per spec, so wiring it up costs
-# nothing operationally.
+# Both also carry `Depends(read_rate_limit)` for the same reason against
+# `test_state_mutating_routes_all_carry_rate_limiter`. The CSRF concern
+# still applies in test mode (a hostile page in a parallel browser
+# context could otherwise reset the limiter mid-spec or expire a
+# tracked secret), Playwright's `request` fixture sends the Origin
+# header explicitly per spec, and the read_rate_limit budget (300/min)
+# is comfortably above the handful of hits the e2e suite ever issues
+# against these endpoints, so wiring both deps up costs nothing
+# operationally.
 router = APIRouter(prefix="/_test", include_in_schema=False)
 
 
-@router.post("/limiter/reset", dependencies=[Depends(verify_same_origin)])
+@router.post(
+    "/limiter/reset",
+    dependencies=[Depends(read_rate_limit), Depends(verify_same_origin)],
+)
 def reset_limiters() -> dict:
     """Clear all in-memory rate-limiter state."""
     for lim in (reveal_limiter, login_limiter, create_limiter, read_limiter):
@@ -56,7 +69,10 @@ def reset_limiters() -> dict:
     return {"ok": True}
 
 
-@router.post("/secret/{token}/expire-now", dependencies=[Depends(verify_same_origin)])
+@router.post(
+    "/secret/{token}/expire-now",
+    dependencies=[Depends(read_rate_limit), Depends(verify_same_origin)],
+)
 def expire_secret_now(token: str) -> dict:
     """Force a secret's `expires_at` to a past timestamp so the next
     reveal lookup sees it as expired. Returns 404 if no row matches

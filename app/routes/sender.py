@@ -151,7 +151,7 @@ def send_login(
 @router.post(
     "/send/logout",
     response_model=LogoutResponse,
-    dependencies=[Depends(verify_same_origin)],
+    dependencies=[Depends(read_rate_limit), Depends(verify_same_origin)],
 )
 def send_logout(response: Response, settings: Settings = Depends(get_settings)):
     response.delete_cookie(
@@ -311,7 +311,7 @@ def list_tracked(user: dict = Depends(verify_api_token_or_session)):
 @router.post(
     "/api/secrets/tracked/clear",
     response_model=ClearTrackedResponse,
-    dependencies=[Depends(verify_same_origin)],
+    dependencies=[Depends(create_rate_limit), Depends(verify_same_origin)],
 )
 def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
     """Batch-delete every non-pending tracked row for the caller.
@@ -332,7 +332,7 @@ def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
 
 @router.post(
     "/api/secrets/{sid}/cancel",
-    dependencies=[Depends(verify_same_origin)],
+    dependencies=[Depends(create_rate_limit), Depends(verify_same_origin)],
 )
 def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
     """Sender revokes a pending secret. Receiver's URL stops working immediately.
@@ -353,7 +353,7 @@ def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
 
 @router.delete(
     "/api/secrets/{sid}",
-    dependencies=[Depends(verify_same_origin)],
+    dependencies=[Depends(create_rate_limit), Depends(verify_same_origin)],
 )
 def untrack_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
     """Remove a secret from the authenticated user's tracked list.

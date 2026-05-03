@@ -118,6 +118,7 @@ def patch_language(
     body: LanguagePatch,
     request: Request,
     _origin=Depends(verify_same_origin),
+    _rate=Depends(read_rate_limit),
 ) -> Response:
     """Persist the user's preferred UI language (BCP-47 tag). None clears
     the preference so resolution falls back to cookie / Accept-Language /
