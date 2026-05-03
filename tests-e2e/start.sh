@@ -18,6 +18,11 @@ export EPHEMERA_DB_PATH="$TMP_DIR/ephemera-e2e.db"
 export EPHEMERA_SECRET_KEY="e2e-smoke-test-secret-key-at-least-32-chars-long-aaaaaa"
 export EPHEMERA_BASE_URL="http://127.0.0.1:8765"
 export EPHEMERA_ALLOWED_ORIGINS="http://127.0.0.1:8765"
+# Mount the /_test/* test-hooks router (limiter reset, secret expire-now)
+# so the rate-limit / expired-secret specs can drive server state without
+# global clock manipulation. See app/_test_hooks.py. Production deploys
+# never set this env var.
+export EPHEMERA_E2E_TEST_HOOKS=1
 
 ./venv/bin/python tests-e2e/seed.py
 exec ./venv/bin/uvicorn app:create_app \

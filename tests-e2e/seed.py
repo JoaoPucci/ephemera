@@ -43,7 +43,14 @@ TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 # window -- the second login then computes an identical code, hits the
 # anti-replay check, and fails. Per-user isolation removes the cross-test
 # coupling cleanly. The keys here are 1:1 with the .spec.js filenames.
-USERNAMES = ["e2e", "e2e-image", "e2e-passphrase", "e2e-cancel"]
+USERNAMES = [
+    "e2e",
+    "e2e-image",
+    "e2e-passphrase",
+    "e2e-cancel",
+    "e2e-expired-secret",
+    "e2e-mobile",
+]
 
 init_db()
 for username in USERNAMES:
