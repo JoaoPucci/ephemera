@@ -11,6 +11,13 @@ from fastapi import (
     Response,
 )
 
+# Starlette's `request.form()` yields the starlette base UploadFile,
+# not the fastapi subclass; isinstance against the fastapi type
+# would silently fail at runtime even though the route's typing
+# declared it. Use the starlette base directly so the narrow holds
+# under both shapes.
+from starlette.datastructures import UploadFile
+
 from .. import analytics, crypto, models, security_log, validation
 from .. import auth as auth_mod
 from ..auth import BCRYPT_ROUNDS
@@ -33,6 +40,7 @@ from ..schemas import (
     LogoutResponse,
     SecretStatusResponse,
     TrackedListResponse,
+    TrackedSecretItem,
 )
 
 router = APIRouter()
@@ -207,21 +215,46 @@ async def create_secret(  # noqa: C901
 
     elif ctype == "multipart/form-data":
         form = await request.form()
+        # `form.get(...)` returns `UploadFile | str | None`; the
+        # `isinstance(..., UploadFile)` narrow tells mypy that `file`
+        # is the upload object the rest of this branch operates on,
+        # and -- critically -- catches a malformed request that put
+        # something other than a file under "file" (which the
+        # previous `hasattr(file, "read")` guard ALSO caught at
+        # runtime, but invisibly to the type checker).
         file = form.get("file")
-        if file is None or not hasattr(file, "read"):
+        if not isinstance(file, UploadFile):
             raise http_error(422, "missing_file")
+        # The string-shaped form fields below all come back from
+        # FormData as `UploadFile | str | None`. Each `isinstance(...,
+        # str)` narrow rejects the upload-object shape with a 422
+        # so the rest of the body works against typed `str` values.
+        raw_expires = form.get("expires_in", "")
+        if not isinstance(raw_expires, str):
+            raise http_error(422, "invalid_expires_in")
         try:
-            expires_in = int(form.get("expires_in", ""))
+            expires_in = int(raw_expires)
         except (TypeError, ValueError):
             raise http_error(422, "invalid_expires_in") from None
         if expires_in not in EXPIRY_PRESETS:
             raise http_error(422, "expires_in_not_preset")
-        passphrase = form.get("passphrase") or None
+        raw_passphrase = form.get("passphrase")
+        if raw_passphrase is not None and not isinstance(raw_passphrase, str):
+            raise http_error(422, "invalid_passphrase")
+        passphrase = raw_passphrase or None
         if passphrase is not None and len(passphrase) > _MAX_PASSPHRASE_LEN:
             raise http_error(422, "passphrase_too_long")
-        track = str(form.get("track", "")).lower() in ("1", "true", "on", "yes")
+        raw_track = form.get("track", "")
+        track = isinstance(raw_track, str) and raw_track.lower() in (
+            "1",
+            "true",
+            "on",
+            "yes",
+        )
         raw_label = form.get("label")
-        if raw_label is not None and len(str(raw_label)) > _MAX_LABEL_LEN:
+        if raw_label is not None and not isinstance(raw_label, str):
+            raise http_error(422, "invalid_label")
+        if raw_label is not None and len(raw_label) > _MAX_LABEL_LEN:
             raise http_error(422, "label_too_long")
         label = _clean_label(raw_label)
         data = await file.read()
@@ -305,7 +338,17 @@ def secret_status(sid: str, user: dict = Depends(verify_api_token_or_session)):
 )
 def list_tracked(user: dict = Depends(verify_api_token_or_session)):
     """List all tracked secrets owned by the authenticated user."""
-    return TrackedListResponse(items=models.list_tracked_secrets(user["id"]))
+    # `list_tracked_secrets` returns `list[dict]` from the data layer;
+    # pydantic auto-coerces dicts at the model boundary, but mypy
+    # doesn't see that. Build the items explicitly so the typed
+    # contract is visible to the checker AND to anyone reading the
+    # function (the dict-keyed shape is no longer cross-cutting; it
+    # ends here).
+    return TrackedListResponse(
+        items=[
+            TrackedSecretItem(**row) for row in models.list_tracked_secrets(user["id"])
+        ]
+    )
 
 
 @router.post(
