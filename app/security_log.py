@@ -53,7 +53,12 @@ _EPHEMERA_ROOT.setLevel(logging.INFO)
 if not any(getattr(h, "_ephemera_installed", False) for h in _EPHEMERA_ROOT.handlers):
     _handler = logging.StreamHandler(sys.stderr)
     _handler.setFormatter(logging.Formatter("%(message)s"))
-    _handler._ephemera_installed = True
+    # Tag the handler so subsequent imports of this module (pytest's
+    # `client` fixture creates a fresh app each test, which re-runs
+    # `app/__init__.py` and indirectly this module) skip re-installing
+    # it. Dynamic attribute on the StreamHandler instance; mypy's
+    # logging stubs don't model arbitrary attrs, hence the ignore.
+    _handler._ephemera_installed = True  # type: ignore[attr-defined]
     _EPHEMERA_ROOT.addHandler(_handler)
 
 

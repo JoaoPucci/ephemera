@@ -156,21 +156,17 @@ ignore_missing_imports = true
 # new code), and the diff to remove an entry is loud-and-visible.
 #
 # Suggested cleanup order (smallest blast radius first):
-#   1. app.security_log, app.i18n, app.limiter   (1-2 errors each)
-#   2. app.auth.lockout                          (auth surface)
-#   3. app.models.users                          (data layer)
-#   4. app.routes.sender                         (UploadFile typing)
-#   5. app.admin.{_core,cli,diagnostics}         (CLI; lower stakes)
+#   1. app.auth.lockout                          (auth surface)
+#   2. app.models.users                          (data layer)
+#   3. app.routes.sender                         (UploadFile typing)
+#   4. app.admin.{_core,cli,diagnostics}         (CLI; lower stakes)
 [[tool.mypy.overrides]]
 module = [
   "app.admin._core",
   "app.admin.cli",
   "app.admin.diagnostics",
   "app.auth.lockout",
-  "app.i18n",
-  "app.limiter",
   "app.models.users",
   "app.routes.sender",
-  "app.security_log",
 ]
 ignore_errors = true

@@ -37,7 +37,7 @@ from pathlib import Path
 
 from babel import Locale
 from babel.core import UnknownLocaleError
-from babel.support import LazyProxy, Translations
+from babel.support import LazyProxy, NullTranslations, Translations
 from fastapi import Request
 
 DEFAULT: str = "en"
@@ -95,7 +95,11 @@ def _label_for(tag: str) -> str:
     if tag in _LABEL_OVERRIDES:
         return _LABEL_OVERRIDES[tag]
     loc = Locale.parse(tag.replace("-", "_"))
-    return loc.get_display_name(locale=loc)
+    # Babel's stub declares `get_display_name` as `str | None` even
+    # though every CLDR-known locale has a display name. Fall back to
+    # the raw BCP-47 tag if it ever does come back None -- a missing
+    # endonym is better than a 500.
+    return loc.get_display_name(locale=loc) or tag
 
 
 def direction_for(tag: str) -> str:
@@ -309,10 +313,14 @@ def get_locale(request: Request) -> str:
 
 
 @cache
-def _translations_for(posix: str) -> Translations:
+def _translations_for(posix: str) -> NullTranslations:
     """Load the gettext catalog for a POSIX locale. Cached forever -- messages
-    don't change at runtime. A missing .mo yields Babel's null Translations,
-    so untranslated msgids render as themselves instead of 500'ing."""
+    don't change at runtime. A missing .mo yields Babel's NullTranslations
+    base class, so untranslated msgids render as themselves instead of 500'ing.
+    The annotated return type matches Babel's stub: `Translations.load`
+    returns the parent `NullTranslations` since the loader can fall back to
+    it; downstream callers only use `.gettext`, which is defined on the
+    parent."""
     return Translations.load(
         dirname=str(_TRANSLATIONS_DIR),
         locales=[posix],

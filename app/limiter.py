@@ -107,7 +107,13 @@ def create_rate_limit(request: Request) -> None:
 
     raw = request.cookies.get(get_settings().session_cookie_name)
     key = read_session_cookie(raw) if raw else None
-    create_limiter.check(key or _client_ip(request))
+    # Stringify the (user_id, generation) tuple into a stable namespace
+    # so the limiter's dict key is always `str`. The IP fallback also
+    # produces a string, so `check`'s parameter type stays clean. The
+    # `session:` prefix can't collide with any IP-shaped string the
+    # fallback path produces.
+    identity = f"session:{key[0]}:{key[1]}" if key else _client_ip(request)
+    create_limiter.check(identity)
 
 
 def read_rate_limit(request: Request) -> None:
