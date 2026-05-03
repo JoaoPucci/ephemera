@@ -28,8 +28,19 @@ def hooks_client(tmp_db_path, monkeypatch):
     `create_app()` runs, so the `/_test/*` router gets registered.
     Resets all limiters before AND after the test (the limiters are
     module-level singletons; reuse across tests would pollute state).
+
+    Settings cache is cleared AFTER the env-var setdefault because
+    `tmp_db_path` already populated the lru_cache with a settings
+    instance that didn't have `e2e_test_hooks` set; without the
+    second clear, pydantic-settings would hand back the stale
+    cached snapshot and `create_app()` would skip the test-hooks
+    registration.
     """
     monkeypatch.setenv("EPHEMERA_E2E_TEST_HOOKS", "1")
+
+    from app import config
+
+    config.get_settings.cache_clear()
     for lim in (reveal_limiter, login_limiter, create_limiter, read_limiter):
         lim.reset()
     app = create_app()

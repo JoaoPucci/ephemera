@@ -13,7 +13,6 @@ the route + static mounts. Concerns broken out into siblings:
 """
 
 import asyncio
-import os
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -218,12 +217,14 @@ def create_app() -> FastAPI:
     app.include_router(prefs.router)
 
     # E2E test hooks (limiter reset, secret expire-now) are registered
-    # only when EPHEMERA_E2E_TEST_HOOKS=1. Production deploys never set
-    # this env var, so the /_test/* routes are not registered and don't
-    # exist on the wire. The env var name carries "TEST" + "E2E"
-    # prominently for deployment-config audit visibility -- same posture
-    # as EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE in app/auth/_core.py.
-    if os.environ.get("EPHEMERA_E2E_TEST_HOOKS") == "1":
+    # only when `settings.e2e_test_hooks` is truthy (env var
+    # EPHEMERA_E2E_TEST_HOOKS, also read from `.env` files via
+    # pydantic-settings). Production deploys never set it, so the
+    # /_test/* routes are not registered and don't exist on the wire.
+    # The env var name carries "TEST" + "E2E" prominently for
+    # deployment-config audit visibility -- same posture as
+    # EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE in app/auth/_core.py.
+    if get_settings().e2e_test_hooks:
         from . import (
             _test_hooks,  # noqa: PLC0415  (deferred to keep prod cold-start tight)
         )
