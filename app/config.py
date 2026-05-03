@@ -95,6 +95,20 @@ class Settings(BaseSettings):
     # don't auto-refresh from the manifest, so this only takes effect on
     # a fresh install (or remove-and-re-add of the home-screen entry).
     deployment_label: str = Field(default="")
+    # Test-only knob. When truthy, `create_app()` mounts the
+    # `/_test/*` router (limiter reset, secret expire-now) defined in
+    # `app/_test_hooks.py` so the Playwright e2e suite can drive
+    # server state directly. Set by `tests-e2e/start.sh`; production
+    # deploys never set it. Routed through pydantic-settings rather
+    # than a raw `os.environ.get` so an operator's `.env` entry takes
+    # effect the same way every other knob does -- the alternative
+    # was a config-source split where `EPHEMERA_E2E_TEST_HOOKS=1` in
+    # `.env` silently did nothing while every neighbour read the
+    # same file. The .env.example warning still applies: setting this
+    # in any production / dev deploy gives any same-origin caller a
+    # rate-limiter flush + arbitrary-secret expire affordance, which
+    # is not what you want behind real users.
+    e2e_test_hooks: bool = Field(default=False)
 
     @property
     def origins(self) -> list[str]:

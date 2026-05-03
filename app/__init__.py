@@ -216,5 +216,20 @@ def create_app() -> FastAPI:
     app.include_router(receiver.router)
     app.include_router(prefs.router)
 
+    # E2E test hooks (limiter reset, secret expire-now) are registered
+    # only when `settings.e2e_test_hooks` is truthy (env var
+    # EPHEMERA_E2E_TEST_HOOKS, also read from `.env` files via
+    # pydantic-settings). Production deploys never set it, so the
+    # /_test/* routes are not registered and don't exist on the wire.
+    # The env var name carries "TEST" + "E2E" prominently for
+    # deployment-config audit visibility -- same posture as
+    # EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE in app/auth/_core.py.
+    if get_settings().e2e_test_hooks:
+        from . import (
+            _test_hooks,  # noqa: PLC0415  (deferred to keep prod cold-start tight)
+        )
+
+        app.include_router(_test_hooks.router)
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
