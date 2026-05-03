@@ -146,6 +146,117 @@ def test_consume_backup_code_with_oversized_input_returns_none(tmp_db_path):
     assert auth.consume_backup_code("X" * 100, blob) is None
 
 
+def test_random_recovery_code_format_is_xxxxx_dash_yyyyy():
+    """Generated codes follow the XXXXX-YYYYY shape: exactly 11 chars
+    with a dash at index 5. Pins the slicing in `_random_recovery_code`
+    so a mutation that off-by-ones the split index (e.g. `raw[:6]`,
+    `raw[5:][1:]`) gets caught -- otherwise such a mutation produces
+    a 10- or 12-char code with a misplaced dash and slips through
+    every test that just iterates `codes` without checking shape."""
+    from app.auth.recovery_codes import _random_recovery_code
+
+    code = _random_recovery_code()
+    assert len(code) == 11
+    assert code[5] == "-"
+    # Halves come from the recovery alphabet (no 0/O/1/I), so they're
+    # alphanumeric. Guards against a mutation that swaps the alphabet
+    # for an empty string and produces an empty-half code.
+    assert len(code[:5]) == 5 and code[:5].isalnum()
+    assert len(code[6:]) == 5 and code[6:].isalnum()
+
+
+def test_normalize_backup_code_inserts_dash_for_unhyphenated_10_char_input():
+    """User who typed the recovery code without the dash (e.g. read
+    aloud as ten characters, retyped without the separator) gets the
+    dash auto-inserted at the canonical position 5 so
+    `consume_backup_code` can match against the stored XXXXX-YYYYY
+    hash. Pins the dash-insertion gate (`len(code) ==
+    RECOVERY_CODE_LENGTH and "-" not in code`) AND the splice
+    arithmetic (`code[:5] + "-" + code[5:]`) so equality-operator
+    and binary-operator mutations on either get caught here in
+    milliseconds."""
+    from app.auth.recovery_codes import _normalize_backup_code
+
+    assert _normalize_backup_code("ABCDEFGHIJ") == "ABCDE-FGHIJ"
+    # Lower-case and whitespace get normalized FIRST, then the dash
+    # rule applies. Pin both passes so a mutation that swaps the
+    # transform order doesn't slip past.
+    assert _normalize_backup_code("abcde fghij") == "ABCDE-FGHIJ"
+
+
+def test_normalize_backup_code_does_not_insert_dash_for_unhyphenated_11_char_input():
+    """11 characters without a dash isn't a valid recovery-code shape
+    (real codes are 10 raw chars OR 11 chars including the dash). The
+    normalizer leaves it alone -- `consume_backup_code`'s bcrypt loop
+    will iterate without finding a match. Pins the `and "-" not in
+    code` half of the gate: a mutation that flipped the `and` to `or`
+    would falsely fire dash-insertion on this shape and produce a
+    misplaced-dash 12-char string that no stored hash would ever
+    match."""
+    from app.auth.recovery_codes import _normalize_backup_code
+
+    assert _normalize_backup_code("ABCDEFGHIJK") == "ABCDEFGHIJK"
+
+
+def test_normalize_backup_code_does_not_insert_dash_for_short_input():
+    """Inputs shorter than `RECOVERY_CODE_LENGTH` (10) chars pass
+    through unchanged. Pins the equality direction of the gate: a
+    mutation that loosened `==` to `<=` would fire dash-insertion on
+    every too-short input and produce a misplaced-dash garbage
+    string."""
+    from app.auth.recovery_codes import _normalize_backup_code
+
+    assert _normalize_backup_code("ABCDEFGH") == "ABCDEFGH"
+
+
+def test_consume_backup_code_does_not_mark_malformed_entry_as_used(tmp_db_path):
+    """When entry[0]'s stored hash is malformed and the code submitted
+    matches entry[1], the malformed entry must stay flagged unused --
+    only the matching entry gets `used_at` set. The existing
+    `test_consume_backup_code_skips_malformed_bcrypt_entries` only
+    asserts `updated is not None`, which silently passes whether
+    matched_index landed on entry[0] or entry[1]. A mutation in the
+    malformed-hash `except` branch that defaults `ok = True`
+    (instead of `ok = False`) would set matched_index to 0
+    (first-match-wins) and consume the malformed entry by mistake;
+    this assertion catches that."""
+    codes, blob = auth.generate_recovery_codes()
+    entries = json.loads(blob)
+    entries[0]["hash"] = "not-a-bcrypt-hash"
+    tampered = json.dumps(entries)
+
+    updated = auth.consume_backup_code(codes[1], tampered)
+    assert updated is not None
+    new_entries = json.loads(updated)
+    assert new_entries[0]["used_at"] is None, (
+        "malformed entry should stay unused; matched_index landed on it"
+    )
+    assert new_entries[1]["used_at"] is not None, (
+        "matching entry should have been consumed"
+    )
+
+
+def test_consume_backup_code_returns_none_when_entry_has_non_string_hash():
+    """Defensive: an entry whose `hash` field is not a string (schema
+    drift, JSON corruption, a manually-edited row) skips the bcrypt
+    check and pays the dummy cost on the else branch. The post-loop
+    matched-index check must NOT bind such an entry as the consumed
+    one. Two distinct mutations would surface here as a wrong return
+    value:
+
+      - Defaulting `ok = True` at the loop top would let the post-loop
+        check bind the corrupt entry (the else branch never reassigns
+        `ok`).
+      - Flipping `isinstance(stored_hash, str) and stored_hash` to
+        `... or stored_hash` would short-circuit into the if-branch
+        on a truthy-but-non-string hash (a list, a dict), where
+        `stored_hash.encode()` raises AttributeError -- the function
+        crashes instead of returning None.
+    """
+    blob = json.dumps([{"hash": ["not", "a", "string"], "used_at": None}])
+    assert auth.consume_backup_code("XXXXX-YYYYY", blob) is None
+
+
 # ---------------------------------------------------------------------------
 # End-to-end authenticate()
 # ---------------------------------------------------------------------------
