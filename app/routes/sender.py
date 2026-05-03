@@ -175,8 +175,8 @@ def send_logout(response: Response, settings: Settings = Depends(get_settings)):
     status_code=201,
     response_model=CreateSecretResponse,
     dependencies=[
-        Depends(create_rate_limit),
         Depends(verify_same_origin),
+        Depends(create_rate_limit),
     ],
 )
 async def create_secret(  # noqa: C901
@@ -311,7 +311,7 @@ def list_tracked(user: dict = Depends(verify_api_token_or_session)):
 @router.post(
     "/api/secrets/tracked/clear",
     response_model=ClearTrackedResponse,
-    dependencies=[Depends(create_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(create_rate_limit)],
 )
 def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
     """Batch-delete every non-pending tracked row for the caller.
@@ -332,7 +332,7 @@ def clear_tracked_history(user: dict = Depends(verify_api_token_or_session)):
 
 @router.post(
     "/api/secrets/{sid}/cancel",
-    dependencies=[Depends(create_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(create_rate_limit)],
 )
 def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
     """Sender revokes a pending secret. Receiver's URL stops working immediately.
@@ -353,7 +353,7 @@ def cancel_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
 
 @router.delete(
     "/api/secrets/{sid}",
-    dependencies=[Depends(create_rate_limit), Depends(verify_same_origin)],
+    dependencies=[Depends(verify_same_origin), Depends(create_rate_limit)],
 )
 def untrack_secret(sid: str, user: dict = Depends(verify_api_token_or_session)):
     """Remove a secret from the authenticated user's tracked list.
