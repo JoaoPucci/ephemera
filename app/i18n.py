@@ -40,6 +40,8 @@ from babel import Locale
 from babel.core import UnknownLocaleError
 from babel.support import LazyProxy, NullTranslations, Translations
 from fastapi import Request
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 DEFAULT: str = "en"
 
@@ -274,7 +276,9 @@ def resolve_locale(request: Request) -> str:
     return negotiate(request.headers.get("accept-language"))
 
 
-async def locale_middleware(request: Request, call_next):
+async def locale_middleware(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     """ASGI middleware that resolves the request's locale once and stashes
     it on `request.state.locale` + a per-request ContextVar. Registered
     via `app.middleware("http")(locale_middleware)` in create_app.

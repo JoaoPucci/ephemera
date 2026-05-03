@@ -13,6 +13,8 @@ stance at the structural level.
 """
 
 from fastapi import Request
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 # CSP: deny-by-default then explicitly enumerate what ephemera actually uses.
 # Nothing is fetched cross-origin (no CDN, no web fonts, no analytics). The
@@ -68,7 +70,9 @@ SECURITY_HEADERS = {
 }
 
 
-async def add_security_headers(request: Request, call_next):
+async def add_security_headers(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     """ASGI middleware that stamps every response with the project's
     security-headers dict.
 

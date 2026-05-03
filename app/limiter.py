@@ -28,7 +28,7 @@ class RateLimiter:
     def __init__(self, max_hits: int, window_seconds: int):
         self.max_hits = max_hits
         self.window = window_seconds
-        self._hits: dict[str, deque] = {}
+        self._hits: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
 
     def check(self, key: str) -> None:

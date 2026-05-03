@@ -35,6 +35,7 @@ import json
 import logging
 import sys
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import Request
 
@@ -65,7 +66,7 @@ if not any(getattr(h, "_ephemera_installed", False) for h in _EPHEMERA_ROOT.hand
 _logger = logging.getLogger("ephemera.security")
 
 
-def emit(event: str, **fields) -> None:
+def emit(event: str, **fields: Any) -> None:
     """Write one structured security event as a single JSON line."""
     payload = {
         "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

@@ -19,7 +19,13 @@ import qrcode
 
 from .. import auth, models
 from ..config import get_settings
-from ..security_log import emit as audit  # noqa: F401  (re-exported for tests)
+from ..security_log import emit
+
+# Re-export under the `audit` name. Command modules and tests reach
+# for `_core.audit(...)` so monkeypatching one symbol intercepts every
+# call site at once. Plain assignment (rather than `import emit as
+# audit`) is mypy's recognised re-export shape under `strict = true`.
+audit = emit
 
 
 def _ascii_qr(data: str) -> str:
