@@ -27,7 +27,11 @@ def record_failure(user: dict) -> str | None:
     The caller uses the return value to emit a structured lockout event; the
     DB state change happens either way."""
     new_attempts = int(user.get("failed_attempts", 0)) + 1
-    updates = {"failed_attempts": new_attempts}
+    # `failed_attempts` is `int`, `lockout_until` is `str | None`. The
+    # explicit annotation keeps mypy from inferring the narrower
+    # `dict[str, int]` from the initial literal and then choking on the
+    # later `str | None` assignment.
+    updates: dict[str, int | str | None] = {"failed_attempts": new_attempts}
     lockout_until: str | None = None
     if new_attempts >= MAX_FAILURES:
         until = _utcnow() + timedelta(seconds=LOCKOUT_DURATION_SECONDS)

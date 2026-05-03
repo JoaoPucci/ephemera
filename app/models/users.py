@@ -145,7 +145,13 @@ def create_user(
                 now,
             ),
         )
-    return int(cur.lastrowid)
+    # `cur.lastrowid` is annotated `int | None` in sqlite3's stubs (it's
+    # None before any INSERT runs on the cursor). After a successful
+    # INSERT, the DB always populates it. The assert documents the
+    # invariant and gives mypy a narrowing point; if it ever does fire,
+    # the failure is loud rather than wrapped in a stale `int(None)`.
+    assert cur.lastrowid is not None
+    return cur.lastrowid
 
 
 # Whitelist for update_user kwargs. Only columns named here can be set via
