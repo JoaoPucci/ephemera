@@ -163,29 +163,52 @@ def test_docs_html_contains_no_inline_scripts(authed_client: TestClient) -> None
     """The CSP is strict (script-src 'self'). The HTML shell must only
     reference external script files; any inline <script>...</script> block
     with a non-empty body would violate the policy and silently break
-    Swagger UI in the browser."""
-    import re
+    Swagger UI in the browser.
+
+    Uses `html.parser` (stdlib) rather than a regex: the HTML5 parser
+    tolerates close-tag shapes a regex routinely misses
+    (`</script >`, `</script\t\n foo>`, mixed-case `<SCRIPT>`, etc.),
+    and CodeQL's `py/bad-tag-filter` / `py/bad-html-filtering-regexp`
+    rules fire on regex usage as an HTML filter -- not on parser-
+    based traversal. Switching the implementation to a parser
+    removes both rules' premise rather than playing whack-a-mole
+    with ever-tightening regex variants."""
+    from html.parser import HTMLParser
+
+    class _ScriptBodyCollector(HTMLParser):
+        bodies: list[str]
+        _depth: int
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.bodies = []
+            self._buf: list[str] = []
+            self._depth = 0
+
+        def handle_starttag(
+            self, tag: str, attrs: list[tuple[str, str | None]]
+        ) -> None:
+            if tag == "script":
+                self._depth += 1
+                if self._depth == 1:
+                    self._buf = []
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag == "script" and self._depth > 0:
+                self._depth -= 1
+                if self._depth == 0:
+                    self.bodies.append("".join(self._buf))
+
+        def handle_data(self, data: str) -> None:
+            if self._depth > 0:
+                self._buf.append(data)
 
     r = authed_client.get("/docs")
-    html = r.text
-    # Find every <script ...>...</script>; reject any with non-empty content.
-    # `</script\s*>` covers `</script >` (whitespace before `>` is
-    # spec-legal in close tags); IGNORECASE covers `<SCRIPT>` etc.
-    # The assertion-as-spec is "no inline script body in this HTML"
-    # regardless of case or close-tag-whitespace shape, so the
-    # regex needs to match every well-formed script block. Also
-    # retires CodeQL's py/bad-tag-filter and
-    # py/bad-html-filtering-regexp alerts (their premise is
-    # "incomplete script filter"; with `\b`, DOTALL, IGNORECASE, and
-    # `\s*` before the close `>`, no well-formed script shape
-    # escapes the iteration).
-    for m in re.finditer(
-        r"<script\b[^>]*>(.*?)</script\s*>",
-        html,
-        flags=re.DOTALL | re.IGNORECASE,
-    ):
-        body = m.group(1).strip()
-        assert body == "", f"inline script body found in /docs HTML: {body!r}"
+    collector = _ScriptBodyCollector()
+    collector.feed(r.text)
+    for body in collector.bodies:
+        stripped = body.strip()
+        assert stripped == "", f"inline script body found in /docs HTML: {stripped!r}"
 
 
 def test_docs_is_not_advertised_in_openapi_schema(
