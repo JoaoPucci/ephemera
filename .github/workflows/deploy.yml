@@ -70,20 +70,44 @@ jobs:
         # Posted before the irreversible parts (Tailscale join, SSH, deploy.sh)
         # so the thread exists from t=0 and the user has a place to watch
         # the deploy unfold even if a later step blows up.
+        #
+        # Auxiliary by design: a webhook outage, rate-limit, or
+        # forum-tag misconfiguration MUST NOT block the deploy.
+        # The script catches every error path explicitly and exits 0;
+        # the result-notify step's `thread_id != ''` gate is what
+        # decides whether to follow up. `continue-on-error: true` is
+        # belt-and-braces in case a future curl / jq invocation slips
+        # through the explicit handling.
         id: discord-thread
         if: env.DISCORD_WEBHOOK_URL != ''
+        continue-on-error: true
         env:
           TAG: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set +x
-          response=$(curl -fsS -X POST "${DISCORD_WEBHOOK_URL}?wait=true" \
+          payload=$(jq -n --arg tag "$TAG" --arg run "$RUN_URL" '{
+            thread_name: "Deploy \($tag)",
+            content: ":rocket: Deploying **\($tag)**\nRun: <\($run)>"
+          }')
+          if ! response=$(curl -sS -w '\n%{http_code}' -X POST "${DISCORD_WEBHOOK_URL}?wait=true" \
             -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg tag "$TAG" --arg run "$RUN_URL" '{
-              thread_name: "Deploy \($tag)",
-              content: ":rocket: Deploying **\($tag)**\nRun: <\($run)>"
-            }')")
-          thread_id=$(echo "$response" | jq -r '.channel_id')
+            -d "$payload"); then
+            echo "::warning::Discord webhook unreachable -- continuing deploy without notifications"
+            exit 0
+          fi
+          status=$(printf '%s' "$response" | tail -n1)
+          body=$(printf '%s' "$response" | sed '$d')
+          if [ "$status" != "200" ] && [ "$status" != "201" ]; then
+            echo "::warning::Discord webhook returned ${status} -- continuing deploy without notifications"
+            echo "::warning::Response body: ${body}"
+            exit 0
+          fi
+          thread_id=$(printf '%s' "$body" | jq -r '.channel_id // empty')
+          if [ -z "$thread_id" ]; then
+            echo "::warning::Discord response missing channel_id -- continuing deploy without notifications"
+            exit 0
+          fi
           echo "thread_id=${thread_id}" >> "$GITHUB_OUTPUT"
 
       - name: Join tailnet
@@ -127,12 +151,21 @@ jobs:
         # the same thread opened above. `if: always()` so the notify
         # fires regardless of which earlier step failed; the additional
         # gate on `steps.discord-thread.outputs.thread_id` covers the
-        # "no webhook configured" path (the open-thread step skipped, so
-        # there's nothing to follow up on). Release URL on success
-        # resolves to the gh release that scripts/release.sh creates;
-        # on failure, the run URL points at the workflow log so the
-        # operator can jump straight to the failing step's output.
+        # "no webhook configured" path (the open-thread step skipped or
+        # silently bailed -- nothing to follow up on). Release URL on
+        # success resolves to the gh release that scripts/release.sh
+        # creates; on failure, the run URL points at the workflow log
+        # so the operator can jump straight to the failing step's
+        # output.
+        #
+        # Same auxiliary-by-design posture as the opener: a Discord
+        # outage post-deploy MUST NOT mark the workflow red when the
+        # deploy itself succeeded. `continue-on-error: true` plus
+        # explicit script-side handling keep the job's final status
+        # reflecting what happened on the droplet, not what happened
+        # to a notification API call.
         if: always() && steps.discord-thread.outputs.thread_id != ''
+        continue-on-error: true
         env:
           THREAD_ID: ${{ steps.discord-thread.outputs.thread_id }}
           TAG: ${{ github.ref_name }}
@@ -152,6 +185,8 @@ jobs:
               content=":x: Deploy of **${TAG}** failed (${JOB_STATUS})\nRun: <${RUN_URL}>"
               ;;
           esac
-          curl -fsS -X POST "${DISCORD_WEBHOOK_URL}?thread_id=${THREAD_ID}&wait=true" \
+          if ! curl -sS -X POST "${DISCORD_WEBHOOK_URL}?thread_id=${THREAD_ID}&wait=true" \
             -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg c "$content" '{content: $c}')"
+            -d "$(jq -n --arg c "$content" '{content: $c}')" >/dev/null; then
+            echo "::warning::Discord result-notification POST failed -- deploy status above is authoritative"
+          fi
