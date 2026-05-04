@@ -617,6 +617,114 @@ def test_reveal_rate_limit_kicks_in(
 
 
 # ---------------------------------------------------------------------------
+# create_rate_limit keying: bearer tokens get per-token buckets, not per-IP
+# ---------------------------------------------------------------------------
+#
+# Pre-1.0 audit found that `create_rate_limit` was falling through to
+# client-IP keying for bearer callers (the limiter was keyed by
+# session-cookie when present, IP otherwise -- no per-token branch).
+# Two scripts running from the same egress IP, each with a different
+# valid token, would compete for one shared 60/hr bucket. The fix
+# adds `bearer:<token_id>` as the keying shape when a valid bearer is
+# present; the tests below pin both halves of the contract: separate
+# tokens get separate buckets even from the same client, and bearer
+# bucketing doesn't leak into the session-keyed bucket of a different
+# caller from the same IP.
+
+
+def _create_secret_with_token(client: TestClient, token: str) -> int:
+    """Helper: POST a tiny text secret authenticated by `token`. Returns
+    the response status so the caller can count 201s vs 429s."""
+    return client.post(
+        "/api/secrets",
+        json={"content": "x", "content_type": "text", "expires_in": 300},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Origin": "http://testserver",
+        },
+    ).status_code
+
+
+def test_two_bearer_tokens_get_independent_create_buckets(
+    client: TestClient, provisioned_user: dict[str, Any]
+) -> None:
+    """Two valid tokens for the same user, hammered from the same client
+    (TestClient -> always client.host = 'testclient'), must not share
+    the create_rate_limit bucket. Pre-fix shape would have keyed both
+    by IP and the second token would inherit the first's exhausted
+    bucket; post-fix each token has its own `bearer:<token_id>` key."""
+    from app import auth as auth_mod
+    from app import models
+    from app.limiter import create_limiter
+
+    create_limiter.reset()
+
+    # Mint two tokens for the same user.
+    plain_a, digest_a = auth_mod.mint_api_token()
+    plain_b, digest_b = auth_mod.mint_api_token()
+    models.create_token(
+        user_id=provisioned_user["id"], name="token-a", token_hash=digest_a
+    )
+    models.create_token(
+        user_id=provisioned_user["id"], name="token-b", token_hash=digest_b
+    )
+
+    # Burn through the 60-create window with token A. After 60 successful
+    # POSTs the next attempt must 429.
+    statuses_a = [_create_secret_with_token(client, plain_a) for _ in range(61)]
+    assert statuses_a[-1] == 429, f"token A didn't hit the cap: {statuses_a[-5:]}"
+    assert statuses_a.count(201) == 60
+
+    # Token B from the same client should be untouched by token A's
+    # exhausted bucket. The very next request with token B must succeed.
+    assert _create_secret_with_token(client, plain_b) == 201
+
+
+def test_bearer_bucket_does_not_leak_into_ip_or_session_keys(
+    client: TestClient, provisioned_user: dict[str, Any]
+) -> None:
+    """A bearer token's exhausted bucket must not affect the session-keyed
+    bucket of a cookie-authenticated caller from the same client. Pre-fix
+    they shared an IP key; post-fix they live under disjoint prefixes
+    (`bearer:` vs `session:`)."""
+    from app import auth as auth_mod
+    from app import models
+    from app.limiter import create_limiter
+
+    create_limiter.reset()
+
+    plain, digest = auth_mod.mint_api_token()
+    models.create_token(
+        user_id=provisioned_user["id"], name="ci-runner", token_hash=digest
+    )
+
+    # Drain the bearer bucket.
+    bearer_statuses = [_create_secret_with_token(client, plain) for _ in range(61)]
+    assert bearer_statuses[-1] == 429
+
+    # Now log in as the same user and confirm the session-keyed bucket
+    # is fresh -- the 429 was a property of the bearer key, not the IP.
+    code = provisioned_user["totp"].now()
+    login = client.post(
+        "/send/login",
+        data={
+            "username": provisioned_user["username"],
+            "password": provisioned_user["password"],
+            "code": code,
+        },
+        headers={"Origin": "http://testserver"},
+    )
+    assert login.status_code == 200, login.text
+
+    cookie_status = client.post(
+        "/api/secrets",
+        json={"content": "y", "content_type": "text", "expires_in": 300},
+        headers={"Origin": "http://testserver"},
+    ).status_code
+    assert cookie_status == 201
+
+
+# ---------------------------------------------------------------------------
 # ProxyHeaders → limiter bucketing
 # ---------------------------------------------------------------------------
 
