@@ -16,6 +16,9 @@ happens to ship.
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,7 +26,7 @@ from app import analytics
 
 
 @pytest.fixture
-def cap_metric_event():
+def cap_metric_event() -> Iterator[str]:
     """Inject a synthetic event type with an int + bool field plus an
     associated _INT_FIELD_BOUNDS entry, then clean up. Lets the validator
     tests assert on int/bool/range behavior without tying the assertions
@@ -40,18 +43,18 @@ def cap_metric_event():
 
 
 @pytest.fixture
-def opted_in_user():
+def opted_in_user() -> dict[str, Any]:
     """Dict shape `record_event*` accepts: `analytics_opt_in` truthy."""
     return {"id": 1, "username": "alice", "analytics_opt_in": 1}
 
 
 @pytest.fixture
-def opted_out_user():
+def opted_out_user() -> dict[str, Any]:
     return {"id": 2, "username": "bob", "analytics_opt_in": 0}
 
 
 @pytest.fixture(autouse=True)
-def _analytics_operator_gate_open(monkeypatch):
+def _analytics_operator_gate_open(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Open the operator gate by default for this file. Gate-closed tests
     override via their own monkeypatch.setenv + get_settings.cache_clear()
     inside the test body. This keeps the happy-path tests focused on
@@ -70,7 +73,7 @@ def _analytics_operator_gate_open(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_registry_contains_content_limit_hit_as_presence_only():
+def test_registry_contains_content_limit_hit_as_presence_only() -> None:
     """The shipped event type. Registry value is empty `{}` -- presence-only
     semantics: the row's existence is the entire signal. No payload, no
     user identity, no per-event metadata. This is the privacy posture in
@@ -84,25 +87,25 @@ def test_registry_contains_content_limit_hit_as_presence_only():
 # ---------------------------------------------------------------------------
 
 
-def test_validate_payload_happy_path_round_trips(cap_metric_event):
+def test_validate_payload_happy_path_round_trips(cap_metric_event: str) -> None:
     payload = {"intended_size_bytes": 150_000, "was_paste": True}
     out = analytics._validate_payload(cap_metric_event, payload)
     assert out == payload
 
 
-def test_validate_payload_allows_partial_payload(cap_metric_event):
+def test_validate_payload_allows_partial_payload(cap_metric_event: str) -> None:
     """Schema keys are opt-in per call site. Absent values are fine."""
     out = analytics._validate_payload(cap_metric_event, {"intended_size_bytes": 50})
     assert out == {"intended_size_bytes": 50}
 
 
-def test_validate_payload_allows_none_or_empty():
+def test_validate_payload_allows_none_or_empty() -> None:
     assert analytics._validate_payload("content.limit_hit", None) == {}
     assert analytics._validate_payload("content.limit_hit", {}) == {}
 
 
 @pytest.mark.parametrize("falsy_non_dict", [[], "", 0, False, set(), ()])
-def test_validate_rejects_falsy_non_dict_payload(falsy_non_dict):
+def test_validate_rejects_falsy_non_dict_payload(falsy_non_dict: object) -> None:
     """Only `None` normalizes to `{}`. Other falsy values that happen to
     not be dicts (`[]`, `''`, `0`, `False`, set(), ()) MUST raise --
     silently coercing them weakens the schema contract and hides bad
@@ -111,7 +114,9 @@ def test_validate_rejects_falsy_non_dict_payload(falsy_non_dict):
     with pytest.raises(
         analytics.AnalyticsValidationError, match="payload must be a dict"
     ):
-        analytics._validate_payload("content.limit_hit", falsy_non_dict)
+        # Test deliberately passes non-dict / non-None values to assert the
+        # validator's runtime rejection; mypy's typing forbids it.
+        analytics._validate_payload("content.limit_hit", falsy_non_dict)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +124,12 @@ def test_validate_rejects_falsy_non_dict_payload(falsy_non_dict):
 # ---------------------------------------------------------------------------
 
 
-def test_validate_rejects_unknown_event_type():
+def test_validate_rejects_unknown_event_type() -> None:
     with pytest.raises(analytics.AnalyticsValidationError, match="unknown event_type"):
         analytics._validate_payload("not.a.real.event", {})
 
 
-def test_validate_rejects_unknown_payload_key(cap_metric_event):
+def test_validate_rejects_unknown_payload_key(cap_metric_event: str) -> None:
     """Per-event-type key allowlist via registry. A typo or an unsanctioned
     field rejects rather than silently landing in the table."""
     with pytest.raises(analytics.AnalyticsValidationError, match="unknown keys"):
@@ -134,7 +139,7 @@ def test_validate_rejects_unknown_payload_key(cap_metric_event):
         )
 
 
-def test_validate_rejects_unknown_payload_key_on_presence_only_event():
+def test_validate_rejects_unknown_payload_key_on_presence_only_event() -> None:
     """A presence-only event (empty registry schema) MUST reject any payload
     keys at all. Otherwise a caller could quietly start writing fields
     that the table contract claims don't exist."""
@@ -142,12 +147,12 @@ def test_validate_rejects_unknown_payload_key_on_presence_only_event():
         analytics._validate_payload("content.limit_hit", {"intended_size_bytes": 100})
 
 
-def test_validate_rejects_wrong_type_for_int_field(cap_metric_event):
+def test_validate_rejects_wrong_type_for_int_field(cap_metric_event: str) -> None:
     with pytest.raises(analytics.AnalyticsValidationError, match="expected int"):
         analytics._validate_payload(cap_metric_event, {"intended_size_bytes": "150000"})
 
 
-def test_validate_rejects_bool_for_int_field(cap_metric_event):
+def test_validate_rejects_bool_for_int_field(cap_metric_event: str) -> None:
     """`bool` is a subclass of int in Python; the validator must reject
     a True/False where int is declared so a flag can't masquerade as
     a count."""
@@ -155,12 +160,12 @@ def test_validate_rejects_bool_for_int_field(cap_metric_event):
         analytics._validate_payload(cap_metric_event, {"intended_size_bytes": True})
 
 
-def test_validate_rejects_wrong_type_for_bool_field(cap_metric_event):
+def test_validate_rejects_wrong_type_for_bool_field(cap_metric_event: str) -> None:
     with pytest.raises(analytics.AnalyticsValidationError, match="expected bool"):
         analytics._validate_payload(cap_metric_event, {"was_paste": 1})
 
 
-def test_validate_rejects_nested_list(cap_metric_event):
+def test_validate_rejects_nested_list(cap_metric_event: str) -> None:
     """The privacy primitive: nested containers can hide a content snippet
     under a flat type-check. Reject structurally."""
     with pytest.raises(analytics.AnalyticsValidationError, match="nested containers"):
@@ -169,7 +174,7 @@ def test_validate_rejects_nested_list(cap_metric_event):
         )
 
 
-def test_validate_rejects_nested_dict(cap_metric_event):
+def test_validate_rejects_nested_dict(cap_metric_event: str) -> None:
     with pytest.raises(analytics.AnalyticsValidationError, match="nested containers"):
         analytics._validate_payload(
             cap_metric_event,
@@ -177,12 +182,12 @@ def test_validate_rejects_nested_dict(cap_metric_event):
         )
 
 
-def test_validate_rejects_int_below_lower_bound(cap_metric_event):
+def test_validate_rejects_int_below_lower_bound(cap_metric_event: str) -> None:
     with pytest.raises(analytics.AnalyticsValidationError, match="outside allowed"):
         analytics._validate_payload(cap_metric_event, {"intended_size_bytes": -1})
 
 
-def test_validate_rejects_int_above_upper_bound(cap_metric_event):
+def test_validate_rejects_int_above_upper_bound(cap_metric_event: str) -> None:
     """Upper bound is 1 GiB to clamp client-asserted sizes."""
     with pytest.raises(analytics.AnalyticsValidationError, match="outside allowed"):
         analytics._validate_payload(
@@ -196,7 +201,7 @@ def test_validate_rejects_int_above_upper_bound(cap_metric_event):
 # ---------------------------------------------------------------------------
 
 
-def test_validate_rejects_oversized_string_value():
+def test_validate_rejects_oversized_string_value() -> None:
     """The privacy invariant. If a future event type adds a str field, a
     65-char value MUST be rejected -- 64 chars caps enum-style categoricals
     but not free-form strings (passphrases, labels, content snippets).
@@ -224,7 +229,7 @@ def test_validate_rejects_oversized_string_value():
 # ---------------------------------------------------------------------------
 
 
-def _make_in_memory_db():
+def _make_in_memory_db() -> sqlite3.Connection:
     """Stand up an in-memory SQLite DB with just the analytics_events table.
     Avoids the full init_db() ceremony for unit tests of record_event.
     Mirrors the v5+ shape: no user_id column."""
@@ -240,7 +245,7 @@ def _make_in_memory_db():
     return conn
 
 
-def test_record_event_writes_presence_only_row(opted_in_user):
+def test_record_event_writes_presence_only_row(opted_in_user: dict[str, Any]) -> None:
     """Happy path: the shipped event type is presence-only. The row records
     `event_type` + auto `occurred_at`; payload is `{}`. No user identity
     is persisted -- the schema has no user_id column. The opt-in is
@@ -254,7 +259,7 @@ def test_record_event_writes_presence_only_row(opted_in_user):
     assert json.loads(payload_json) == {}
 
 
-def test_record_event_writes_validated_row(cap_metric_event, opted_in_user):
+def test_record_event_writes_validated_row(cap_metric_event: str, opted_in_user: dict[str, Any]) -> None:
     """A non-presence-only event round-trips its payload through the
     validator. Uses the synthetic test event so we exercise int + bool
     fields without coupling to a shipped event's payload shape."""
@@ -275,7 +280,7 @@ def test_record_event_writes_validated_row(cap_metric_event, opted_in_user):
     }
 
 
-def test_record_event_propagates_validation_error(opted_in_user):
+def test_record_event_propagates_validation_error(opted_in_user: dict[str, Any]) -> None:
     """A bad call doesn't silently no-op on validation; the writer raises
     so the call site sees the bug at first run. (Distinct from the gate-
     closed silent-no-op path: gates are policy, validation is correctness.)
@@ -298,14 +303,14 @@ def test_record_event_propagates_validation_error(opted_in_user):
 # ---------------------------------------------------------------------------
 
 
-def _set_operator_gate(enabled: bool, monkeypatch):
+def _set_operator_gate(enabled: bool, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EPHEMERA_ANALYTICS_ENABLED", "true" if enabled else "false")
     from app import config
 
     config.get_settings.cache_clear()
 
 
-def test_gate_silent_noop_when_user_opted_out(opted_out_user):
+def test_gate_silent_noop_when_user_opted_out(opted_out_user: dict[str, Any]) -> None:
     """Operator on, user off -> no row, no exception. Silent so call sites
     can emit unconditionally."""
     conn = _make_in_memory_db()
@@ -314,7 +319,7 @@ def test_gate_silent_noop_when_user_opted_out(opted_out_user):
     assert rows[0] == 0
 
 
-def test_gate_silent_noop_when_operator_disabled(opted_in_user, monkeypatch):
+def test_gate_silent_noop_when_operator_disabled(opted_in_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     """Operator off, user on -> no row. Operator kill switch wins."""
     _set_operator_gate(False, monkeypatch)
     conn = _make_in_memory_db()
@@ -323,7 +328,7 @@ def test_gate_silent_noop_when_operator_disabled(opted_in_user, monkeypatch):
     assert rows[0] == 0
 
 
-def test_gate_silent_noop_when_both_closed(opted_out_user, monkeypatch):
+def test_gate_silent_noop_when_both_closed(opted_out_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     _set_operator_gate(False, monkeypatch)
     conn = _make_in_memory_db()
     analytics.record_event(conn, "content.limit_hit", user=opted_out_user)
@@ -331,7 +336,7 @@ def test_gate_silent_noop_when_both_closed(opted_out_user, monkeypatch):
     assert rows[0] == 0
 
 
-def test_gate_emits_only_when_both_open(opted_in_user):
+def test_gate_emits_only_when_both_open(opted_in_user: dict[str, Any]) -> None:
     """Both gates open is the only configuration that lands a row.
     Sanity-pin for the matrix."""
     conn = _make_in_memory_db()
@@ -340,7 +345,7 @@ def test_gate_emits_only_when_both_open(opted_in_user):
     assert rows[0] == 1
 
 
-def test_no_user_sentinel_silently_refuses_emit():
+def test_no_user_sentinel_silently_refuses_emit() -> None:
     """`NO_USER` is the explicit "this caller has no user context" marker.
     Reaching the emit path with it still refuses (presence-only events need
     a user-consent context to count toward an aggregate), but unlike a
@@ -352,7 +357,7 @@ def test_no_user_sentinel_silently_refuses_emit():
     assert rows[0] == 0
 
 
-def test_record_event_raises_typeerror_on_bogus_user_value():
+def test_record_event_raises_typeerror_on_bogus_user_value() -> None:
     """Passing a non-dict, non-NO_USER value to `user` is a programmer
     error -- raise so the call site sees it at first run instead of
     silently dropping events."""
@@ -366,7 +371,7 @@ def test_record_event_raises_typeerror_on_bogus_user_value():
 # ---------------------------------------------------------------------------
 
 
-def test_event_registry_is_presence_only():
+def test_event_registry_is_presence_only() -> None:
     """The user-facing toggle copy at `settings.analytics_help` (en.json)
     promises no payload data is collected. That promise is honest only
     as long as every entry in EVENT_REGISTRY has an empty payload schema.
@@ -387,12 +392,12 @@ def test_event_registry_is_presence_only():
 # ---------------------------------------------------------------------------
 
 
-def test_summarize_zero_events(tmp_db_path):
+def test_summarize_zero_events(tmp_db_path: Path) -> None:
     out = analytics.summarize("content.limit_hit")
     assert out == {"count": 0, "fields": {}}
 
 
-def test_summarize_presence_only_event_returns_count(tmp_db_path, opted_in_user):
+def test_summarize_presence_only_event_returns_count(tmp_db_path: Path, opted_in_user: dict[str, Any]) -> None:
     """For presence-only events (`content.limit_hit`), summarize should
     return only count -- there are no int fields to percentile-aggregate.
     Counts over time are the entire query surface for these events."""
@@ -406,8 +411,8 @@ def test_summarize_presence_only_event_returns_count(tmp_db_path, opted_in_user)
 
 
 def test_summarize_aggregates_int_field_percentiles(
-    tmp_db_path, cap_metric_event, opted_in_user
-):
+    tmp_db_path: Path, cap_metric_event: str, opted_in_user: dict[str, Any]
+) -> None:
     """Insert a small distribution and assert the percentile slots work.
     Uses the synthetic test event (with an int field) so we exercise the
     aggregation path without depending on a shipped event having an int
@@ -437,8 +442,8 @@ def test_summarize_aggregates_int_field_percentiles(
 
 
 def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(
-    tmp_db_path, cap_metric_event, opted_in_user
-):
+    tmp_db_path: Path, cap_metric_event: str, opted_in_user: dict[str, Any]
+) -> None:
     """Regression for the int(n*p) overshoot bug. For n=20 and p=0.95,
     n*p is exactly 19.0; the buggy formula `int(19.0) = 19` returns
     values[19] (the max), biasing capacity-planning telemetry high.
@@ -466,6 +471,6 @@ def test_summarize_p95_does_not_overshoot_when_np_is_exact_integer(
     )
 
 
-def test_summarize_rejects_unknown_event_type(tmp_db_path):
+def test_summarize_rejects_unknown_event_type(tmp_db_path: Path) -> None:
     with pytest.raises(analytics.AnalyticsValidationError):
         analytics.summarize("not.a.real.event")

@@ -2,7 +2,9 @@
 
 import os
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 # Drop bcrypt's cost factor in tests via an explicit env-var signal
 # that `app/auth/_core.py` reads at import time. Cost-12 hashing makes
@@ -21,6 +23,7 @@ from pathlib import Path
 os.environ.setdefault("EPHEMERA_TEST_BCRYPT_ROUNDS_OVERRIDE", "4")
 
 import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -31,7 +34,7 @@ TEST_PASSWORD = "test-password-xyz"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _verify_bcrypt_test_override_applied():
+def _verify_bcrypt_test_override_applied() -> None:
     """Session-level safety net for the bcrypt test-mode override.
 
     Conftest's module-level `os.environ.setdefault` above sets
@@ -77,7 +80,9 @@ def _verify_bcrypt_test_override_applied():
 
 
 @pytest.fixture
-def tmp_db_path(tmp_path, monkeypatch):
+def tmp_db_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Path]:
     """Isolated SQLite DB file, wired in via env vars and settings cache reset."""
     db = tmp_path / "test.db"
     monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
@@ -105,7 +110,7 @@ def tmp_db_path(tmp_path, monkeypatch):
     config.get_settings.cache_clear()
 
 
-def _provision(username: str, password: str = TEST_PASSWORD) -> dict:
+def _provision(username: str, password: str = TEST_PASSWORD) -> dict[str, Any]:
     """Create a user directly via the data layer. Returns a dict with the
     created user's id, password, totp_secret, and a pyotp.TOTP helper."""
     import pyotp
@@ -132,23 +137,25 @@ def _provision(username: str, password: str = TEST_PASSWORD) -> dict:
 
 
 @pytest.fixture
-def provisioned_user(tmp_db_path):
+def provisioned_user(tmp_db_path: Path) -> dict[str, Any]:
     """Default single user for tests that don't need multi-user coverage."""
     return _provision(TEST_USERNAME)
 
 
 @pytest.fixture
-def make_user(tmp_db_path):
+def make_user(
+    tmp_db_path: Path,
+) -> Callable[..., dict[str, Any]]:
     """Factory for creating additional users on demand (multi-user tests)."""
 
-    def _make(username: str, password: str = TEST_PASSWORD) -> dict:
+    def _make(username: str, password: str = TEST_PASSWORD) -> dict[str, Any]:
         return _provision(username, password)
 
     return _make
 
 
 @pytest.fixture
-def api_token(provisioned_user):
+def api_token(provisioned_user: dict[str, Any]) -> str:
     """Mint a test API token bound to the default provisioned user."""
     from app import auth, models
 
@@ -158,10 +165,8 @@ def api_token(provisioned_user):
 
 
 @pytest.fixture
-def client(tmp_db_path):
+def client(tmp_db_path: Path) -> Iterator[TestClient]:
     """FastAPI TestClient bound to an isolated DB, with rate-limiters reset."""
-    from fastapi.testclient import TestClient
-
     from app import create_app
     from app.limiter import create_limiter, login_limiter, read_limiter, reveal_limiter
 
@@ -175,7 +180,9 @@ def client(tmp_db_path):
 
 
 @pytest.fixture
-def authed_client(client, provisioned_user):
+def authed_client(
+    client: TestClient, provisioned_user: dict[str, Any]
+) -> TestClient:
     """A TestClient already logged in as the default provisioned user."""
     code = provisioned_user["totp"].now()
     r = client.post(
@@ -192,13 +199,13 @@ def authed_client(client, provisioned_user):
 
 
 @pytest.fixture
-def auth_headers(api_token):
+def auth_headers(api_token: str) -> dict[str, str]:
     """Bearer-token headers for API routes (replaces the old static API key)."""
     return {"Authorization": f"Bearer {api_token}", "Origin": "http://testserver"}
 
 
 @pytest.fixture
-def sample_png_bytes():
+def sample_png_bytes() -> bytes:
     import base64
 
     b64 = (
@@ -209,7 +216,7 @@ def sample_png_bytes():
 
 
 @pytest.fixture
-def sample_jpeg_bytes():
+def sample_jpeg_bytes() -> bytes:
     return (
         bytes.fromhex("ffd8ffe000104a46494600010101006000600000")
         + b"\x00" * 32
@@ -218,15 +225,15 @@ def sample_jpeg_bytes():
 
 
 @pytest.fixture
-def sample_gif_bytes():
+def sample_gif_bytes() -> bytes:
     return b"GIF89a" + b"\x01\x00\x01\x00\x00\x00\x00;"
 
 
 @pytest.fixture
-def sample_webp_bytes():
+def sample_webp_bytes() -> bytes:
     return b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 24
 
 
 @pytest.fixture
-def sample_svg_bytes():
+def sample_svg_bytes() -> bytes:
     return b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>'

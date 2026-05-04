@@ -1,6 +1,11 @@
 """Tests for security headers, rate limiting, origin validation."""
 
+from pathlib import Path
+from typing import Any
+
+import httpx
 import pytest
+from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -16,7 +21,7 @@ SEC_HEADERS = {
 }
 
 
-def test_security_headers_present_on_html_response(client):
+def test_security_headers_present_on_html_response(client: TestClient) -> None:
     r = client.get("/send")
     for h in SEC_HEADERS:
         assert h in {k.lower() for k in r.headers}, f"missing header: {h}"
@@ -33,14 +38,14 @@ def test_security_headers_present_on_html_response(client):
 # ---------------------------------------------------------------------------
 
 
-def test_healthz_returns_200_with_ok_true_when_db_reachable(client):
+def test_healthz_returns_200_with_ok_true_when_db_reachable(client: TestClient) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
     body = r.json()
     assert body == {"ok": True}
 
 
-def test_healthz_returns_503_when_db_unreachable(client, monkeypatch):
+def test_healthz_returns_503_when_db_unreachable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Simulate DB open/read failure; must surface as 503, not 200.
 
     The point of /healthz over the prior `/send` smoke test is that /send
@@ -53,7 +58,7 @@ def test_healthz_returns_503_when_db_unreachable(client, monkeypatch):
 
     from app import models
 
-    def _raise(*_a, **_kw):
+    def _raise(*_a: Any, **_kw: Any) -> None:
         raise sqlite3.OperationalError("unable to open database file")
 
     monkeypatch.setattr(models, "ping", _raise)
@@ -64,7 +69,7 @@ def test_healthz_returns_503_when_db_unreachable(client, monkeypatch):
     assert body["reason"] == "db_unreachable"
 
 
-def test_healthz_is_not_advertised_in_openapi_schema(client, auth_headers):
+def test_healthz_is_not_advertised_in_openapi_schema(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Same posture as /docs and /openapi.json -- do not leak the endpoint
     via the schema. Ops can curl it directly; probes get nothing from a
     schema read."""
@@ -84,12 +89,12 @@ def test_healthz_is_not_advertised_in_openapi_schema(client, auth_headers):
 # ---------------------------------------------------------------------------
 
 
-def test_openapi_json_requires_auth(client):
+def test_openapi_json_requires_auth(client: TestClient) -> None:
     r = client.get("/openapi.json")
     assert r.status_code == 401
 
 
-def test_openapi_json_accessible_with_bearer(client, auth_headers):
+def test_openapi_json_accessible_with_bearer(client: TestClient, auth_headers: dict[str, str]) -> None:
     r = client.get("/openapi.json", headers=auth_headers)
     assert r.status_code == 200
     body = r.json()
@@ -100,18 +105,18 @@ def test_openapi_json_accessible_with_bearer(client, auth_headers):
     assert "/send/login" in body["paths"]
 
 
-def test_openapi_json_accessible_with_session(authed_client):
+def test_openapi_json_accessible_with_session(authed_client: TestClient) -> None:
     r = authed_client.get("/openapi.json")
     assert r.status_code == 200
     assert "openapi" in r.json()
 
 
-def test_docs_requires_auth(client):
+def test_docs_requires_auth(client: TestClient) -> None:
     r = client.get("/docs")
     assert r.status_code == 401
 
 
-def test_docs_accessible_with_session(authed_client):
+def test_docs_accessible_with_session(authed_client: TestClient) -> None:
     r = authed_client.get("/docs")
     assert r.status_code == 200
     html = r.text
@@ -122,7 +127,7 @@ def test_docs_accessible_with_session(authed_client):
     assert "/static/swagger/init.js" in html
 
 
-def test_swagger_static_assets_are_public_by_design(client):
+def test_swagger_static_assets_are_public_by_design(client: TestClient) -> None:
     """`/docs` (the HTML shell) and `/openapi.json` (the schema) are auth-
     gated -- they're the real API surface that must not leak to unauthed
     probes. The Swagger UI vendor assets under `/static/swagger/` (JS
@@ -148,7 +153,7 @@ def test_swagger_static_assets_are_public_by_design(client):
         assert r.status_code == 200, f"/static/swagger/{asset} -> {r.status_code}"
 
 
-def test_docs_html_contains_no_inline_scripts(authed_client):
+def test_docs_html_contains_no_inline_scripts(authed_client: TestClient) -> None:
     """The CSP is strict (script-src 'self'). The HTML shell must only
     reference external script files; any inline <script>...</script> block
     with a non-empty body would violate the policy and silently break
@@ -163,7 +168,7 @@ def test_docs_html_contains_no_inline_scripts(authed_client):
         assert body == "", f"inline script body found in /docs HTML: {body!r}"
 
 
-def test_docs_is_not_advertised_in_openapi_schema(client, auth_headers):
+def test_docs_is_not_advertised_in_openapi_schema(client: TestClient, auth_headers: dict[str, str]) -> None:
     """/docs and /openapi.json themselves shouldn't appear as API routes
     in the schema they serve. include_in_schema=False on both prevents
     the meta-surface from bloating the docs."""
@@ -173,7 +178,7 @@ def test_docs_is_not_advertised_in_openapi_schema(client, auth_headers):
     assert "/openapi.json" not in paths
 
 
-def test_redoc_stays_disabled(client, auth_headers):
+def test_redoc_stays_disabled(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Swagger UI is the chosen docs surface; /redoc has no route mounted.
     Check both unauthenticated (404) and authenticated (still 404) so a
     future accidental re-enable is visible."""
@@ -181,7 +186,7 @@ def test_redoc_stays_disabled(client, auth_headers):
     assert client.get("/redoc", headers=auth_headers).status_code == 404
 
 
-def test_security_headers_present_on_api_response(client, auth_headers):
+def test_security_headers_present_on_api_response(client: TestClient, auth_headers: dict[str, str]) -> None:
     r = client.post(
         "/api/secrets",
         json={"content": "x", "content_type": "text", "expires_in": 300},
@@ -192,8 +197,8 @@ def test_security_headers_present_on_api_response(client, auth_headers):
 
 
 def test_every_response_carries_every_security_header(
-    client, authed_client, auth_headers
-):
+    client: TestClient, authed_client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """The middleware sets SECURITY_HEADERS unconditionally on every
     response. Pin that across a cross-section of real route shapes so a
     future change that lets a route override one of these values (or
@@ -202,7 +207,7 @@ def test_every_response_carries_every_security_header(
     Compares exact values, not just presence, so "header is there but
     weakened" also trips this.
     """
-    from app import SECURITY_HEADERS
+    from app.security_headers import SECURITY_HEADERS
 
     # Pre-register a secret so cancel/status routes have a real sid to hit.
     r = client.post(
@@ -212,7 +217,7 @@ def test_every_response_carries_every_security_header(
     )
     sid = r.json()["id"]
 
-    def assert_full_headers(resp, label):
+    def assert_full_headers(resp: httpx.Response, label: str) -> None:
         for k, expected in SECURITY_HEADERS.items():
             got = resp.headers.get(k)
             assert got == expected, f"{label}: {k!r} was {got!r}, expected {expected!r}"
@@ -247,23 +252,23 @@ def test_every_response_carries_every_security_header(
     assert_full_headers(client.get("/api/me"), "GET /api/me (401)")
 
 
-def test_x_content_type_options_is_nosniff(client):
+def test_x_content_type_options_is_nosniff(client: TestClient) -> None:
     r = client.get("/send")
     assert r.headers.get("X-Content-Type-Options") == "nosniff"
 
 
-def test_x_frame_options_is_deny(client):
+def test_x_frame_options_is_deny(client: TestClient) -> None:
     r = client.get("/send")
     assert r.headers.get("X-Frame-Options") == "DENY"
 
 
-def test_hsts_has_a_max_age(client):
+def test_hsts_has_a_max_age(client: TestClient) -> None:
     r = client.get("/send")
     hsts = r.headers.get("Strict-Transport-Security", "")
     assert "max-age=" in hsts
 
 
-def test_csp_contains_expected_directives(client):
+def test_csp_contains_expected_directives(client: TestClient) -> None:
     """Pin the CSP shape so a future refactor can't silently drop directives.
     If you intentionally change CSP, update this list alongside the policy."""
     r = client.get("/send")
@@ -285,13 +290,13 @@ def test_csp_contains_expected_directives(client):
         assert directive in csp, f"missing CSP directive: {directive!r} in {csp!r}"
 
 
-def test_cross_origin_isolation_headers_present(client):
+def test_cross_origin_isolation_headers_present(client: TestClient) -> None:
     r = client.get("/send")
     assert r.headers.get("Cross-Origin-Opener-Policy") == "same-origin"
     assert r.headers.get("Cross-Origin-Resource-Policy") == "same-origin"
 
 
-def test_permissions_policy_denies_sensitive_features(client):
+def test_permissions_policy_denies_sensitive_features(client: TestClient) -> None:
     r = client.get("/send")
     pp = r.headers.get("Permissions-Policy", "")
     for feature in ("camera", "microphone", "geolocation", "payment", "usb"):
@@ -300,7 +305,7 @@ def test_permissions_policy_denies_sensitive_features(client):
         )
 
 
-def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_client):
+def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_client: TestClient) -> None:
     """Browser clients must send Origin on state-changing requests. A
     session-cookie-authenticated POST with no Origin header is the
     CSRF-gap shape we refuse."""
@@ -311,7 +316,7 @@ def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_cli
     assert r.status_code == 403
 
 
-def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client, api_token):
+def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client: TestClient, api_token: str) -> None:
     """Bearer-token (CLI/curl) callers have no ambient credentials and thus
     no CSRF risk. Missing Origin stays allowed for them."""
     r = client.post(
@@ -322,7 +327,7 @@ def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client, api
     assert r.status_code == 201
 
 
-def test_post_api_secrets_without_origin_and_with_garbage_bearer_is_rejected(client):
+def test_post_api_secrets_without_origin_and_with_garbage_bearer_is_rejected(client: TestClient) -> None:
     """`Authorization: Bearer anything` used to bypass the Origin gate
     because verify_same_origin only checked the prefix. Now the token is
     validated against the DB before missing-Origin is accepted; a bogus
@@ -341,7 +346,7 @@ def test_post_api_secrets_without_origin_and_with_garbage_bearer_is_rejected(cli
     assert r.status_code == 403
 
 
-def test_post_api_secrets_without_origin_and_with_empty_bearer_is_rejected(client):
+def test_post_api_secrets_without_origin_and_with_empty_bearer_is_rejected(client: TestClient) -> None:
     """`Authorization: Bearer ` (with no token after the space) is
     obviously-bogus and must be treated like any other missing-auth
     browser case -- 403 at the origin gate, not 401 at the auth layer."""
@@ -353,14 +358,14 @@ def test_post_api_secrets_without_origin_and_with_empty_bearer_is_rejected(clien
     assert r.status_code == 403
 
 
-def test_delete_without_origin_and_with_session_is_rejected(authed_client):
+def test_delete_without_origin_and_with_session_is_rejected(authed_client: TestClient) -> None:
     """Same policy on the DELETE verb, where historical browser Origin
     coverage is less uniform than POST."""
     r = authed_client.delete("/api/secrets/some-id")
     assert r.status_code == 403
 
 
-def test_reveal_rejects_cross_origin_post(client, auth_headers):
+def test_reveal_rejects_cross_origin_post(client: TestClient, auth_headers: dict[str, str]) -> None:
     # Create a secret first with a valid origin.
     r = client.post(
         "/api/secrets",
@@ -378,7 +383,7 @@ def test_reveal_rejects_cross_origin_post(client, auth_headers):
     assert bad.status_code == 403
 
 
-def test_rate_limiter_recovers_after_window_expires(monkeypatch):
+def test_rate_limiter_recovers_after_window_expires(monkeypatch: pytest.MonkeyPatch) -> None:
     """Once the window elapses, old hits get popped from the queue and the
     same key can take a fresh round of hits. Deterministic via patching
     time.monotonic -- no wall-clock sleeping in the test."""
@@ -387,7 +392,7 @@ def test_rate_limiter_recovers_after_window_expires(monkeypatch):
     from app import limiter
 
     fake_time = [100.0]
-    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+    monkeypatch.setattr("app.limiter.time.monotonic", lambda: fake_time[0])
 
     rl = limiter.RateLimiter(max_hits=2, window_seconds=60)
     rl.check("k")
@@ -400,7 +405,7 @@ def test_rate_limiter_recovers_after_window_expires(monkeypatch):
     rl.check("k")  # must not raise
 
 
-def test_limiter_evicts_empty_buckets_on_check(monkeypatch):
+def test_limiter_evicts_empty_buckets_on_check(monkeypatch: pytest.MonkeyPatch) -> None:
     """When a key's bucket ages fully empty and that key hits again, the
     stale entry must be replaced rather than accumulated -- so a rotating-
     IP workload that happens to revisit keys doesn't leave dead empty
@@ -408,7 +413,7 @@ def test_limiter_evicts_empty_buckets_on_check(monkeypatch):
     from app import limiter
 
     fake_time = [100.0]
-    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+    monkeypatch.setattr("app.limiter.time.monotonic", lambda: fake_time[0])
 
     rl = limiter.RateLimiter(max_hits=2, window_seconds=60)
     rl.check("k")
@@ -424,7 +429,7 @@ def test_limiter_evicts_empty_buckets_on_check(monkeypatch):
     assert all(len(q) > 0 for q in rl._hits.values())
 
 
-def test_limiter_sweep_evicts_keys_that_never_return(monkeypatch):
+def test_limiter_sweep_evicts_keys_that_never_return(monkeypatch: pytest.MonkeyPatch) -> None:
     """The "attacker rotates source IPs, each hits once, never comes
     back" case. In-check lazy GC can't help -- nothing triggers a
     re-read of a key that's never queried again. sweep() walks the
@@ -432,7 +437,7 @@ def test_limiter_sweep_evicts_keys_that_never_return(monkeypatch):
     from app import limiter
 
     fake_time = [1000.0]
-    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+    monkeypatch.setattr("app.limiter.time.monotonic", lambda: fake_time[0])
 
     rl = limiter.RateLimiter(max_hits=5, window_seconds=60)
     for i in range(50):
@@ -447,13 +452,13 @@ def test_limiter_sweep_evicts_keys_that_never_return(monkeypatch):
     assert len(rl._hits) == 0
 
 
-def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch):
+def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch: pytest.MonkeyPatch) -> None:
     """sweep() must not drop entries whose deques still have hits inside
     the window -- those are live buckets, not litter."""
     from app import limiter
 
     fake_time = [1000.0]
-    monkeypatch.setattr(limiter.time, "monotonic", lambda: fake_time[0])
+    monkeypatch.setattr("app.limiter.time.monotonic", lambda: fake_time[0])
 
     rl = limiter.RateLimiter(max_hits=5, window_seconds=60)
     rl.check("recent")  # at t=1000
@@ -469,7 +474,7 @@ def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch):
     assert "even-more-recent" in rl._hits
 
 
-def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch, tmp_db_path):
+def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch: pytest.MonkeyPatch, tmp_db_path: Path) -> None:
     """cleanup.run_once() must advance sweep() across all four limiter
     instances so the bounded-memory invariant holds uniformly.
 
@@ -484,7 +489,7 @@ def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch, tmp_db_path)
         lim.reset()
         original = lim.sweep
 
-        def wrapped(orig=original, n=name):
+        def wrapped(orig: Any = original, n: str = name) -> Any:
             called.append(n)
             return orig()
 
@@ -499,7 +504,7 @@ def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch, tmp_db_path)
     }
 
 
-def test_read_rate_limit_kicks_in_on_meta_spam(client, auth_headers):
+def test_read_rate_limit_kicks_in_on_meta_spam(client: TestClient, auth_headers: dict[str, str]) -> None:
     """`/s/{token}/meta` used to have no rate limiter; a bogus-token probe
     loop could hammer the app indefinitely. The generic read limiter
     catches that past 300 req/min."""
@@ -513,7 +518,7 @@ def test_read_rate_limit_kicks_in_on_meta_spam(client, auth_headers):
     assert 429 in statuses
 
 
-def test_api_me_covered_by_read_rate_limit(client, auth_headers):
+def test_api_me_covered_by_read_rate_limit(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Hitting /api/me past the 300/min budget must 429 -- the endpoint
     used to have no limiter at all."""
     from app.limiter import read_limiter
@@ -525,7 +530,7 @@ def test_api_me_covered_by_read_rate_limit(client, auth_headers):
     assert 429 in statuses
 
 
-def test_reveal_rate_limit_kicks_in(client, auth_headers):
+def test_reveal_rate_limit_kicks_in(client: TestClient, auth_headers: dict[str, str]) -> None:
     # Hammer the reveal endpoint with bogus tokens. After the limit, responses are 429.
     statuses = []
     for i in range(15):
@@ -543,7 +548,7 @@ def test_reveal_rate_limit_kicks_in(client, auth_headers):
 # ---------------------------------------------------------------------------
 
 
-def test_rate_limit_uses_forwarded_for_when_proxied():
+def test_rate_limit_uses_forwarded_for_when_proxied() -> None:
     """Guards against the "everyone looks like the proxy's IP"
     regression. In prod, uvicorn is started with `--proxy-headers
     --forwarded-allow-ips 127.0.0.1` (see `docs/deployment.md`), which
@@ -570,7 +575,7 @@ def test_rate_limit_uses_forwarded_for_when_proxied():
     app = FastAPI()
 
     @app.get("/probe")
-    def probe(req: Request):
+    def probe(req: Request) -> dict[str, Any]:
         limiter.check(_client_ip(req))
         return {"ok": True, "ip": _client_ip(req)}
 
@@ -601,7 +606,7 @@ def test_rate_limit_uses_forwarded_for_when_proxied():
 # ---------------------------------------------------------------------------
 
 
-def test_landing_passphrase_input_is_type_password():
+def test_landing_passphrase_input_is_type_password() -> None:
     """Receiver-side shoulder-surf hygiene: the passphrase <input> on the
     reveal landing page must be masked by default. A show/hide toggle is
     allowed to flip the type at runtime, but the rendered source must
@@ -626,7 +631,7 @@ def test_landing_passphrase_input_is_type_password():
     )
 
 
-def test_landing_passphrase_input_has_no_html_maxlength():
+def test_landing_passphrase_input_has_no_html_maxlength() -> None:
     """The reveal-side passphrase input must NOT enforce an HTML maxlength.
     HTML maxlength counts UTF-16 code units; the server cap on
     `RevealBody.passphrase` is 200 codepoints. For supplementary-plane
@@ -655,7 +660,7 @@ def test_landing_passphrase_input_has_no_html_maxlength():
     )
 
 
-def test_login_code_input_has_show_hide_toggle_wiring():
+def test_login_code_input_has_show_hide_toggle_wiring() -> None:
     """The login form's code input ships as type=text (TOTP is the default
     mode; masking a 30-second rotating code buys no security). When the
     user toggles into recovery-code mode, login.js flips the input to
@@ -702,7 +707,7 @@ def test_login_code_input_has_show_hide_toggle_wiring():
     )
 
 
-def test_routes_do_not_log_tracebacks_or_grab_raw_body():
+def test_routes_do_not_log_tracebacks_or_grab_raw_body() -> None:
     """Invariant: route handlers must not call logger.exception or
     traceback.format_exc (tracebacks with locals leak plaintext/
     passphrase/client_half/password/totp_code), and must not
@@ -767,8 +772,8 @@ def test_routes_do_not_log_tracebacks_or_grab_raw_body():
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_property_session_cookie_roundtrips_any_id_pair(
-    tmp_db_path, user_id: int, generation: int
-):
+    tmp_db_path: Path, user_id: int, generation: int
+) -> None:
     """For any pair of non-negative integers fitting in 32 bits, the cookie
     minted by make_session_cookie reads back as the exact same pair via
     read_session_cookie. Pins that the payload encoding doesn't truncate,
@@ -790,8 +795,8 @@ def test_property_session_cookie_roundtrips_any_id_pair(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_property_session_cookie_rejects_byte_flip(
-    tmp_db_path, user_id: int, generation: int, flip_index: int
-):
+    tmp_db_path: Path, user_id: int, generation: int, flip_index: int
+) -> None:
     """For any cookie, a single-byte tamper cannot forge a cookie for a
     DIFFERENT (user_id, generation) than the one originally minted.
     Pins the integrity guarantee of TimestampSigner: an attacker can't
@@ -841,7 +846,7 @@ def test_property_session_cookie_rejects_byte_flip(
     # round-trip property -- we sign and verify with the same key.
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-def test_property_session_cookie_rejects_arbitrary_strings(tmp_db_path, raw: str):
+def test_property_session_cookie_rejects_arbitrary_strings(tmp_db_path: Path, raw: str) -> None:
     """For any random printable-ASCII string that we did NOT mint, the
     cookie reader returns None. Catches edge cases: empty string,
     string with colons but no signature, signed-looking string with

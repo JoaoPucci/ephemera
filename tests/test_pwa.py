@@ -44,8 +44,11 @@ in PR-thread; implementation contract:
 """
 
 import json
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 MANIFEST_URL = "/manifest.webmanifest"
 
@@ -55,12 +58,12 @@ MANIFEST_URL = "/manifest.webmanifest"
 # ---------------------------------------------------------------------------
 
 
-def test_manifest_endpoint_returns_200(client):
+def test_manifest_endpoint_returns_200(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     assert r.status_code == 200, r.text
 
 
-def test_legacy_static_manifest_path_still_serves_manifest(client):
+def test_legacy_static_manifest_path_still_serves_manifest(client: TestClient) -> None:
     # PR #106 shipped the manifest as a static file at
     # /static/manifest.webmanifest. PR #107 (this PR) moved it to a
     # route at /manifest.webmanifest so the content can vary per
@@ -84,7 +87,7 @@ def test_legacy_static_manifest_path_still_serves_manifest(client):
     )
 
 
-def test_manifest_endpoint_uses_manifest_mime(client):
+def test_manifest_endpoint_uses_manifest_mime(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     ctype = r.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     assert ctype == "application/manifest+json", (
@@ -92,13 +95,13 @@ def test_manifest_endpoint_uses_manifest_mime(client):
     )
 
 
-def test_manifest_is_parseable_json(client):
+def test_manifest_is_parseable_json(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     assert isinstance(data, dict)
 
 
-def test_manifest_has_required_keys(client):
+def test_manifest_has_required_keys(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     required = {
@@ -115,7 +118,7 @@ def test_manifest_has_required_keys(client):
     assert not missing, f"manifest missing required keys: {sorted(missing)}"
 
 
-def test_manifest_pins_stable_id(client):
+def test_manifest_pins_stable_id(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     assert data.get("id") == "/", (
@@ -123,19 +126,19 @@ def test_manifest_pins_stable_id(client):
     )
 
 
-def test_manifest_start_url_lands_on_sender(client):
+def test_manifest_start_url_lands_on_sender(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     assert data["start_url"] == "/send?source=pwa"
 
 
-def test_manifest_display_is_standalone(client):
+def test_manifest_display_is_standalone(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     assert data["display"] == "standalone"
 
 
-def test_manifest_default_name_is_ephemera_unsuffixed(client):
+def test_manifest_default_name_is_ephemera_unsuffixed(client: TestClient) -> None:
     # Empty deployment_label is the prod posture: bare "ephemera",
     # no environment suffix.
     r = client.get(MANIFEST_URL)
@@ -144,7 +147,7 @@ def test_manifest_default_name_is_ephemera_unsuffixed(client):
     assert data["short_name"] == "ephemera"
 
 
-def test_manifest_icons_cover_any_and_maskable_purposes(client):
+def test_manifest_icons_cover_any_and_maskable_purposes(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     purposes = {
@@ -158,7 +161,7 @@ def test_manifest_icons_cover_any_and_maskable_purposes(client):
     )
 
 
-def test_manifest_icons_include_192_and_512(client):
+def test_manifest_icons_include_192_and_512(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     sizes = {size for icon in data["icons"] for size in icon["sizes"].split()}
@@ -166,7 +169,7 @@ def test_manifest_icons_include_192_and_512(client):
     assert "512x512" in sizes, "manifest must declare a 512x512 icon"
 
 
-def test_manifest_default_lists_only_visually_light_icons(client):
+def test_manifest_default_lists_only_visually_light_icons(client: TestClient) -> None:
     # Prod posture pins ONE colourway -- the visually-light variant
     # (icon-*-dark-* in our file naming) -- so the captured-at-install
     # tile is consistent across OS themes. Listing both would leave
@@ -187,14 +190,14 @@ def test_manifest_default_lists_only_visually_light_icons(client):
 # ---------------------------------------------------------------------------
 
 
-def test_head_links_manifest(client):
+def test_head_links_manifest(client: TestClient) -> None:
     html = client.get("/send").text
     assert '<link rel="manifest" href="/manifest.webmanifest">' in html, (
         "head must link the manifest so install affordances pick it up"
     )
 
 
-def test_head_has_theme_color_for_light_and_dark(client):
+def test_head_has_theme_color_for_light_and_dark(client: TestClient) -> None:
     html = client.get("/send").text
     assert (
         'name="theme-color"' in html and 'media="(prefers-color-scheme: light)"' in html
@@ -204,14 +207,14 @@ def test_head_has_theme_color_for_light_and_dark(client):
     ), "head must carry a dark-mode theme-color meta"
 
 
-def test_head_links_apple_touch_icon(client):
+def test_head_links_apple_touch_icon(client: TestClient) -> None:
     html = client.get("/send").text
     assert 'rel="apple-touch-icon"' in html, (
         "head must link an apple-touch-icon for iOS Add-to-Home-Screen"
     )
 
 
-def test_head_default_apple_touch_icon_is_visually_light(client):
+def test_head_default_apple_touch_icon_is_visually_light(client: TestClient) -> None:
     # Prod posture: visually-light apple-touch-icon (light-bg/dark-glyph)
     # at the bare-filename apple-touch-icon.png that iOS auto-discovers
     # as a fallback. The -dev variant (visually dark) is only wired
@@ -223,21 +226,21 @@ def test_head_default_apple_touch_icon_is_visually_light(client):
     )
 
 
-def test_head_declares_apple_mobile_web_app_capable(client):
+def test_head_declares_apple_mobile_web_app_capable(client: TestClient) -> None:
     html = client.get("/send").text
     assert '<meta name="apple-mobile-web-app-capable" content="yes">' in html, (
         "iOS only enters standalone mode when this meta is present"
     )
 
 
-def test_head_sets_apple_status_bar_style(client):
+def test_head_sets_apple_status_bar_style(client: TestClient) -> None:
     html = client.get("/send").text
     assert 'name="apple-mobile-web-app-status-bar-style"' in html, (
         "head must set the iOS status-bar style for the standalone shell"
     )
 
 
-def test_head_default_apple_mobile_web_app_title_is_unsuffixed(client):
+def test_head_default_apple_mobile_web_app_title_is_unsuffixed(client: TestClient) -> None:
     html = client.get("/send").text
     assert '<meta name="apple-mobile-web-app-title" content="ephemera">' in html, (
         "iOS uses this for the home-screen label; without it the <title> is used"
@@ -249,7 +252,7 @@ def test_head_default_apple_mobile_web_app_title_is_unsuffixed(client):
 # ---------------------------------------------------------------------------
 
 
-def test_apple_touch_icon_is_reachable(client):
+def test_apple_touch_icon_is_reachable(client: TestClient) -> None:
     r = client.get("/static/icons/apple-touch-icon.png")
     assert r.status_code == 200, "apple-touch-icon.png missing from /static/icons/"
     assert r.headers.get("content-type", "").startswith("image/png"), (
@@ -257,7 +260,7 @@ def test_apple_touch_icon_is_reachable(client):
     )
 
 
-def test_apple_touch_icon_dev_variant_is_reachable(client):
+def test_apple_touch_icon_dev_variant_is_reachable(client: TestClient) -> None:
     # Used when EPHEMERA_DEPLOYMENT_LABEL is set; must exist on disk
     # regardless of which posture the test instance is running in,
     # because the static mount is shared across all environments.
@@ -269,7 +272,7 @@ def test_apple_touch_icon_dev_variant_is_reachable(client):
     assert r.headers.get("content-type", "").startswith("image/png")
 
 
-def test_manifest_icon_targets_resolve(client):
+def test_manifest_icon_targets_resolve(client: TestClient) -> None:
     r = client.get(MANIFEST_URL)
     data = json.loads(r.text)
     for icon in data["icons"]:
@@ -303,7 +306,7 @@ def test_manifest_icon_targets_resolve(client):
 
 
 @pytest.fixture
-def dev_label_client(tmp_db_path, monkeypatch):
+def dev_label_client(tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """TestClient with EPHEMERA_DEPLOYMENT_LABEL=dev wired through the
     settings cache before the app is built. Mirrors conftest.py's
     `client` shape but interposes the env var + cache_clear so
@@ -331,14 +334,14 @@ def dev_label_client(tmp_db_path, monkeypatch):
     config.get_settings.cache_clear()
 
 
-def test_dev_manifest_name_is_suffixed(dev_label_client):
+def test_dev_manifest_name_is_suffixed(dev_label_client: TestClient) -> None:
     r = dev_label_client.get(MANIFEST_URL)
     data = json.loads(r.text)
     assert data["name"] == "ephemera-dev"
     assert data["short_name"] == "ephemera-dev"
 
 
-def test_dev_manifest_lists_only_visually_dark_icons(dev_label_client):
+def test_dev_manifest_lists_only_visually_dark_icons(dev_label_client: TestClient) -> None:
     # In our naming, icon-*-light-* is the dark-bg/light-glyph asset
     # (intended for a light OS -- visually a dark tile). The dev
     # manifest pins ONLY these so a fresh install on a dev box
@@ -354,7 +357,7 @@ def test_dev_manifest_lists_only_visually_dark_icons(dev_label_client):
     )
 
 
-def test_dev_manifest_keeps_stable_id_and_start_url(dev_label_client):
+def test_dev_manifest_keeps_stable_id_and_start_url(dev_label_client: TestClient) -> None:
     # The dev / prod cohorts must remain *the same app* in browsers
     # that respect manifest id. The label affects presentation, not
     # identity.
@@ -364,7 +367,7 @@ def test_dev_manifest_keeps_stable_id_and_start_url(dev_label_client):
     assert data["start_url"] == "/send?source=pwa"
 
 
-def test_dev_head_apple_touch_icon_uses_dev_variant(dev_label_client):
+def test_dev_head_apple_touch_icon_uses_dev_variant(dev_label_client: TestClient) -> None:
     html = dev_label_client.get("/send").text
     assert (
         '<link rel="apple-touch-icon" '
@@ -372,7 +375,7 @@ def test_dev_head_apple_touch_icon_uses_dev_variant(dev_label_client):
     ), "dev head must point apple-touch-icon at the visually-dark variant"
 
 
-def test_dev_head_apple_mobile_web_app_title_is_suffixed(dev_label_client):
+def test_dev_head_apple_mobile_web_app_title_is_suffixed(dev_label_client: TestClient) -> None:
     html = dev_label_client.get("/send").text
     assert '<meta name="apple-mobile-web-app-title" content="ephemera-dev">' in html, (
         "dev head's iOS home-screen label must match the suffixed manifest name"

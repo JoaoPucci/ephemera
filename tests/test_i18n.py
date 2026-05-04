@@ -3,7 +3,12 @@ error shape, and the JS catalog inlining."""
 
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
+
+import pytest
+from fastapi.testclient import TestClient
 
 from app.errors import ERROR_MESSAGES, http_error
 from app.i18n import (
@@ -29,7 +34,7 @@ ORIGIN = {"Origin": "http://testserver"}
 # ---------------------------------------------------------------------------
 
 
-def test_supported_and_labels_cover_the_same_set():
+def test_supported_and_labels_cover_the_same_set() -> None:
     """Every SUPPORTED tag must have a LANGUAGE_LABELS entry (otherwise the
     picker widget would render an empty option) and a POSIX_MAP entry
     (otherwise gettext_for would silently fall back to DEFAULT)."""
@@ -38,25 +43,25 @@ def test_supported_and_labels_cover_the_same_set():
         assert tag in POSIX_MAP, f"missing POSIX_MAP entry: {tag}"
 
 
-def test_default_is_in_supported():
+def test_default_is_in_supported() -> None:
     assert DEFAULT in SUPPORTED
 
 
-def test_launched_is_subset_of_supported():
+def test_launched_is_subset_of_supported() -> None:
     """LAUNCHED is the picker-visible subset -- every member must also be
     in SUPPORTED (so it resolves via Accept-Language / cookie / DB pref)."""
     for tag in LAUNCHED:
         assert tag in SUPPORTED, f"LAUNCHED tag not in SUPPORTED: {tag}"
 
 
-def test_launched_contains_default():
+def test_launched_contains_default() -> None:
     """Whatever set of locales is currently launched, the default (English)
     must be among them -- otherwise the picker could render only tags the
     app can't actually localize into."""
     assert DEFAULT in LAUNCHED
 
 
-def test_supported_is_default_first_then_alphabetical():
+def test_supported_is_default_first_then_alphabetical() -> None:
     """Picker ordering contract: English is always the first option
     (users' fallback / default), and the remaining tags are sorted
     alphabetically so the order is stable as new locales land."""
@@ -70,7 +75,7 @@ def test_supported_is_default_first_then_alphabetical():
 # ---------------------------------------------------------------------------
 
 
-def test_bcp47_to_posix_simple_language_tag():
+def test_bcp47_to_posix_simple_language_tag() -> None:
     """Language-only tags map to themselves (gettext catalog dir == BCP-47
     tag for unambiguous cases like ja, fr, de, ru, ko)."""
     from app.i18n import _bcp47_to_posix
@@ -79,7 +84,7 @@ def test_bcp47_to_posix_simple_language_tag():
         assert _bcp47_to_posix(tag) == tag
 
 
-def test_bcp47_to_posix_with_territory():
+def test_bcp47_to_posix_with_territory() -> None:
     """Tags carrying a territory subtag get the POSIX underscore form.
     pt-BR has no CLDR script inference, so Babel's str(loc) is the
     right dir name."""
@@ -88,7 +93,7 @@ def test_bcp47_to_posix_with_territory():
     assert _bcp47_to_posix("pt-BR") == "pt_BR"
 
 
-def test_bcp47_to_posix_chinese_drops_territory():
+def test_bcp47_to_posix_chinese_drops_territory() -> None:
     """Chinese gettext catalogs are keyed on script (zh_Hans, zh_Hant),
     not on territory (zh_CN, zh_TW). Babel's likely-subtag resolution
     inflates 'zh-CN' to both territory=CN and script=Hans; the helper
@@ -100,7 +105,7 @@ def test_bcp47_to_posix_chinese_drops_territory():
     assert _bcp47_to_posix("zh-TW") == "zh_Hant"
 
 
-def test_label_override_wins_over_cldr_default():
+def test_label_override_wins_over_cldr_default() -> None:
     """_LABEL_OVERRIDES exists for aesthetic refinements (title-casing
     Romance/Slavic endonyms, the common-usage abbreviation for Chinese).
     The override value must win over Babel's CLDR endonym."""
@@ -111,7 +116,7 @@ def test_label_override_wins_over_cldr_default():
     assert _label_for("pt-BR") == _LABEL_OVERRIDES["pt-BR"]
 
 
-def test_label_falls_back_to_cldr_endonym():
+def test_label_falls_back_to_cldr_endonym() -> None:
     """Locales with no override entry use Babel's CLDR endonym. German
     ('Deutsch') and Japanese ('日本語') are existing examples where CLDR
     matches the aesthetic we want -- no override needed, the function
@@ -132,7 +137,7 @@ def test_label_falls_back_to_cldr_endonym():
 # ---------------------------------------------------------------------------
 
 
-def test_direction_is_ltr_for_ltr_launched_locales():
+def test_direction_is_ltr_for_ltr_launched_locales() -> None:
     """Every LTR locale we ship renders dir='ltr'. Arabic is the first
     RTL locale in LAUNCHED; skip it (and any future RTL addition) so this
     assertion pins the contract for the LTR surface without double-covering
@@ -143,7 +148,7 @@ def test_direction_is_ltr_for_ltr_launched_locales():
         assert direction_for(tag) == "ltr", f"{tag} unexpectedly RTL"
 
 
-def test_direction_is_rtl_for_known_rtl_scripts():
+def test_direction_is_rtl_for_known_rtl_scripts() -> None:
     """Babel's CLDR data assigns 'rtl' to Arabic, Hebrew, Farsi, and Urdu.
     Pin the contract -- if Babel ever ships a CLDR update that changes
     this, we want to know."""
@@ -151,19 +156,19 @@ def test_direction_is_rtl_for_known_rtl_scripts():
         assert direction_for(tag) == "rtl", f"{tag} unexpectedly LTR"
 
 
-def test_direction_falls_back_to_ltr_on_unknown_tag():
+def test_direction_falls_back_to_ltr_on_unknown_tag() -> None:
     """A bogus tag is treated as LTR rather than crashing. Matches the
     rest of resolve_locale's tolerance -- bad locale hints are UX
     degrades, not errors."""
     assert direction_for("xyz-nonsense") == "ltr"
 
 
-def test_html_dir_attribute_reflects_ltr_locale(client):
+def test_html_dir_attribute_reflects_ltr_locale(client: TestClient) -> None:
     r = client.get("/send")
     assert 'dir="ltr"' in r.text
 
 
-def test_html_dir_attribute_reflects_rtl_locale(client):
+def test_html_dir_attribute_reflects_rtl_locale(client: TestClient) -> None:
     """Resolution accepts any SUPPORTED tag; direction follows. Arabic
     is the first real RTL locale to ship -- `ar` is auto-discovered from
     the filesystem catalog, so this test checks the live behavior with
@@ -177,7 +182,7 @@ def test_html_dir_attribute_reflects_rtl_locale(client):
     assert 'lang="ar"' in r.text
 
 
-def test_discover_requires_po_for_non_default_locales(tmp_path, monkeypatch):
+def test_discover_requires_po_for_non_default_locales(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A locale with a JSON catalog but no gettext .po is half-shipped and
     must be skipped. Drop a fake es.json into an otherwise-empty tree and
     confirm discovery refuses to include it."""
@@ -202,7 +207,7 @@ def test_discover_requires_po_for_non_default_locales(tmp_path, monkeypatch):
     i18n_mod._discover.cache_clear()
 
 
-def test_discover_default_does_not_require_po(tmp_path, monkeypatch):
+def test_discover_default_does_not_require_po(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """English is the source of truth -- the msgids inside templates ARE
     the English strings, so no .po is required. Only the JSON catalog
     needs to exist."""
@@ -224,7 +229,7 @@ def test_discover_default_does_not_require_po(tmp_path, monkeypatch):
     i18n_mod._discover.cache_clear()
 
 
-def test_discover_skips_tags_babel_does_not_recognize(tmp_path, monkeypatch):
+def test_discover_skips_tags_babel_does_not_recognize(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If someone drops a JSON file whose stem isn't a real BCP-47 tag,
     Babel raises UnknownLocaleError during parsing and discovery skips
     it silently rather than crashing the app."""
@@ -246,7 +251,7 @@ def test_discover_skips_tags_babel_does_not_recognize(tmp_path, monkeypatch):
     i18n_mod._discover.cache_clear()
 
 
-def test_launch_opt_out_excludes_from_launched_but_keeps_in_supported(monkeypatch):
+def test_launch_opt_out_excludes_from_launched_but_keeps_in_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     """Adding a tag to _LAUNCH_OPT_OUT must keep it resolvable (SUPPORTED)
     while hiding it from the picker (LAUNCHED). The feature is for
     staging a locale before exposing it in the UI."""
@@ -267,20 +272,20 @@ def test_launch_opt_out_excludes_from_launched_but_keeps_in_supported(monkeypatc
 # ---------------------------------------------------------------------------
 
 
-def test_negotiate_exact_match():
+def test_negotiate_exact_match() -> None:
     assert negotiate("ja") == "ja"
     assert negotiate("zh-CN") == "zh-CN"
     assert negotiate("zh-TW") == "zh-TW"
     assert negotiate("pt-BR") == "pt-BR"
 
 
-def test_negotiate_is_case_insensitive():
+def test_negotiate_is_case_insensitive() -> None:
     assert negotiate("JA") == "ja"
     assert negotiate("zh-cn") == "zh-CN"
     assert negotiate("PT-br") == "pt-BR"
 
 
-def test_negotiate_honours_browser_order():
+def test_negotiate_honours_browser_order() -> None:
     # Browsers list the preferred locale first; first match wins regardless
     # of q-values (which we don't parse).
     assert negotiate("ja,en;q=0.9") == "ja"
@@ -290,7 +295,7 @@ def test_negotiate_honours_browser_order():
     assert negotiate("hi,ja;q=0.5,en;q=0.4") == "ja"
 
 
-def test_negotiate_primary_subtag_fallback():
+def test_negotiate_primary_subtag_fallback() -> None:
     # Regional variants fall back to their primary if it's supported.
     assert negotiate("es-MX") == "es"
     # `fr-CA` primary is `fr`, which IS in SUPPORTED. Pin the fallback;
@@ -302,7 +307,7 @@ def test_negotiate_primary_subtag_fallback():
     assert negotiate("it-IT") == DEFAULT
 
 
-def test_negotiate_unknown_returns_default():
+def test_negotiate_unknown_returns_default() -> None:
     # `it` (Italian) and `hi` (Hindi) are intentionally outside SUPPORTED.
     # If either gets added later, pick different unused tags here.
     assert negotiate("it,hi") == DEFAULT
@@ -319,12 +324,12 @@ def test_negotiate_unknown_returns_default():
 # ---------------------------------------------------------------------------
 
 
-def test_negotiate_routes_zh_sg_to_simplified():
+def test_negotiate_routes_zh_sg_to_simplified() -> None:
     """Singapore aligned to PRC Simplified in 1976; zh-SG gets zh-CN."""
     assert negotiate("zh-SG") == "zh-CN"
 
 
-def test_negotiate_routes_zh_hk_to_traditional():
+def test_negotiate_routes_zh_hk_to_traditional() -> None:
     """Hong Kong uses Traditional. Vocabulary differs from Taiwan in
     domains ephemera doesn't touch (network, software, printer), so
     zh-HK -> zh-TW is a defensible mapping at ephemera's tier rather
@@ -332,19 +337,19 @@ def test_negotiate_routes_zh_hk_to_traditional():
     assert negotiate("zh-HK") == "zh-TW"
 
 
-def test_negotiate_routes_zh_mo_to_traditional():
+def test_negotiate_routes_zh_mo_to_traditional() -> None:
     """Macao, like HK, uses Traditional. Same reasoning as HK routing."""
     assert negotiate("zh-MO") == "zh-TW"
 
 
-def test_negotiate_routes_zh_hans_variants_to_simplified():
+def test_negotiate_routes_zh_hans_variants_to_simplified() -> None:
     """Explicit script tags should be honored: zh-Hans* always Simplified."""
     assert negotiate("zh-Hans") == "zh-CN"
     assert negotiate("zh-Hans-CN") == "zh-CN"
     assert negotiate("zh-Hans-SG") == "zh-CN"
 
 
-def test_negotiate_routes_zh_hant_variants_to_traditional():
+def test_negotiate_routes_zh_hant_variants_to_traditional() -> None:
     """zh-Hant* always Traditional, regardless of regional subtag."""
     assert negotiate("zh-Hant") == "zh-TW"
     assert negotiate("zh-Hant-HK") == "zh-TW"
@@ -352,14 +357,14 @@ def test_negotiate_routes_zh_hant_variants_to_traditional():
     assert negotiate("zh-Hant-TW") == "zh-TW"
 
 
-def test_negotiate_routes_bare_zh_to_simplified():
+def test_negotiate_routes_bare_zh_to_simplified() -> None:
     """Bare `zh` with no region/script is utilitarian-defaulted to the
     larger speaker base (Simplified, ~30x Traditional). A bare tag often
     means a misconfigured client rather than a specific signal."""
     assert negotiate("zh") == "zh-CN"
 
 
-def test_negotiate_chinese_routing_is_case_insensitive():
+def test_negotiate_chinese_routing_is_case_insensitive() -> None:
     """Accept-Language tags come in mixed case in the wild (ZH-HK, Zh-Hk
     etc.); the routing table normalizes before lookup."""
     assert negotiate("ZH-HK") == "zh-TW"
@@ -367,14 +372,14 @@ def test_negotiate_chinese_routing_is_case_insensitive():
     assert negotiate("zh-hk") == "zh-TW"
 
 
-def test_negotiate_chinese_exact_match_still_wins():
+def test_negotiate_chinese_exact_match_still_wins() -> None:
     """Exact match beats alias routing -- a client sending zh-CN directly
     gets zh-CN without going through the alias table."""
     assert negotiate("zh-CN") == "zh-CN"
     assert negotiate("zh-TW") == "zh-TW"
 
 
-def test_negotiate_chinese_routing_respects_supported(monkeypatch):
+def test_negotiate_chinese_routing_respects_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     """If a future deployment drops zh-CN from SUPPORTED, the zh-SG alias
     must NOT return a tag that doesn't resolve. Verified by monkeypatching
     SUPPORTED to exclude zh-CN and confirming the alias silently disables
@@ -387,7 +392,7 @@ def test_negotiate_chinese_routing_respects_supported(monkeypatch):
     assert i18n_mod.negotiate("zh-SG") == DEFAULT
 
 
-def test_negotiate_chinese_routing_honors_browser_order():
+def test_negotiate_chinese_routing_honors_browser_order() -> None:
     """When Accept-Language carries multiple tags, routing fires on the
     first matchable one. Browsers emit preferred-first, so the alias
     resolves in that priority order along with the rest of the stack."""
@@ -399,13 +404,13 @@ def test_negotiate_chinese_routing_honors_browser_order():
     assert negotiate("hi,zh-HK;q=0.9,en;q=0.8") == "zh-TW"
 
 
-def test_negotiate_empty_and_none():
+def test_negotiate_empty_and_none() -> None:
     assert negotiate(None) == DEFAULT
     assert negotiate("") == DEFAULT
     assert negotiate("   ") == DEFAULT
 
 
-def test_validate_normalizes_case():
+def test_validate_normalizes_case() -> None:
     assert _validate("ZH-cn") == "zh-CN"
     assert _validate("ja") == "ja"
     assert _validate("xx") is None
@@ -418,7 +423,7 @@ def test_validate_normalizes_case():
 # ---------------------------------------------------------------------------
 
 
-def test_gettext_null_catalog_identity():
+def test_gettext_null_catalog_identity() -> None:
     # No .mo files are shipped yet; every locale yields the null catalog,
     # which returns the msgid unchanged.
     for tag in SUPPORTED:
@@ -426,7 +431,7 @@ def test_gettext_null_catalog_identity():
         assert g("Hello, world.") == "Hello, world."
 
 
-def test_lazy_gettext_reads_contextvar():
+def test_lazy_gettext_reads_contextvar() -> None:
     lz = lazy_gettext("Expires in")
     # Default context -> identity (catalog lookup returns the msgid when no
     # locale is active), still string-coerceable.
@@ -444,7 +449,7 @@ def test_lazy_gettext_reads_contextvar():
 # ---------------------------------------------------------------------------
 
 
-def test_js_catalog_en_has_expected_keys():
+def test_js_catalog_en_has_expected_keys() -> None:
     cat = js_catalog("en")
     # Spot-check: every error-code the server raises should have an
     # error.<code> entry so the JS side can localize it.
@@ -460,7 +465,7 @@ def test_js_catalog_en_has_expected_keys():
     assert cat["button"]["creating"]
 
 
-def test_js_catalog_non_en_locales_are_populated():
+def test_js_catalog_non_en_locales_are_populated() -> None:
     # Every supported locale ships a populated JS catalog. The shim's
     # fallback chain still uses the English catalog for any miss, so an
     # accidentally-stubbed locale would silently render English instead
@@ -477,7 +482,7 @@ def test_js_catalog_non_en_locales_are_populated():
         assert cat["button"]["creating"]
 
 
-def test_js_catalog_returns_empty_dict_for_unknown_locale(tmp_path, monkeypatch):
+def test_js_catalog_returns_empty_dict_for_unknown_locale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Locales without a `<tag>.json` file under the catalog dir get
     an empty dict, not a 500. The shim's fallback chain re-resolves
     against English on miss, so a tag with no shipped catalog still
@@ -488,7 +493,7 @@ def test_js_catalog_returns_empty_dict_for_unknown_locale(tmp_path, monkeypatch)
     assert i18n_mod.js_catalog("xx-NOT-A-REAL-LOCALE") == {}
 
 
-def test_js_catalog_returns_empty_dict_for_malformed_json(tmp_path, monkeypatch):
+def test_js_catalog_returns_empty_dict_for_malformed_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A truncated / corrupted `.json` catalog returns `{}` rather
     than letting the JSONDecodeError propagate. Ensures a partial
     deploy or a hand-edit-gone-wrong doesn't 500 the page."""
@@ -499,7 +504,7 @@ def test_js_catalog_returns_empty_dict_for_malformed_json(tmp_path, monkeypatch)
     assert i18n_mod.js_catalog("broken") == {}
 
 
-def test_get_locale_resolves_when_middleware_did_not_run():
+def test_get_locale_resolves_when_middleware_did_not_run() -> None:
     """`get_locale` is the FastAPI dependency the route handlers use.
     The locale_middleware normally stashes the resolved tag on
     `request.state.locale` so this dependency just hands back the
@@ -518,7 +523,10 @@ def test_get_locale_resolves_when_middleware_did_not_run():
         headers={},
         query_params={},
     )
-    assert i18n_mod.get_locale(cached_request) == "es"
+    # The dependency expects a fastapi.Request; the test deliberately
+    # passes a SimpleNamespace stand-in to drive both the cached and
+    # fallback branches without spinning up a real ASGI scope.
+    assert i18n_mod.get_locale(cached_request) == "es"  # type: ignore[arg-type]
 
     # Fallback path: no cache, resolve_locale runs and returns the
     # default for an empty Accept-Language / no-cookie request.
@@ -528,7 +536,7 @@ def test_get_locale_resolves_when_middleware_did_not_run():
         headers={},
         query_params={},
     )
-    assert i18n_mod.get_locale(bare_request) == i18n_mod.DEFAULT
+    assert i18n_mod.get_locale(bare_request) == i18n_mod.DEFAULT  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -536,37 +544,37 @@ def test_get_locale_resolves_when_middleware_did_not_run():
 # ---------------------------------------------------------------------------
 
 
-def test_locale_default_is_english_with_no_hints(client):
+def test_locale_default_is_english_with_no_hints(client: TestClient) -> None:
     r = client.get("/send")
     assert r.status_code == 200
     assert 'lang="en"' in r.text
 
 
-def test_locale_query_param_wins(client):
+def test_locale_query_param_wins(client: TestClient) -> None:
     r = client.get("/send?lang=ja")
     assert 'lang="ja"' in r.text
     r = client.get("/send?lang=zh-TW")
     assert 'lang="zh-TW"' in r.text
 
 
-def test_locale_cookie_wins_over_accept_language(client):
+def test_locale_cookie_wins_over_accept_language(client: TestClient) -> None:
     client.cookies.set("ephemera_lang_v1", "es")
     r = client.get("/send", headers={"Accept-Language": "ja"})
     assert 'lang="es"' in r.text
 
 
-def test_locale_query_param_wins_over_cookie(client):
+def test_locale_query_param_wins_over_cookie(client: TestClient) -> None:
     client.cookies.set("ephemera_lang_v1", "es")
     r = client.get("/send?lang=pt-BR", headers={"Accept-Language": "ja"})
     assert 'lang="pt-BR"' in r.text
 
 
-def test_locale_accept_language_negotiation(client):
+def test_locale_accept_language_negotiation(client: TestClient) -> None:
     r = client.get("/send", headers={"Accept-Language": "pt-BR,en;q=0.9"})
     assert 'lang="pt-BR"' in r.text
 
 
-def test_locale_unknown_falls_through_silently(client):
+def test_locale_unknown_falls_through_silently(client: TestClient) -> None:
     # ?lang=xx is advisory, not validation -- an unknown tag must not
     # 400 the request. It just falls through to the next step in the
     # precedence chain (Accept-Language, then DEFAULT).
@@ -575,9 +583,7 @@ def test_locale_unknown_falls_through_silently(client):
     assert 'lang="ja"' in r.text
 
 
-def test_locale_authed_user_preference_wins_over_header(
-    authed_client, provisioned_user
-):
+def test_locale_authed_user_preference_wins_over_header(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
     # Persist a preference on the authed user, then verify a request with
     # a conflicting Accept-Language still gets the stored locale.
     from app.models import users as users_model
@@ -587,7 +593,7 @@ def test_locale_authed_user_preference_wins_over_header(
     assert 'lang="zh-CN"' in r.text
 
 
-def test_locale_cookie_beats_user_preference(authed_client, provisioned_user):
+def test_locale_cookie_beats_user_preference(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
     # A user who temporarily picks a different language via the widget
     # (cookie) should see it even though their stored preference differs.
     from app.models import users as users_model
@@ -603,7 +609,7 @@ def test_locale_cookie_beats_user_preference(authed_client, provisioned_user):
 # ---------------------------------------------------------------------------
 
 
-def test_fresh_db_is_at_current_schema_version(tmp_db_path):
+def test_fresh_db_is_at_current_schema_version(tmp_db_path: Path) -> None:
     import sqlite3
 
     from app.models._core import CURRENT_SCHEMA_VERSION
@@ -614,7 +620,7 @@ def test_fresh_db_is_at_current_schema_version(tmp_db_path):
     assert row[0] == CURRENT_SCHEMA_VERSION
 
 
-def test_fresh_db_has_preferred_language_column(tmp_db_path):
+def test_fresh_db_has_preferred_language_column(tmp_db_path: Path) -> None:
     import sqlite3
 
     with sqlite3.connect(str(tmp_db_path)) as conn:
@@ -622,7 +628,7 @@ def test_fresh_db_has_preferred_language_column(tmp_db_path):
     assert "preferred_language" in cols
 
 
-def test_v1_legacy_db_upgrades_through_to_current(tmp_path, monkeypatch):
+def test_v1_legacy_db_upgrades_through_to_current(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Seed a v1 DB (no preferred_language column, version stamped at 1),
     boot the current code, and confirm migrations chain through to the
     latest stamped version. As schema_version bumps, the assertion
@@ -687,7 +693,7 @@ def test_v1_legacy_db_upgrades_through_to_current(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_patch_language_anonymous_rejected_401(client):
+def test_patch_language_anonymous_rejected_401(client: TestClient) -> None:
     """Anonymous callers get 401 with the `not_authenticated` code. The
     picker JS short-circuits on anonymous before this fires, so in normal
     operation this path is only hit by forged / misconfigured clients."""
@@ -700,7 +706,7 @@ def test_patch_language_anonymous_rejected_401(client):
     assert r.json()["detail"]["code"] == "not_authenticated"
 
 
-def test_patch_language_anonymous_does_not_leak_language_validation(client):
+def test_patch_language_anonymous_does_not_leak_language_validation(client: TestClient) -> None:
     """Even with a body the authed-flow would reject at 400 (unsupported
     language), the anonymous caller must still see 401 first. Otherwise
     the endpoint would leak whether a tag is in SUPPORTED to anyone
@@ -713,7 +719,7 @@ def test_patch_language_anonymous_does_not_leak_language_validation(client):
     assert r.status_code == 401
 
 
-def test_patch_language_null_clears(authed_client, provisioned_user):
+def test_patch_language_null_clears(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
     from app.models import users as users_model
 
     users_model.set_preferred_language(provisioned_user["id"], "ja")
@@ -724,10 +730,11 @@ def test_patch_language_null_clears(authed_client, provisioned_user):
     )
     assert r.status_code == 204
     user = users_model.get_user_by_id(provisioned_user["id"])
+    assert user is not None
     assert user["preferred_language"] is None
 
 
-def test_patch_language_authed_persists(authed_client, provisioned_user):
+def test_patch_language_authed_persists(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
     from app.models import users as users_model
 
     r = authed_client.patch(
@@ -737,10 +744,11 @@ def test_patch_language_authed_persists(authed_client, provisioned_user):
     )
     assert r.status_code == 204
     user = users_model.get_user_by_id(provisioned_user["id"])
+    assert user is not None
     assert user["preferred_language"] == "zh-CN"
 
 
-def test_patch_language_unsupported_rejected(authed_client):
+def test_patch_language_unsupported_rejected(authed_client: TestClient) -> None:
     """Body validation (400) only reached after auth passes -- anonymous
     callers get 401 first, see the auth-leak test above."""
     r = authed_client.patch(
@@ -752,7 +760,7 @@ def test_patch_language_unsupported_rejected(authed_client):
     assert r.json()["detail"]["code"] == "unsupported_language"
 
 
-def test_patch_language_missing_origin_blocked(client):
+def test_patch_language_missing_origin_blocked(client: TestClient) -> None:
     # verify_same_origin must still gate this state-changing endpoint.
     r = client.patch("/api/me/language", json={"language": "ja"})
     assert r.status_code == 403
@@ -764,29 +772,35 @@ def test_patch_language_missing_origin_blocked(client):
 # ---------------------------------------------------------------------------
 
 
-def test_http_error_basic_shape():
+def test_http_error_basic_shape() -> None:
     exc = http_error(401, "wrong_passphrase")
     assert exc.status_code == 401
-    assert exc.detail == {
+    # Starlette types HTTPException.detail as `str`; FastAPI widens to Any
+    # at runtime, and http_error stores a dict here. Cast through Any so
+    # the dict assertions don't trip the inherited str annotation.
+    detail = cast(dict[str, Any], exc.detail)
+    assert detail == {
         "code": "wrong_passphrase",
         "message": "Wrong passphrase.",
     }
 
 
-def test_http_error_custom_message_overrides():
+def test_http_error_custom_message_overrides() -> None:
     exc = http_error(422, "invalid_json_body", message="Invalid JSON body: got 3.")
-    assert exc.detail["code"] == "invalid_json_body"
-    assert exc.detail["message"] == "Invalid JSON body: got 3."
+    detail = cast(dict[str, Any], exc.detail)
+    assert detail["code"] == "invalid_json_body"
+    assert detail["message"] == "Invalid JSON body: got 3."
 
 
-def test_http_error_extra_fields_merged():
+def test_http_error_extra_fields_merged() -> None:
     exc = http_error(423, "locked", until="2026-04-23T10:00:00Z")
-    assert exc.detail["code"] == "locked"
-    assert exc.detail["until"] == "2026-04-23T10:00:00Z"
-    assert "message" in exc.detail
+    detail = cast(dict[str, Any], exc.detail)
+    assert detail["code"] == "locked"
+    assert detail["until"] == "2026-04-23T10:00:00Z"
+    assert "message" in detail
 
 
-def test_http_error_live_response_shape(client):
+def test_http_error_live_response_shape(client: TestClient) -> None:
     # Real request -> real response: confirm the wire payload matches.
     r = client.get("/s/does-not-exist/meta")
     assert r.status_code == 404
@@ -801,7 +815,7 @@ def test_http_error_live_response_shape(client):
 # ---------------------------------------------------------------------------
 
 
-def test_page_inlines_active_and_fallback_catalogs(client):
+def test_page_inlines_active_and_fallback_catalogs(client: TestClient) -> None:
     r = client.get("/send?lang=ja")
     body = r.text
     # Active locale's catalog is inlined as JSON and contains the translated
@@ -814,7 +828,7 @@ def test_page_inlines_active_and_fallback_catalogs(client):
     assert "Wrong passphrase" in body
 
 
-def test_picker_hidden_when_launched_has_fewer_than_two(client, monkeypatch):
+def test_picker_hidden_when_launched_has_fewer_than_two(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Structural test for the picker-gate. A single-option <select> is a
     UX wart (nothing to actually pick), so the template hides the picker
     entirely when LAUNCHED has <2 members. Monkeypatches LAUNCHED because
@@ -831,7 +845,7 @@ def test_picker_hidden_when_launched_has_fewer_than_two(client, monkeypatch):
     assert 'lang="pt-BR"' in r2.text
 
 
-def test_picker_renders_when_multiple_locales_launched(client, monkeypatch):
+def test_picker_renders_when_multiple_locales_launched(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Structural test for the two-or-more-locales render path.
     Monkeypatches LAUNCHED to a small set so the assertion is stable
     against future additions to the shipped LAUNCHED tuple."""
@@ -845,7 +859,7 @@ def test_picker_renders_when_multiple_locales_launched(client, monkeypatch):
     assert 'value="en"' in body
 
 
-def test_picker_renders_every_shipped_launched_locale(client):
+def test_picker_renders_every_shipped_launched_locale(client: TestClient) -> None:
     """Ship-state test: every tag currently in LAUNCHED must appear as an
     <option> in the picker, unmonkeypatched. Guards against 'added a
     locale to SUPPORTED + LAUNCHED but forgot to update LANGUAGE_LABELS'
@@ -867,12 +881,12 @@ def test_picker_renders_every_shipped_launched_locale(client):
         )
 
 
-def test_body_data_authenticated_present_for_authed(authed_client):
+def test_body_data_authenticated_present_for_authed(authed_client: TestClient) -> None:
     r = authed_client.get("/send")
     assert 'data-authenticated="true"' in r.text
 
 
-def test_body_data_authenticated_absent_for_anonymous(client):
+def test_body_data_authenticated_absent_for_anonymous(client: TestClient) -> None:
     """Anonymous page loads must not carry the data-authenticated
     attribute -- the picker JS branches on it to decide whether to PATCH
     /api/me/language, so a stray attribute would cost every anonymous
@@ -895,7 +909,7 @@ def test_body_data_authenticated_absent_for_anonymous(client):
 _JS_T_CALL_RE = re.compile(r"""i18n\.t\(\s*['"]([a-z][a-z0-9_.]*)['"]""")
 
 
-def _enumerate_string_paths(tree, prefix=""):
+def _enumerate_string_paths(tree: Any, prefix: str = "") -> "Iterator[str]":
     """Yield every dotted path that leads to a string leaf in the
     catalog. Plural containers (dicts of 'one'/'other'/...) yield the
     container path itself in addition to each leaf inside -- both forms
@@ -910,7 +924,7 @@ def _enumerate_string_paths(tree, prefix=""):
         yield prefix
 
 
-def test_every_js_i18n_key_exists_in_en_catalog():
+def test_every_js_i18n_key_exists_in_en_catalog() -> None:
     """Scan every .js file under app/static/ for i18n.t('...') calls;
     assert each referenced stem is reachable in the English catalog. A
     miss means someone added a translation call without adding the key
@@ -978,7 +992,7 @@ def test_every_js_i18n_key_exists_in_en_catalog():
 # ---------------------------------------------------------------------------
 
 
-def _structural_paths(tree, prefix=""):
+def _structural_paths(tree: Any, prefix: str = "") -> Iterator[str]:
     """Enumerate paths for cross-locale parity. Differs from the
     _enumerate_string_paths enumerator used by the JS-key-coverage
     test: plural containers (dicts whose keys are a subset of the
@@ -1000,7 +1014,7 @@ def _structural_paths(tree, prefix=""):
         yield prefix
 
 
-def test_every_locale_catalog_has_every_en_key():
+def test_every_locale_catalog_has_every_en_key() -> None:
     """Every non-plural leaf path and every plural container path in
     en.json must exist in every other locale's JSON catalog. Without
     this coverage, a PR that adds a new key to en.json + wires it into
@@ -1044,7 +1058,7 @@ def test_every_locale_catalog_has_every_en_key():
 # ---------------------------------------------------------------------------
 
 
-def test_version_module_returns_non_empty_string():
+def test_version_module_returns_non_empty_string() -> None:
     """The module-level constant is populated at import time. Even in
     environments where git is missing or the repo is a tarball, the
     fallback sentinel ('unknown') keeps this non-empty."""
@@ -1054,7 +1068,7 @@ def test_version_module_returns_non_empty_string():
     assert VERSION, "VERSION must not be empty -- fallback should be 'unknown'"
 
 
-def test_version_fallback_on_subprocess_failure(monkeypatch):
+def test_version_fallback_on_subprocess_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """If `git describe` errors or times out, the function must return
     'unknown' rather than raising or returning an empty string. Verified
     by monkeypatching subprocess.run to raise, then re-running the
@@ -1063,14 +1077,14 @@ def test_version_fallback_on_subprocess_failure(monkeypatch):
 
     import app.version as version_mod
 
-    def _raise(*_a, **_kw):
+    def _raise(*_a: Any, **_kw: Any) -> None:
         raise FileNotFoundError("git not on PATH")
 
     monkeypatch.setattr(subprocess, "run", _raise)
     assert version_mod._compute_version() == "unknown"
 
 
-def test_version_renders_under_wordmark(client):
+def test_version_renders_under_wordmark(client: TestClient) -> None:
     """The version tag sits as a <small> directly following the wordmark
     -- 'fine print adjacent to brand' pattern. Proximity to the
     wordmark makes the context obvious (screen readers read 'ephemera,

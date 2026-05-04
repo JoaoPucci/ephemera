@@ -1,10 +1,18 @@
 """Tests for receiver routes: landing page, reveal, passphrase, burn-on-failure."""
 
+from typing import Any
+
+from fastapi.testclient import TestClient
+
 
 def _create_text_secret(
-    client, auth_headers, content="the secret", passphrase=None, track=False
-):
-    body = {
+    client: TestClient,
+    auth_headers: dict[str, str],
+    content: str = "the secret",
+    passphrase: str | None = None,
+    track: bool = False,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
         "content": content,
         "content_type": "text",
         "expires_in": 3600,
@@ -14,23 +22,25 @@ def _create_text_secret(
         body["passphrase"] = passphrase
     r = client.post("/api/secrets", json=body, headers=auth_headers)
     assert r.status_code == 201, r.text
-    return r.json()
+    # httpx.Response.json() is typed Any; the create-secret response is a
+    # dict-shaped JSON object.
+    return r.json()  # type: ignore[no-any-return]
 
 
-def _token_and_client_half(url):
+def _token_and_client_half(url: str) -> tuple[str, str]:
     path, frag = url.split("#", 1)
     token = path.rsplit("/", 1)[-1]
     return token, frag
 
 
-def test_landing_page_returned_for_any_token(client):
+def test_landing_page_returned_for_any_token(client: TestClient) -> None:
     # Even for bogus tokens, landing HTML is returned; meta endpoint reveals state.
     r = client.get("/s/totally-fake-token")
     assert r.status_code == 200
     assert b"<html" in r.content.lower() or b"<!doctype" in r.content.lower()
 
 
-def test_meta_returns_passphrase_false_when_none(client, auth_headers):
+def test_meta_returns_passphrase_false_when_none(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers)
     token, _ = _token_and_client_half(secret["url"])
     r = client.get(f"/s/{token}/meta")
@@ -38,7 +48,7 @@ def test_meta_returns_passphrase_false_when_none(client, auth_headers):
     assert r.json()["passphrase_required"] is False
 
 
-def test_meta_returns_passphrase_true_when_set(client, auth_headers):
+def test_meta_returns_passphrase_true_when_set(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers, passphrase="open sesame")
     token, _ = _token_and_client_half(secret["url"])
     r = client.get(f"/s/{token}/meta")
@@ -46,12 +56,12 @@ def test_meta_returns_passphrase_true_when_set(client, auth_headers):
     assert r.json()["passphrase_required"] is True
 
 
-def test_meta_returns_404_for_unknown_token(client):
+def test_meta_returns_404_for_unknown_token(client: TestClient) -> None:
     r = client.get("/s/nonexistent/meta")
     assert r.status_code == 404
 
 
-def test_reveal_returns_plaintext_for_text_secret(client, auth_headers):
+def test_reveal_returns_plaintext_for_text_secret(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers, content="hello")
     token, client_half = _token_and_client_half(secret["url"])
     r = client.post(
@@ -65,7 +75,7 @@ def test_reveal_returns_plaintext_for_text_secret(client, auth_headers):
     assert body["content"] == "hello"
 
 
-def test_reveal_deletes_secret_on_success(client, auth_headers):
+def test_reveal_deletes_secret_on_success(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers)
     token, client_half = _token_and_client_half(secret["url"])
     client.post(
@@ -78,7 +88,7 @@ def test_reveal_deletes_secret_on_success(client, auth_headers):
     assert models.get_by_token(token) is None
 
 
-def test_reveal_twice_second_returns_404(client, auth_headers):
+def test_reveal_twice_second_returns_404(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers)
     token, client_half = _token_and_client_half(secret["url"])
     client.post(
@@ -94,7 +104,7 @@ def test_reveal_twice_second_returns_404(client, auth_headers):
     assert r.status_code == 404
 
 
-def test_concurrent_reveals_exactly_one_gets_plaintext(client, auth_headers):
+def test_concurrent_reveals_exactly_one_gets_plaintext(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Two threaded reveals racing: one 200 with plaintext, the other 404.
     Regression gate for the atomic-reveal fix: if the route loses its
     atomic gate, both callers would return the plaintext."""
@@ -108,7 +118,7 @@ def test_concurrent_reveals_exactly_one_gets_plaintext(client, auth_headers):
     bodies: list[str] = []
     lock = threading.Lock()
 
-    def fire():
+    def fire() -> None:
         barrier.wait()
         r = client.post(
             f"/s/{token}/reveal", json={"key": client_half}, headers=headers
@@ -129,7 +139,7 @@ def test_concurrent_reveals_exactly_one_gets_plaintext(client, auth_headers):
     assert bodies == ["race-winner"]
 
 
-def test_reveal_with_wrong_key_returns_error(client, auth_headers):
+def test_reveal_with_wrong_key_returns_error(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers)
     token, _ = _token_and_client_half(secret["url"])
     import base64
@@ -141,7 +151,7 @@ def test_reveal_with_wrong_key_returns_error(client, auth_headers):
     assert r.status_code == 400
 
 
-def test_reveal_with_malformed_base64_fragment_returns_400(client, auth_headers):
+def test_reveal_with_malformed_base64_fragment_returns_400(client: TestClient, auth_headers: dict[str, str]) -> None:
     """A fragment that isn't valid base64url at all -- decode_half raises,
     we return 400 'malformed key' rather than letting the exception bubble."""
     secret = _create_text_secret(client, auth_headers)
@@ -154,7 +164,7 @@ def test_reveal_with_malformed_base64_fragment_returns_400(client, auth_headers)
     assert r.status_code == 400
 
 
-def test_reveal_with_wrong_length_fragment_returns_400(client, auth_headers):
+def test_reveal_with_wrong_length_fragment_returns_400(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Valid base64url but the decoded bytes aren't 16 bytes long -- we
     reject before reaching Fernet so the error message is specific."""
     secret = _create_text_secret(client, auth_headers)
@@ -170,7 +180,7 @@ def test_reveal_with_wrong_length_fragment_returns_400(client, auth_headers):
     assert r.status_code == 400
 
 
-def test_reveal_without_passphrase_when_required_rejected(client, auth_headers):
+def test_reveal_without_passphrase_when_required_rejected(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers, passphrase="pw")
     token, client_half = _token_and_client_half(secret["url"])
     r = client.post(
@@ -181,7 +191,7 @@ def test_reveal_without_passphrase_when_required_rejected(client, auth_headers):
     assert r.status_code == 401
 
 
-def test_reveal_with_wrong_passphrase_returns_401_and_increments(client, auth_headers):
+def test_reveal_with_wrong_passphrase_returns_401_and_increments(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(client, auth_headers, passphrase="correct")
     token, client_half = _token_and_client_half(secret["url"])
     r = client.post(
@@ -197,7 +207,7 @@ def test_reveal_with_wrong_passphrase_returns_401_and_increments(client, auth_he
     assert row["attempts"] == 1
 
 
-def test_reveal_with_correct_passphrase_succeeds(client, auth_headers):
+def test_reveal_with_correct_passphrase_succeeds(client: TestClient, auth_headers: dict[str, str]) -> None:
     secret = _create_text_secret(
         client, auth_headers, content="payload", passphrase="correct"
     )
@@ -212,8 +222,8 @@ def test_reveal_with_correct_passphrase_succeeds(client, auth_headers):
 
 
 def test_reveal_burns_secret_after_too_many_failed_passphrase_attempts(
-    client, auth_headers
-):
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     secret = _create_text_secret(client, auth_headers, passphrase="correct")
     token, client_half = _token_and_client_half(secret["url"])
     last_status = None
@@ -234,7 +244,7 @@ def test_reveal_burns_secret_after_too_many_failed_passphrase_attempts(
     assert r.status_code in (404, 410)
 
 
-def test_reveal_returns_image_as_base64(client, auth_headers, sample_png_bytes):
+def test_reveal_returns_image_as_base64(client: TestClient, auth_headers: dict[str, str], sample_png_bytes: bytes) -> None:
     r = client.post(
         "/api/secrets",
         files={"file": ("a.png", sample_png_bytes, "image/png")},
@@ -258,7 +268,7 @@ def test_reveal_returns_image_as_base64(client, auth_headers, sample_png_bytes):
     assert base64.b64decode(body["content"]) == sample_png_bytes
 
 
-def test_reveal_404_for_expired_secret(client, auth_headers, provisioned_user):
+def test_reveal_404_for_expired_secret(client: TestClient, auth_headers: dict[str, str], provisioned_user: dict[str, Any]) -> None:
     from app import crypto, models
 
     # Create directly with negative expiry.
@@ -321,7 +331,7 @@ from hypothesis import HealthCheck, given, settings  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
 
 
-def _reset_rate_limits():
+def _reset_rate_limits() -> None:
     """Reset every rate-limiter bucket. Hypothesis runs many examples
     inside one test function; the `client` fixture only resets at
     function setup/teardown, so without a per-example reset the
@@ -359,7 +369,7 @@ _text_content = st.text(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
     deadline=None,
 )
-def test_property_text_secret_round_trips(client, auth_headers, content: str):
+def test_property_text_secret_round_trips(client: TestClient, auth_headers: dict[str, str], content: str) -> None:
     """For any non-empty text content (printable + unicode + whitespace),
     POST /api/secrets followed by POST /s/{token}/reveal returns the
     same string byte-for-byte. Catches encoding regressions:
@@ -385,7 +395,7 @@ def test_property_text_secret_round_trips(client, auth_headers, content: str):
     suppress_health_check=[HealthCheck.function_scoped_fixture],
     deadline=None,
 )
-def test_property_reveal_is_single_use(client, auth_headers, content: str):
+def test_property_reveal_is_single_use(client: TestClient, auth_headers: dict[str, str], content: str) -> None:
     """For any minted secret, the second reveal call returns 404. Pins
     the consume-on-success contract against any code path that quietly
     leaves the row behind on success (would let a second viewer get the
@@ -423,7 +433,7 @@ _token_shaped = st.text(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
     deadline=None,
 )
-def test_property_unknown_token_returns_404(client, fake_token: str):
+def test_property_unknown_token_returns_404(client: TestClient, fake_token: str) -> None:
     """For any token-shaped string the server didn't issue, the meta
     endpoint returns 404. Catches a regression that loosened the token
     existence check (prefix match, case-insensitive lookup, etc.). The
@@ -450,8 +460,8 @@ _passphrase = st.text(min_size=1, max_size=72).filter(
     deadline=None,
 )
 def test_property_passphrase_protected_round_trips(
-    client, auth_headers, passphrase: str, content: str
-):
+    client: TestClient, auth_headers: dict[str, str], passphrase: str, content: str
+) -> None:
     """For any (passphrase, content) pair within bcrypt's input cap,
     minting with that passphrase and revealing with the same
     passphrase returns the original content. Pins the bcrypt verify

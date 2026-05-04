@@ -1,7 +1,11 @@
 """Tests for app.config env-file discovery."""
 
+from pathlib import Path
 
-def test_filter_readable_skips_missing_and_includes_existing(tmp_path):
+import pytest
+
+
+def test_filter_readable_skips_missing_and_includes_existing(tmp_path: Path) -> None:
     """Given a list of candidate .env-style paths, only the ones the
     current process can actually open should make it into the tuple
     pydantic-settings sees. Everything else (missing, unreadable) is
@@ -18,7 +22,7 @@ def test_filter_readable_skips_missing_and_includes_existing(tmp_path):
     assert str(missing) not in result
 
 
-def test_filter_readable_skips_unreadable_files(tmp_path):
+def test_filter_readable_skips_unreadable_files(tmp_path: Path) -> None:
     """File exists but the current process can't read it. Must be
     skipped with no error, same as if the file didn't exist at all.
     Without this, pydantic-settings would raise PermissionError at
@@ -35,8 +39,6 @@ def test_filter_readable_skips_unreadable_files(tmp_path):
         if os.access(str(locked), os.R_OK):
             # Running as root defeats the test's premise; skip rather
             # than silently pass.
-            import pytest
-
             pytest.skip("running as root -- unreadable-file branch can't fire")
 
         result = _filter_readable((str(locked),))
@@ -46,7 +48,7 @@ def test_filter_readable_skips_unreadable_files(tmp_path):
         os.chmod(locked, 0o600)
 
 
-def test_env_file_candidates_layering_includes_system_and_dev_paths():
+def test_env_file_candidates_layering_includes_system_and_dev_paths() -> None:
     """The candidate list must include the system path the deployment
     docs publish (`/etc/ephemera/env`) and the XDG dev location. If
     anyone removes either, that removal should be a deliberate change,
@@ -61,7 +63,7 @@ def test_env_file_candidates_layering_includes_system_and_dev_paths():
     assert ".env" in _ENV_FILE_CANDIDATES
 
 
-def test_env_file_precedence_system_wins_over_dev():
+def test_env_file_precedence_system_wins_over_dev() -> None:
     """pydantic-settings loads `env_file` in tuple order, later entries
     overriding earlier ones. The candidate list must put `/etc/ephemera/env`
     LAST so a prod host with a stale dev-side XDG file doesn't have admin-
@@ -84,7 +86,7 @@ def test_env_file_precedence_system_wins_over_dev():
     assert xdg_index < system_index
 
 
-def test_db_path_default_is_xdg_not_repo_root():
+def test_db_path_default_is_xdg_not_repo_root() -> None:
     """The code-level default for EPHEMERA_DB_PATH (used only when every
     higher-priority source is absent -- fresh clone, no .env anywhere)
     must resolve to the XDG data dir, not the repo root. Without this
@@ -98,7 +100,9 @@ def test_db_path_default_is_xdg_not_repo_root():
     # reads os.environ by default; override to an empty _env_file so any
     # EPHEMERA_DB_PATH we happen to have set while running tests doesn't
     # mask the default-under-test.
-    s = Settings(_env_file=None, _env_file_encoding=None)
+    # _env_file / _env_file_encoding are runtime-supported pydantic-settings
+    # init kwargs that aren't on the model schema; mypy can't see them.
+    s = Settings(_env_file=None, _env_file_encoding=None)  # type: ignore[call-arg]
     default_path = s.db_path
     assert ".local/share/ephemera-dev/ephemera.db" in default_path, (
         f"db_path default is {default_path!r}; should point at the XDG data dir"
@@ -107,7 +111,9 @@ def test_db_path_default_is_xdg_not_repo_root():
     assert not default_path.startswith("ephemera.db")
 
 
-def test_connect_creates_parent_directory_if_missing(tmp_path, monkeypatch):
+def test_connect_creates_parent_directory_if_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """_connect must mkdir -p the db_path's parent directory before
     sqlite3 tries to open the file inside it. Without this, a fresh
     clone with no env config would crash at first DB touch because

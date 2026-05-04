@@ -17,8 +17,10 @@ editing") via lang-confirm.js. The dialog markup is server-rendered
 into the head/body when chrome_variant == "sender".
 """
 
+from fastapi.testclient import TestClient
 
-def test_receiver_landing_does_not_render_language_picker(client):
+
+def test_receiver_landing_does_not_render_language_picker(client: TestClient) -> None:
     # /s/{token} routes through receiver.py, which passes
     # chrome_variant="receiver". The desktop <select id="lang-picker">
     # and the mobile <select id="chrome-menu-lang"> rows must both be
@@ -34,7 +36,7 @@ def test_receiver_landing_does_not_render_language_picker(client):
     )
 
 
-def test_receiver_landing_still_renders_theme_toggle(client):
+def test_receiver_landing_still_renders_theme_toggle(client: TestClient) -> None:
     # Hiding the language picker should not collapse the rest of the
     # chrome menu. Theme toggle stays because it's safe (theme.js flips
     # data-theme via JS, no reload) and recipient-relevant (read in
@@ -46,7 +48,7 @@ def test_receiver_landing_still_renders_theme_toggle(client):
     )
 
 
-def test_sender_form_renders_lang_confirm_dialog_markup(client):
+def test_sender_form_renders_lang_confirm_dialog_markup(client: TestClient) -> None:
     # /send routes through sender.py with chrome_variant="sender". The
     # confirm dialog markup is rendered server-side so lang-confirm.js
     # can locate and animate it without injecting DOM at runtime
@@ -70,7 +72,7 @@ def test_sender_form_renders_lang_confirm_dialog_markup(client):
         )
 
 
-def test_receiver_does_not_render_lang_confirm_dialog(client):
+def test_receiver_does_not_render_lang_confirm_dialog(client: TestClient) -> None:
     # Dialog is only useful on the sender (where dirty state exists).
     # Rendering it on receiver is dead markup and a bug source if the
     # picker ever leaks back in.
@@ -81,7 +83,7 @@ def test_receiver_does_not_render_lang_confirm_dialog(client):
     )
 
 
-def test_pages_without_chrome_variant_default_to_no_lang_confirm_dialog(client):
+def test_pages_without_chrome_variant_default_to_no_lang_confirm_dialog(client: TestClient) -> None:
     # Login / docs / other auth-gated pages don't pass a chrome_variant
     # and default to the unsuffixed (no dialog) shape -- the dialog is
     # specifically for the sender form's dirty-state path. /send/login

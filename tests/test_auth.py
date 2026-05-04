@@ -2,7 +2,10 @@
 
 import json
 import time
+from collections.abc import Callable
 from datetime import UTC
+from pathlib import Path
+from typing import Any
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -12,51 +15,51 @@ from app import auth, models
 from app.auth import tokens as tokens_mod
 
 
-def test_hash_and_verify_password_roundtrip():
+def test_hash_and_verify_password_roundtrip() -> None:
     h = auth.hash_password("correct horse battery")
     assert auth.verify_password("correct horse battery", h) is True
     assert auth.verify_password("wrong", h) is False
 
 
-def test_bcrypt_hash_has_standard_prefix():
+def test_bcrypt_hash_has_standard_prefix() -> None:
     h = auth.hash_password("x")
     assert h.startswith("$2")
 
 
-def test_verify_password_returns_false_for_malformed_hash():
+def test_verify_password_returns_false_for_malformed_hash() -> None:
     """bcrypt.checkpw raises ValueError on non-bcrypt strings (e.g. a legacy
     plaintext column, a truncated hash). Should return False, not crash."""
     assert auth.verify_password("anything", "not-a-bcrypt-hash") is False
     assert auth.verify_password("anything", "") is False
 
 
-def test_totp_accepts_current_step(provisioned_user):
+def test_totp_accepts_current_step(provisioned_user: dict[str, Any]) -> None:
     secret = provisioned_user["totp_secret"]
     code = provisioned_user["totp"].now()
     step = auth.verify_totp(secret, code, last_step=0)
     assert step is not None and step > 0
 
 
-def test_totp_rejects_wrong_code(provisioned_user):
+def test_totp_rejects_wrong_code(provisioned_user: dict[str, Any]) -> None:
     assert (
         auth.verify_totp(provisioned_user["totp_secret"], "000000", last_step=0) is None
     )
 
 
-def test_totp_rejects_non_numeric(provisioned_user):
+def test_totp_rejects_non_numeric(provisioned_user: dict[str, Any]) -> None:
     assert (
         auth.verify_totp(provisioned_user["totp_secret"], "abcdef", last_step=0) is None
     )
 
 
-def test_totp_accepts_previous_step_within_tolerance(provisioned_user):
+def test_totp_accepts_previous_step_within_tolerance(provisioned_user: dict[str, Any]) -> None:
     secret = provisioned_user["totp_secret"]
     prev_step_time = (int(time.time()) // auth.TOTP_INTERVAL - 1) * auth.TOTP_INTERVAL
     old_code = provisioned_user["totp"].at(prev_step_time)
     assert auth.verify_totp(secret, old_code, last_step=0) is not None
 
 
-def test_totp_replay_blocked(provisioned_user):
+def test_totp_replay_blocked(provisioned_user: dict[str, Any]) -> None:
     secret = provisioned_user["totp_secret"]
     code = provisioned_user["totp"].now()
     step = auth.verify_totp(secret, code, last_step=0)
@@ -64,7 +67,7 @@ def test_totp_replay_blocked(provisioned_user):
     assert auth.verify_totp(secret, code, last_step=step) is None
 
 
-def test_totp_rejects_step_far_in_past(provisioned_user):
+def test_totp_rejects_step_far_in_past(provisioned_user: dict[str, Any]) -> None:
     secret = provisioned_user["totp_secret"]
     ancient = provisioned_user["totp"].at(int(time.time()) - 300)
     assert auth.verify_totp(secret, ancient, last_step=0) is None
@@ -75,7 +78,7 @@ def test_totp_rejects_step_far_in_past(provisioned_user):
 # ---------------------------------------------------------------------------
 
 
-def test_generate_recovery_codes_returns_10_codes_and_stores_hashes(tmp_db_path):
+def test_generate_recovery_codes_returns_10_codes_and_stores_hashes(tmp_db_path: Path) -> None:
     codes, blob = auth.generate_recovery_codes()
     assert len(codes) == 10
     entries = json.loads(blob)
@@ -84,7 +87,7 @@ def test_generate_recovery_codes_returns_10_codes_and_stores_hashes(tmp_db_path)
     assert all(e["hash"].startswith("$2") for e in entries)
 
 
-def test_consume_backup_code_marks_used(tmp_db_path):
+def test_consume_backup_code_marks_used(tmp_db_path: Path) -> None:
     codes, blob = auth.generate_recovery_codes()
     updated = auth.consume_backup_code(codes[0], blob)
     assert updated is not None
@@ -93,19 +96,19 @@ def test_consume_backup_code_marks_used(tmp_db_path):
     assert len(used) == 1
 
 
-def test_consume_backup_code_is_single_use(tmp_db_path):
+def test_consume_backup_code_is_single_use(tmp_db_path: Path) -> None:
     codes, blob = auth.generate_recovery_codes()
     after_first = auth.consume_backup_code(codes[0], blob)
     assert after_first is not None
     assert auth.consume_backup_code(codes[0], after_first) is None
 
 
-def test_consume_backup_code_rejects_malformed_json(tmp_db_path):
+def test_consume_backup_code_rejects_malformed_json(tmp_db_path: Path) -> None:
     """A JSON blob that doesn't parse returns None (no crash)."""
     assert auth.consume_backup_code("XXXXX-YYYYY", "not-json") is None
 
 
-def test_consume_backup_code_skips_malformed_bcrypt_entries(tmp_db_path):
+def test_consume_backup_code_skips_malformed_bcrypt_entries(tmp_db_path: Path) -> None:
     """If one entry has a corrupted hash, we should skip it and try the rest
     rather than abort. Mirrors the same bcrypt-raises-ValueError defensive
     path verify_password uses."""
@@ -119,12 +122,12 @@ def test_consume_backup_code_skips_malformed_bcrypt_entries(tmp_db_path):
     assert updated is not None
 
 
-def test_consume_backup_code_rejects_unknown_code(tmp_db_path):
+def test_consume_backup_code_rejects_unknown_code(tmp_db_path: Path) -> None:
     _, blob = auth.generate_recovery_codes()
     assert auth.consume_backup_code("WRONG-CODE1", blob) is None
 
 
-def test_normalize_backup_code_caps_oversized_input():
+def test_normalize_backup_code_caps_oversized_input() -> None:
     """Hygiene cap: anything dramatically longer than the legitimate
     11-char (XXXXX-XXXXX) format is treated as no input. Returning the
     empty string preserves the constant-time bcrypt iteration in
@@ -139,14 +142,14 @@ def test_normalize_backup_code_caps_oversized_input():
     assert _normalize_backup_code("A" * 32) != ""
 
 
-def test_consume_backup_code_with_oversized_input_returns_none(tmp_db_path):
+def test_consume_backup_code_with_oversized_input_returns_none(tmp_db_path: Path) -> None:
     """End-to-end: the hygiene cap reaches consume_backup_code as an empty
     string, which doesn't match any stored hash."""
     _, blob = auth.generate_recovery_codes()
     assert auth.consume_backup_code("X" * 100, blob) is None
 
 
-def test_random_recovery_code_format_is_xxxxx_dash_yyyyy():
+def test_random_recovery_code_format_is_xxxxx_dash_yyyyy() -> None:
     """Generated codes follow the XXXXX-YYYYY shape: exactly 11 chars
     with a dash at index 5. Pins the slicing in `_random_recovery_code`
     so a mutation that off-by-ones the split index (e.g. `raw[:6]`,
@@ -165,7 +168,7 @@ def test_random_recovery_code_format_is_xxxxx_dash_yyyyy():
     assert len(code[6:]) == 5 and code[6:].isalnum()
 
 
-def test_normalize_backup_code_inserts_dash_for_unhyphenated_10_char_input():
+def test_normalize_backup_code_inserts_dash_for_unhyphenated_10_char_input() -> None:
     """User who typed the recovery code without the dash (e.g. read
     aloud as ten characters, retyped without the separator) gets the
     dash auto-inserted at the canonical position 5 so
@@ -184,7 +187,7 @@ def test_normalize_backup_code_inserts_dash_for_unhyphenated_10_char_input():
     assert _normalize_backup_code("abcde fghij") == "ABCDE-FGHIJ"
 
 
-def test_normalize_backup_code_does_not_insert_dash_for_unhyphenated_11_char_input():
+def test_normalize_backup_code_does_not_insert_dash_for_unhyphenated_11_char_input() -> None:
     """11 characters without a dash isn't a valid recovery-code shape
     (real codes are 10 raw chars OR 11 chars including the dash). The
     normalizer leaves it alone -- `consume_backup_code`'s bcrypt loop
@@ -198,7 +201,7 @@ def test_normalize_backup_code_does_not_insert_dash_for_unhyphenated_11_char_inp
     assert _normalize_backup_code("ABCDEFGHIJK") == "ABCDEFGHIJK"
 
 
-def test_normalize_backup_code_does_not_insert_dash_for_short_input():
+def test_normalize_backup_code_does_not_insert_dash_for_short_input() -> None:
     """Inputs shorter than `RECOVERY_CODE_LENGTH` (10) chars pass
     through unchanged. Pins the equality direction of the gate: a
     mutation that loosened `==` to `<=` would fire dash-insertion on
@@ -209,7 +212,7 @@ def test_normalize_backup_code_does_not_insert_dash_for_short_input():
     assert _normalize_backup_code("ABCDEFGH") == "ABCDEFGH"
 
 
-def test_consume_backup_code_does_not_mark_malformed_entry_as_used(tmp_db_path):
+def test_consume_backup_code_does_not_mark_malformed_entry_as_used(tmp_db_path: Path) -> None:
     """When entry[0]'s stored hash is malformed and the code submitted
     matches entry[1], the malformed entry must stay flagged unused --
     only the matching entry gets `used_at` set. The existing
@@ -236,7 +239,7 @@ def test_consume_backup_code_does_not_mark_malformed_entry_as_used(tmp_db_path):
     )
 
 
-def test_consume_backup_code_returns_none_when_entry_has_non_string_hash():
+def test_consume_backup_code_returns_none_when_entry_has_non_string_hash() -> None:
     """Defensive: an entry whose `hash` field is not a string (schema
     drift, JSON corruption, a manually-edited row) skips the bcrypt
     check and pays the dummy cost on the else branch. The post-loop
@@ -262,7 +265,7 @@ def test_consume_backup_code_returns_none_when_entry_has_non_string_hash():
 # ---------------------------------------------------------------------------
 
 
-def test_authenticate_accepts_password_and_totp(provisioned_user):
+def test_authenticate_accepts_password_and_totp(provisioned_user: dict[str, Any]) -> None:
     user = auth.authenticate(
         provisioned_user["username"],
         provisioned_user["password"],
@@ -271,28 +274,28 @@ def test_authenticate_accepts_password_and_totp(provisioned_user):
     assert user["id"] == provisioned_user["id"]
 
 
-def test_authenticate_rejects_unknown_username(provisioned_user):
+def test_authenticate_rejects_unknown_username(provisioned_user: dict[str, Any]) -> None:
     with pytest.raises(auth.AuthError):
         auth.authenticate(
             "nobody", provisioned_user["password"], provisioned_user["totp"].now()
         )
 
 
-def test_authenticate_rejects_wrong_password(provisioned_user):
+def test_authenticate_rejects_wrong_password(provisioned_user: dict[str, Any]) -> None:
     with pytest.raises(auth.AuthError):
         auth.authenticate(
             provisioned_user["username"], "wrong", provisioned_user["totp"].now()
         )
 
 
-def test_authenticate_rejects_wrong_code(provisioned_user):
+def test_authenticate_rejects_wrong_code(provisioned_user: dict[str, Any]) -> None:
     with pytest.raises(auth.AuthError):
         auth.authenticate(
             provisioned_user["username"], provisioned_user["password"], "000000"
         )
 
 
-def test_authenticate_with_backup_code_works_once(provisioned_user):
+def test_authenticate_with_backup_code_works_once(provisioned_user: dict[str, Any]) -> None:
     codes, blob = auth.generate_recovery_codes()
     models.update_user(provisioned_user["id"], recovery_code_hashes=blob)
     auth.authenticate(
@@ -304,20 +307,24 @@ def test_authenticate_with_backup_code_works_once(provisioned_user):
         )
 
 
-def test_authenticate_resets_failed_attempts_on_success(provisioned_user):
+def test_authenticate_resets_failed_attempts_on_success(provisioned_user: dict[str, Any]) -> None:
     for _ in range(3):
         with pytest.raises(auth.AuthError):
             auth.authenticate(provisioned_user["username"], "wrong", "000000")
-    assert models.get_user_by_id(provisioned_user["id"])["failed_attempts"] == 3
+    after_failures = models.get_user_by_id(provisioned_user["id"])
+    assert after_failures is not None
+    assert after_failures["failed_attempts"] == 3
     auth.authenticate(
         provisioned_user["username"],
         provisioned_user["password"],
         provisioned_user["totp"].now(),
     )
-    assert models.get_user_by_id(provisioned_user["id"])["failed_attempts"] == 0
+    after_success = models.get_user_by_id(provisioned_user["id"])
+    assert after_success is not None
+    assert after_success["failed_attempts"] == 0
 
 
-def test_lockout_counter_has_no_rolling_window():
+def test_lockout_counter_has_no_rolling_window() -> None:
     """The lockout threshold is a cumulative-since-last-success counter,
     NOT a rolling window. There used to be a `LOCKOUT_WINDOW_SECONDS`
     constant exported from `app.auth` that implied "failures within this
@@ -334,7 +341,7 @@ def test_lockout_counter_has_no_rolling_window():
     assert auth.LOCKOUT_DURATION_SECONDS == 3600
 
 
-def test_lockout_after_max_failures(provisioned_user):
+def test_lockout_after_max_failures(provisioned_user: dict[str, Any]) -> None:
     for _ in range(auth.MAX_FAILURES):
         with pytest.raises(auth.AuthError):
             auth.authenticate(provisioned_user["username"], "wrong", "000000")
@@ -346,7 +353,7 @@ def test_lockout_after_max_failures(provisioned_user):
         )
 
 
-def test_lockout_is_per_user(provisioned_user, make_user):
+def test_lockout_is_per_user(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]) -> None:
     """Locking Alice doesn't lock Bob."""
     bob = make_user("bob")
     for _ in range(auth.MAX_FAILURES):
@@ -369,7 +376,7 @@ def test_lockout_is_per_user(provisioned_user, make_user):
 # ---------------------------------------------------------------------------
 
 
-def test_api_token_mint_and_lookup(provisioned_user):
+def test_api_token_mint_and_lookup(provisioned_user: dict[str, Any]) -> None:
     plaintext, digest = auth.mint_api_token()
     assert plaintext.startswith("eph_")
     models.create_token(user_id=provisioned_user["id"], name="t1", token_hash=digest)
@@ -381,18 +388,18 @@ def test_api_token_mint_and_lookup(provisioned_user):
     )
 
 
-def test_api_token_lookup_rejects_unknown(provisioned_user):
+def test_api_token_lookup_rejects_unknown(provisioned_user: dict[str, Any]) -> None:
     assert auth.lookup_api_token("eph_unknown") is None
 
 
-def test_api_token_lookup_rejects_revoked(provisioned_user):
+def test_api_token_lookup_rejects_revoked(provisioned_user: dict[str, Any]) -> None:
     plaintext, digest = auth.mint_api_token()
     models.create_token(user_id=provisioned_user["id"], name="t1", token_hash=digest)
     models.revoke_token(provisioned_user["id"], "t1")
     assert auth.lookup_api_token(plaintext) is None
 
 
-def test_api_token_lookup_updates_last_used(provisioned_user):
+def test_api_token_lookup_updates_last_used(provisioned_user: dict[str, Any]) -> None:
     plaintext, digest = auth.mint_api_token()
     models.create_token(user_id=provisioned_user["id"], name="t1", token_hash=digest)
     before = models.list_tokens(provisioned_user["id"])[0]["last_used_at"]
@@ -401,7 +408,7 @@ def test_api_token_lookup_updates_last_used(provisioned_user):
     assert before is None and after is not None
 
 
-def test_token_name_unique_per_user_not_global(provisioned_user, make_user):
+def test_token_name_unique_per_user_not_global(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]) -> None:
     """Alice and Bob can both have an API token named 'cli'."""
     bob = make_user("bob")
     _, d1 = auth.mint_api_token()
@@ -421,18 +428,18 @@ def test_token_name_unique_per_user_not_global(provisioned_user, make_user):
 class _FakeResponse:
     """Minimal context-manager-compatible stand-in for urlopen()'s return."""
 
-    def __init__(self, body: str, status: int = 200):
+    def __init__(self, body: str, status: int = 200) -> None:
         self._body = body.encode("ascii")
         self.status = status
 
-    def read(self):
+    def read(self) -> bytes:
         return self._body
 
-    def __enter__(self):
+    def __enter__(self) -> "_FakeResponse":
         return self
 
-    def __exit__(self, *_):
-        return False
+    def __exit__(self, *_: Any) -> None:
+        return None
 
 
 def _sha1_parts(password: str) -> tuple[str, str]:
@@ -442,7 +449,7 @@ def _sha1_parts(password: str) -> tuple[str, str]:
     return h[:5], h[5:]
 
 
-def test_pwned_count_returns_count_on_corpus_hit(monkeypatch):
+def test_pwned_count_returns_count_on_corpus_hit(monkeypatch: pytest.MonkeyPatch) -> None:
     """A known-breached password must round-trip through the range API
     into a non-zero count."""
     from app.auth import hibp
@@ -450,46 +457,49 @@ def test_pwned_count_returns_count_on_corpus_hit(monkeypatch):
     _, suffix = _sha1_parts("password123")
     body = f"{suffix}:42\r\n{'F' * 35}:1\r\n"
     monkeypatch.setattr(
-        hibp.urllib.request, "urlopen", lambda *a, **kw: _FakeResponse(body)
+        "app.auth.hibp.urllib.request.urlopen",
+        lambda *a, **kw: _FakeResponse(body),
     )
     assert hibp.pwned_count("password123") == 42
 
 
-def test_pwned_count_returns_zero_when_suffix_absent(monkeypatch):
+def test_pwned_count_returns_zero_when_suffix_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Password not in the corpus -> 0 (fail-open with explicit False)."""
     from app.auth import hibp
 
     body = "0000000000000000000000000000000000A:5\r\n" + "1" * 35 + ":3\r\n"
     monkeypatch.setattr(
-        hibp.urllib.request, "urlopen", lambda *a, **kw: _FakeResponse(body)
+        "app.auth.hibp.urllib.request.urlopen",
+        lambda *a, **kw: _FakeResponse(body),
     )
     assert hibp.pwned_count("fresh-strong-unique-phrase-xyz") == 0
 
 
-def test_pwned_count_returns_none_on_network_failure(monkeypatch):
+def test_pwned_count_returns_none_on_network_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """An offline host (no DNS, no route) must not block password setup.
     None is the sentinel the caller uses to skip the check with a warning."""
+    import urllib.error
+
     from app.auth import hibp
 
-    def _boom(*a, **kw):
-        raise hibp.urllib.error.URLError("network down")
+    def _boom(*a: Any, **kw: Any) -> None:
+        raise urllib.error.URLError("network down")
 
-    monkeypatch.setattr(hibp.urllib.request, "urlopen", _boom)
+    monkeypatch.setattr("app.auth.hibp.urllib.request.urlopen", _boom)
     assert hibp.pwned_count("anything") is None
 
 
-def test_pwned_count_returns_none_on_non_200_status(monkeypatch):
+def test_pwned_count_returns_none_on_non_200_status(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.auth import hibp
 
     monkeypatch.setattr(
-        hibp.urllib.request,
-        "urlopen",
+        "app.auth.hibp.urllib.request.urlopen",
         lambda *a, **kw: _FakeResponse("", status=503),
     )
     assert hibp.pwned_count("anything") is None
 
 
-def test_provisioning_uri_respects_custom_issuer():
+def test_provisioning_uri_respects_custom_issuer() -> None:
     """Different instances (dev / prod) need distinct issuer strings so
     their entries don't visually collide in a shared authenticator app."""
     secret = auth.generate_totp_secret()
@@ -499,7 +509,7 @@ def test_provisioning_uri_respects_custom_issuer():
     assert "issuer=ephemera-dev" in uri
 
 
-def test_provisioning_uri_default_issuer_unchanged():
+def test_provisioning_uri_default_issuer_unchanged() -> None:
     """Keep backward compatibility: callers that don't pass issuer still
     get 'ephemera', so existing QRs remain reproducible."""
     secret = auth.generate_totp_secret()
@@ -512,7 +522,7 @@ def test_provisioning_uri_default_issuer_unchanged():
 # ---------------------------------------------------------------------------
 
 
-def test_totp_secret_at_rest_is_not_plaintext(provisioned_user, tmp_db_path):
+def test_totp_secret_at_rest_is_not_plaintext(provisioned_user: dict[str, Any], tmp_db_path: Path) -> None:
     """Invariant: the stored totp_secret is NEVER the base32 plaintext.
     Raw SQL reads must return the versioned ciphertext prefix; the model
     layer handles encrypt-on-write and decrypt-on-read transparently."""
@@ -526,13 +536,12 @@ def test_totp_secret_at_rest_is_not_plaintext(provisioned_user, tmp_db_path):
     assert stored != plaintext
     assert stored.startswith("v1:"), f"expected v1: prefix, got {stored!r}"
     # And the opt-in with-TOTP wrapper round-trips back to plaintext:
-    assert (
-        models.get_user_with_totp_by_id(provisioned_user["id"])["totp_secret"]
-        == plaintext
-    )
+    with_totp = models.get_user_with_totp_by_id(provisioned_user["id"])
+    assert with_totp is not None
+    assert with_totp["totp_secret"] == plaintext
 
 
-def test_rotate_totp_writes_ciphertext(provisioned_user, tmp_db_path):
+def test_rotate_totp_writes_ciphertext(provisioned_user: dict[str, Any], tmp_db_path: Path) -> None:
     """After `update_user(totp_secret=...)` the DB cell still holds
     ciphertext -- no code path leaves a plaintext seed sitting on disk."""
     import sqlite3
@@ -545,15 +554,12 @@ def test_rotate_totp_writes_ciphertext(provisioned_user, tmp_db_path):
         ).fetchone()
     assert stored.startswith("v1:")
     assert stored != new_secret
-    assert (
-        models.get_user_with_totp_by_id(provisioned_user["id"])["totp_secret"]
-        == new_secret
-    )
+    after = models.get_user_with_totp_by_id(provisioned_user["id"])
+    assert after is not None
+    assert after["totp_secret"] == new_secret
 
 
-def test_secret_key_rotation_breaks_totp_but_recovery_code_still_works(
-    provisioned_user, monkeypatch
-):
+def test_secret_key_rotation_breaks_totp_but_recovery_code_still_works(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     """Documented recovery path for at-rest TOTP encryption: if SECRET_KEY
     rotates, the stored TOTP ciphertext is undecryptable. The user must
     then log in with a recovery code (unaffected by the KEK change), after
@@ -584,7 +590,7 @@ def test_secret_key_rotation_breaks_totp_but_recovery_code_still_works(
         config.get_settings.cache_clear()
 
 
-def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path, monkeypatch):
+def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A DB rescued from before the at-rest rollout has a plaintext base32
     totp_secret. init_db() must encrypt it in place, idempotently."""
     import sqlite3
@@ -629,7 +635,7 @@ def test_legacy_plaintext_totp_secret_is_migrated_on_init_db(tmp_path, monkeypat
     config.get_settings.cache_clear()
 
 
-def test_check_not_locked_passes_when_lockout_already_expired():
+def test_check_not_locked_passes_when_lockout_already_expired() -> None:
     """A lockout_until timestamp in the past (e.g., a stale lockout that
     wasn't cleared after its window elapsed) shouldn't block auth — the
     gate should silently pass through."""
@@ -642,7 +648,7 @@ def test_check_not_locked_passes_when_lockout_already_expired():
     check_not_locked(user)  # must not raise
 
 
-def test_check_not_locked_passes_when_no_lockout_set():
+def test_check_not_locked_passes_when_no_lockout_set() -> None:
     """Happy path: no lockout_until at all -> pass through."""
     from app.auth.lockout import check_not_locked
 
@@ -655,7 +661,7 @@ def test_check_not_locked_passes_when_no_lockout_set():
 # ---------------------------------------------------------------------------
 
 
-def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch):
+def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     """The known-user failure path can cost up to (1 + RECOVERY_CODE_COUNT)
     bcrypts: 1 for password verify + up to RECOVERY_CODE_COUNT for the
     recovery-code iteration when the submitted code isn't a valid 6-digit
@@ -668,18 +674,17 @@ def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch
     import bcrypt as bcrypt_lib
 
     from app.auth import _core
-    from app.auth import login as login_mod
 
     count = [0]
     real_checkpw = bcrypt_lib.checkpw
 
-    def counting_checkpw(*args, **kwargs):
+    def counting_checkpw(*args: Any, **kwargs: Any) -> bool:
         count[0] += 1
         return real_checkpw(*args, **kwargs)
 
     # Patch both the library and the import in login.py's namespace.
     monkeypatch.setattr(bcrypt_lib, "checkpw", counting_checkpw)
-    monkeypatch.setattr(login_mod.bcrypt, "checkpw", counting_checkpw)
+    monkeypatch.setattr("app.auth.login.bcrypt.checkpw", counting_checkpw)
 
     # Unknown user, non-6-digit code (would trigger recovery-code path on a
     # real user). Must raise AuthError and burn the full worst-case count.
@@ -704,9 +709,7 @@ def test_unknown_user_runs_worst_case_bcrypt_count(provisioned_user, monkeypatch
     )
 
 
-def test_known_user_wrong_password_correct_totp_runs_worst_case_bcrypt_count(
-    provisioned_user, monkeypatch
-):
+def test_known_user_wrong_password_correct_totp_runs_worst_case_bcrypt_count(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     """The unknown-user failure path always burns (1 + RECOVERY_CODE_COUNT)
     bcrypts so response time doesn't reveal whether the username exists.
     The known-user + wrong-password branch matches that cost when the
@@ -722,17 +725,16 @@ def test_known_user_wrong_password_correct_totp_runs_worst_case_bcrypt_count(
     import bcrypt as bcrypt_lib
 
     from app.auth import _core
-    from app.auth import login as login_mod
 
     count = [0]
     real_checkpw = bcrypt_lib.checkpw
 
-    def counting_checkpw(*args, **kwargs):
+    def counting_checkpw(*args: Any, **kwargs: Any) -> bool:
         count[0] += 1
         return real_checkpw(*args, **kwargs)
 
     monkeypatch.setattr(bcrypt_lib, "checkpw", counting_checkpw)
-    monkeypatch.setattr(login_mod.bcrypt, "checkpw", counting_checkpw)
+    monkeypatch.setattr("app.auth.login.bcrypt.checkpw", counting_checkpw)
 
     count[0] = 0
     valid_totp = provisioned_user["totp"].now()
@@ -748,7 +750,7 @@ def test_known_user_wrong_password_correct_totp_runs_worst_case_bcrypt_count(
     )
 
 
-def test_totp_last_step_bumped_even_on_wrong_password(provisioned_user):
+def test_totp_last_step_bumped_even_on_wrong_password(provisioned_user: dict[str, Any]) -> None:
     """A captured valid TOTP must become single-use even if the paired
     password is wrong. Otherwise an attacker with a phishing-stolen TOTP
     could re-submit it against multiple password guesses until lockout.
@@ -763,7 +765,9 @@ def test_totp_last_step_bumped_even_on_wrong_password(provisioned_user):
     current_totp = provisioned_user["totp"].now()
 
     # Before: totp_last_step is zero (fresh user).
-    assert models.get_user_by_id(provisioned_user["id"])["totp_last_step"] == 0
+    initial = models.get_user_by_id(provisioned_user["id"])
+    assert initial is not None
+    assert initial["totp_last_step"] == 0
 
     # Right password + right TOTP would succeed. But send the TOTP with a
     # WRONG password; login must fail -- AND last_step must advance so
@@ -772,6 +776,7 @@ def test_totp_last_step_bumped_even_on_wrong_password(provisioned_user):
         auth.authenticate(provisioned_user["username"], "wrong-password", current_totp)
 
     row = models.get_user_by_id(provisioned_user["id"])
+    assert row is not None
     assert row["totp_last_step"] > 0, (
         "totp_last_step must advance even when the paired password is wrong"
     )
@@ -791,12 +796,11 @@ def test_totp_last_step_bumped_even_on_wrong_password(provisioned_user):
     # fresh live step if we happened to cross a 30s boundary. Either is
     # fine; the invariant is "must not regress."
     row2 = models.get_user_by_id(provisioned_user["id"])
+    assert row2 is not None
     assert row2["totp_last_step"] >= bumped_step
 
 
-def test_recovery_code_consumption_is_not_persisted_on_wrong_password(
-    provisioned_user,
-):
+def test_recovery_code_consumption_is_not_persisted_on_wrong_password(provisioned_user: dict[str, Any]) -> None:
     """Contrast with test_totp_last_step_bumped_even_on_wrong_password.
     Recovery codes must remain valid after a wrong-password + correct-
     recovery-code failed login, so an attacker who knows a username
@@ -818,7 +822,7 @@ def test_recovery_code_consumption_is_not_persisted_on_wrong_password(
     assert user["id"] == provisioned_user["id"]
 
 
-def test_authenticate_success_return_does_not_contain_totp_secret(provisioned_user):
+def test_authenticate_success_return_does_not_contain_totp_secret(provisioned_user: dict[str, Any]) -> None:
     """The models-layer split keeps the plaintext TOTP seed out of every
     read path whose name does NOT contain `with_totp` -- reading
     `user["totp_secret"]` off the default getter raises KeyError. The one
@@ -838,9 +842,7 @@ def test_authenticate_success_return_does_not_contain_totp_secret(provisioned_us
     assert "totp_secret" not in user
 
 
-def test_recovery_code_lookup_is_constant_time_across_consumption_state(
-    provisioned_user, monkeypatch
-):
+def test_recovery_code_lookup_is_constant_time_across_consumption_state(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     """consume_backup_code must run bcrypt.checkpw once per stored entry
     regardless of how many codes have been used. Without this invariant a
     timing attacker could distinguish between users by consumption state
@@ -850,7 +852,6 @@ def test_recovery_code_lookup_is_constant_time_across_consumption_state(
     import bcrypt as bcrypt_lib
 
     from app.auth import _core
-    from app.auth import login as login_mod
 
     # Freshly-minted recovery codes for Alice so we have known plaintexts.
     codes, blob = auth.generate_recovery_codes()
@@ -859,12 +860,12 @@ def test_recovery_code_lookup_is_constant_time_across_consumption_state(
     count = [0]
     real_checkpw = bcrypt_lib.checkpw
 
-    def counting_checkpw(*args, **kwargs):
+    def counting_checkpw(*args: Any, **kwargs: Any) -> bool:
         count[0] += 1
         return real_checkpw(*args, **kwargs)
 
     monkeypatch.setattr(bcrypt_lib, "checkpw", counting_checkpw)
-    monkeypatch.setattr(login_mod.bcrypt, "checkpw", counting_checkpw)
+    monkeypatch.setattr("app.auth.login.bcrypt.checkpw", counting_checkpw)
 
     # --- Baseline: failed login with 0 codes consumed --------------------
     count[0] = 0
@@ -931,7 +932,7 @@ _password_strategy = st.text(min_size=1, max_size=72).filter(
 
 @given(password=_password_strategy)
 @settings(max_examples=10, deadline=None)
-def test_property_password_roundtrips_for_any_string(password: str):
+def test_property_password_roundtrips_for_any_string(password: str) -> None:
     """For any non-empty string whose UTF-8 encoding fits in bcrypt's
     72-byte input cap, hash_password followed by verify_password with
     the same value returns True. Catches edge cases bcrypt's own
@@ -946,7 +947,7 @@ def test_property_password_roundtrips_for_any_string(password: str):
 
 @given(password=_password_strategy, other=_password_strategy)
 @settings(max_examples=10, deadline=None)
-def test_property_password_rejects_anything_but_the_original(password: str, other: str):
+def test_property_password_rejects_anything_but_the_original(password: str, other: str) -> None:
     """For any pair where `password != other` (both within bcrypt's
     72-byte input cap), verify_password(other, hash_password(password))
     is False. Pins that bcrypt isn't silently accepting common-prefix
@@ -961,7 +962,7 @@ def test_property_password_rejects_anything_but_the_original(password: str, othe
 
 @given(_=st.integers(min_value=0, max_value=2**31 - 1))
 @settings(max_examples=20, deadline=None)
-def test_property_totp_secret_is_uniformly_base32(_: int):
+def test_property_totp_secret_is_uniformly_base32(_: int) -> None:
     """For any call (the integer input is just hypothesis's generator
     handle -- the function takes no args), generate_totp_secret returns
     a 32-character base32-decodable string. Pins that the secret can
@@ -996,7 +997,7 @@ def test_property_totp_secret_is_uniformly_base32(_: int):
 
 @given(_=st.integers(min_value=0, max_value=2**31 - 1))
 @settings(max_examples=30, deadline=None)
-def test_property_mint_api_token_digest_is_lowercase_hex_sha256_format(_: int):
+def test_property_mint_api_token_digest_is_lowercase_hex_sha256_format(_: int) -> None:
     """For any call, the returned digest is a 64-character lowercase
     hex string -- the format produced by `sha256.hexdigest()`. The
     digest's CORRECTNESS (mint and lookup using the same formula) is
@@ -1018,7 +1019,7 @@ def test_property_mint_api_token_digest_is_lowercase_hex_sha256_format(_: int):
 
 @given(_=st.integers(min_value=0, max_value=2**31 - 1))
 @settings(max_examples=30, deadline=None)
-def test_property_mint_api_token_plaintext_starts_with_prefix(_: int):
+def test_property_mint_api_token_plaintext_starts_with_prefix(_: int) -> None:
     """Every minted plaintext starts with the documented prefix. The
     prefix is the discriminator `lookup_api_token` uses to short-
     circuit on obviously-not-a-token input before hashing -- a mint
@@ -1033,7 +1034,7 @@ def test_property_mint_api_token_plaintext_starts_with_prefix(_: int):
 
 @given(_=st.integers(min_value=0, max_value=2**31 - 1))
 @settings(max_examples=30, deadline=None)
-def test_property_mint_api_token_body_is_urlsafe_base64(_: int):
+def test_property_mint_api_token_body_is_urlsafe_base64(_: int) -> None:
     """The body (the part after the prefix) consists only of url-safe
     base64 characters. `secrets.token_urlsafe(32)` is the documented
     source; if a future refactor swapped to a generator that emits
@@ -1049,7 +1050,7 @@ def test_property_mint_api_token_body_is_urlsafe_base64(_: int):
 
 
 @pytest.fixture
-def stored_api_token(provisioned_user):
+def stored_api_token(provisioned_user: dict[str, Any]) -> str:
     """Mint a real token and persist its digest so the lookup-rejection
     property exercises the "DB has a real row, presented value doesn't
     match" path -- not just the empty-DB short-circuit. Function-
@@ -1089,9 +1090,7 @@ _printable_ascii = st.text(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
     deadline=None,
 )
-def test_property_lookup_api_token_rejects_arbitrary_strings(
-    stored_api_token: str, raw: str
-):
+def test_property_lookup_api_token_rejects_arbitrary_strings(stored_api_token: str, raw: str) -> None:
     """For any printable-ASCII string we did NOT mint+store, the
     lookup returns None. The strategy biases roughly 50/50 between
     prefix-bearing inputs (which reach the hash+DB-lookup branch and
