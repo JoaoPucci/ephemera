@@ -90,7 +90,13 @@ jobs:
             thread_name: "Deploy \($tag)",
             content: ":rocket: Deploying **\($tag)**\nRun: <\($run)>"
           }')
-          if ! response=$(curl -sS -w '\n%{http_code}' -X POST "${DISCORD_WEBHOOK_URL}?wait=true" \
+          # --connect-timeout / --max-time bound the call so a network
+          # blackhole or stalled TLS handshake can't hang the step
+          # until the job-level 15-min timeout. Discord webhook
+          # responses are typically <1s; 10s total per call is
+          # generous slack while still failing fast on bad networks.
+          if ! response=$(curl -sS --connect-timeout 5 --max-time 10 \
+            -w '\n%{http_code}' -X POST "${DISCORD_WEBHOOK_URL}?wait=true" \
             -H 'Content-Type: application/json' \
             -d "$payload"); then
             echo "::warning::Discord webhook unreachable -- continuing deploy without notifications"
@@ -186,7 +192,10 @@ jobs:
               ;;
           esac
           payload=$(jq -n --arg c "$content" '{content: $c}')
-          if ! response=$(curl -sS -w '\n%{http_code}' -X POST "${DISCORD_WEBHOOK_URL}?thread_id=${THREAD_ID}&wait=true" \
+          # Bounded same as the opener -- a notify-side stall MUST NOT
+          # hold the workflow open for the full job-level timeout.
+          if ! response=$(curl -sS --connect-timeout 5 --max-time 10 \
+            -w '\n%{http_code}' -X POST "${DISCORD_WEBHOOK_URL}?thread_id=${THREAD_ID}&wait=true" \
             -H 'Content-Type: application/json' \
             -d "$payload"); then
             echo "::warning::Discord result-notification transport failed -- deploy status above is authoritative"
