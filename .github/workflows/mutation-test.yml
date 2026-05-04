@@ -60,10 +60,10 @@ jobs:
     # raise this floor and split scope across multiple jobs.
     timeout-minutes: 330  # 5h30m -- 30m headroom before the hard limit
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.12'
           cache: pip
@@ -128,7 +128,7 @@ jobs:
         # truth (one line per mutant, full mutation diff + outcome
         # per record); markdown is the human-friendly view.
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-report
           path: |
@@ -144,7 +144,7 @@ jobs:
         # the JSONL artifact above carries the same information in
         # a more portable form.
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-session-db
           path: session.sqlite
