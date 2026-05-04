@@ -605,7 +605,9 @@ whether the supplied tag is valid (the alternative would leak the
 Body: { "language": "ja" }   or { "language": null }
 Response 204: persisted
 Response 401: not authenticated
-Response 422: tag not in the project's SUPPORTED list
+Response 400: tag not in the project's SUPPORTED list
+              (`{ "code": "unsupported_language", ... }`)
+Response 422: malformed request body (FastAPI / Pydantic validation)
 ```
 
 #### `GET /api/secrets/{id}/status`
