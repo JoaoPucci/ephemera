@@ -573,17 +573,38 @@
      44px (2.75rem) hit target: Apple HIG minimum; Material recommends
      48px but 44px clears both WCAG 2.5.8 and platform guidance. The
      glyph inside stays small (18x14) so visual weight doesn't change,
-     only the touchable area. */
+     only the touchable area.
+
+     The button paints its OWN ground (semi-opaque surface + 1px
+     hairline + backdrop-blur) rather than relying on the bar to
+     supply one. The bar above is intentionally transparent and only
+     a structural slot; the hamburger can scroll over arbitrary page
+     content (form labels, dropdown chevrons, the segmented Text/Image
+     toggle), so the icon would otherwise sit on top of foreign
+     content with no visual separation. The pill makes the affordance
+     legible against any background -- same convention as the iOS
+     reader pill and the desktop top-chrome pills. */
   .chrome-menu-btn {
+    /* `--pill-bg` is scoped to the button so the interaction-state
+       reset and the supports-not fallback both reference one source
+       of truth for the pill ground (rather than re-spelling the
+       color-mix() across three rules). */
+    --pill-bg: color-mix(in srgb, var(--surface) 78%, transparent);
+
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 2.75rem;
     height: 2.75rem;
     padding: 0;
-    border: 0;
+    /* Hairline border + surface-mix ground. `--surface` resolves to
+       white in light theme and zinc-900 in dark, so the same pill
+       reads correctly under both. */
+    border: 1px solid var(--border);
     border-radius: 999px;
-    background: transparent;
+    background: var(--pill-bg);
+    backdrop-filter: blur(8px) saturate(1.4);
+    -webkit-backdrop-filter: blur(8px) saturate(1.4);
     color: var(--text);
     cursor: pointer;
     pointer-events: auto;
@@ -593,18 +614,30 @@
       background 0.15s,
       color 0.15s;
   }
+  /* Browsers without backdrop-filter (older Firefox-on-Android) lose
+     the blur layer; bump the surface alpha to ~92% so the pill still
+     has a legible ground without the frost. */
+  @supports not (backdrop-filter: blur(1px)) {
+    .chrome-menu-btn {
+      --pill-bg: color-mix(in srgb, var(--surface) 92%, transparent);
+    }
+  }
   /* Reset the interaction states inherited from the global
      `button` / `button:hover` / `button:focus-visible` rules defined
      earlier in this file -- those paint an accent background + lift +
-     focus-ring that's wrong for this transparent chrome button. The
-     class+pseudo specificity here beats element+pseudo, so the reset
-     applies unconditionally; the pointer-aware media block below is
-     the only place we re-opt-in to hover / focus-ring visuals. */
+     focus-ring that's wrong for this chrome button. Re-asserting
+     `background: var(--pill-bg)` (rather than letting the global
+     button:hover's accent leak through after a click that leaves
+     hover sticky on the cursor) keeps the pill ground stable across
+     every interaction state. The class+pseudo specificity beats
+     element+pseudo, so the reset applies unconditionally; the
+     pointer-aware media block below is the only place we re-opt-in
+     to a deliberate hover / focus-ring tweak. */
   .chrome-menu-btn:hover,
   .chrome-menu-btn:active,
   .chrome-menu-btn:focus,
   .chrome-menu-btn:focus-visible {
-    background: transparent;
+    background: var(--pill-bg);
     transform: none;
     box-shadow: none;
     outline: none;
@@ -618,7 +651,7 @@
      S Pen isn't (the device's primary is still the touchscreen). */
   @media (hover: hover) and (pointer: fine) {
     .chrome-menu-btn:hover {
-      background: color-mix(in srgb, var(--muted) 12%, transparent);
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
     }
     .chrome-menu-btn:focus-visible {
       box-shadow: var(--focus-ring);
