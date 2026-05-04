@@ -185,8 +185,16 @@ jobs:
               content=":x: Deploy of **${TAG}** failed (${JOB_STATUS})\nRun: <${RUN_URL}>"
               ;;
           esac
-          if ! curl -sS -X POST "${DISCORD_WEBHOOK_URL}?thread_id=${THREAD_ID}&wait=true" \
+          payload=$(jq -n --arg c "$content" '{content: $c}')
+          if ! response=$(curl -sS -w '\n%{http_code}' -X POST "${DISCORD_WEBHOOK_URL}?thread_id=${THREAD_ID}&wait=true" \
             -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg c "$content" '{content: $c}')" >/dev/null; then
-            echo "::warning::Discord result-notification POST failed -- deploy status above is authoritative"
+            -d "$payload"); then
+            echo "::warning::Discord result-notification transport failed -- deploy status above is authoritative"
+            exit 0
+          fi
+          status=$(printf '%s' "$response" | tail -n1)
+          body=$(printf '%s' "$response" | sed '$d')
+          if [ "$status" != "200" ] && [ "$status" != "201" ]; then
+            echo "::warning::Discord result-notification returned ${status} -- deploy status above is authoritative"
+            echo "::warning::Response body: ${body}"
           fi
