@@ -169,7 +169,15 @@ def test_docs_html_contains_no_inline_scripts(authed_client: TestClient) -> None
     r = authed_client.get("/docs")
     html = r.text
     # Find every <script ...>...</script>; reject any with non-empty content.
-    for m in re.finditer(r"<script\b[^>]*>(.*?)</script>", html, flags=re.DOTALL):
+    # IGNORECASE so an uppercase `<SCRIPT>` (which Jinja would never
+    # emit, but the assertion-as-spec is "no inline script body in
+    # this HTML") would still trip the test if it ever appeared.
+    # Belt-and-braces; also retires CodeQL's py/bad-tag-filter alert
+    # (rule premise is "incomplete script-tag filter"; `\b` + DOTALL
+    # + IGNORECASE leaves no shape unhandled).
+    for m in re.finditer(
+        r"<script\b[^>]*>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE
+    ):
         body = m.group(1).strip()
         assert body == "", f"inline script body found in /docs HTML: {body!r}"
 
