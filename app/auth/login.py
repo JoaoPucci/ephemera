@@ -58,9 +58,18 @@ def authenticate(
         # "username exists" from "username doesn't."
         for _ in range(1 + RECOVERY_CODE_COUNT):
             bcrypt.checkpw(b"dummy", _DUMMY_BCRYPT_HASH)
+        # `unknown_user` is the only login.failure variant where the
+        # `username` field would be the *user-submitted string* rather
+        # than the canonical username on a real `users` row. Dropping
+        # it: form-field stuffing (passwords, emails, junk submitted
+        # in the username slot by a probe loop) doesn't accumulate as
+        # logged data we never asked for. The defender's signal --
+        # "an account is being probed" -- is preserved by the
+        # client_ip + reason combination; whether the probe used a
+        # plausible username or a noise string doesn't change the
+        # response.
         audit(
             "login.failure",
-            username=trimmed,
             client_ip=client_ip,
             reason="unknown_user",
         )

@@ -275,6 +275,43 @@ the env, and make sure every user has at least one unused recovery code
 on hand first (`python -m app.admin regen-recovery-codes` will mint a
 fresh set).
 
+### Audit log retention
+
+The Python process writes structured security events to journald via the
+`ephemera.security` logger (one JSON line per event; field shapes
+documented in `app/security_log.py`). Without a per-service journald
+config, retention is whatever the host's global journald settings allow
+— by default, "until disk pressure," which on a small VPS can mean
+months of `login.success` / `reveal.*` / etc. accumulating. For a
+service whose pitch is "minimal collected data," the audit log is the
+longest-tail surface that escapes the application's own retention story
+(secrets are hard-deleted on reveal; tracked metadata purges at 30
+days; the audit log doesn't have an analogous ceiling baked in).
+
+Recommended: cap journald retention via a drop-in for the unit. Drop
+`/etc/systemd/journald.conf.d/ephemera.conf`:
+
+```ini
+[Journal]
+# Bound the local audit-log retention to a fixed window. 30 days mirrors
+# the application's tracked-metadata purge horizon, so the operator-
+# facing retention story is consistent across the audit trail and the
+# product surface. SystemMaxFileSec rotates the active file; combined
+# with the global SystemMaxUse cap (defaults to ~10% of disk) this
+# keeps an idle VPS from accumulating months of login lines.
+MaxRetentionSec=30d
+SystemMaxFileSec=7d
+```
+
+Then `systemctl restart systemd-journald`. Verify via `journalctl
+--disk-usage` and `journalctl --vacuum-time=30d` (the latter is a manual
+one-off if there's already historical data exceeding the new cap).
+
+This is a recommendation, not a requirement: operators who deliberately
+want longer retention (incident-investigation, regulatory) can pick
+their own ceiling. The point of the doc is to make the choice
+explicit rather than letting "until disk pressure" be the default.
+
 ## Automated deploy from GitHub Actions
 
 Optional. The manual `fetch → checkout → pip install → restart` recipe
