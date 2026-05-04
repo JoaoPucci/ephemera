@@ -18,9 +18,13 @@ architecture is in [`backend.md`](backend.md); product-level intent is in
 | Testing (E2E)    | Playwright (Chromium)         | Real browser, real crypto, one golden-path test |
 
 No bundler. No preprocessor. No frontend framework. Bundle size is whatever
-the raw files weigh. Every page loads at most three scripts, all from the
-same origin. That choice is the main reason the UI feels fast on mobile over
-a cold connection -- there's nothing to hydrate.
+the raw files weigh. Every script loads from the same origin (CSP is
+`script-src 'self'`). The pages are split into small focused modules
+(theme, i18n shim, copy helper, chrome menu, mask toggle, two-click
+confirm) plus per-page entry points; the chrome scripts are shared
+across pages, the per-page entries are loaded only where needed.
+That choice is the main reason the UI feels fast on mobile over a cold
+connection -- there's nothing to hydrate.
 
 ## Client-side state
 
@@ -31,7 +35,7 @@ a DB wipe.
 | Where | What | Why it lives here |
 |---|---|---|
 | SQLite on the server | Users, secrets, API tokens, labels, tracked-status timestamps | Authoritative; survives restarts; the only source of truth that multiple browsers can share |
-| `localStorage` on the sender's browser | Theme choice (`ephemera_theme_v1`), URL cache (`ephemera_urls_v1`: `{id: url}`) | Either per-device preference, or data the server cannot hold without breaking the zero-knowledge property |
+| `localStorage` on the sender's browser | Theme choice (`ephemera_theme_v1`), language preference (`ephemera_lang_v1`, mirrored in a cookie so the server-side resolver sees it pre-auth), URL cache (`ephemera_urls_v1`: `{id: url}`) | Either per-device preference, or data the server cannot hold without breaking the zero-knowledge property |
 | In-memory on the client | Tracked-list render state, copy-flash timers, polling interval handle | Ephemeral UI state; lost on reload, which is fine |
 
 ### Why the URL cache is client-side only
@@ -413,32 +417,101 @@ Replaces the form card content after creation (no page navigation):
 
 ## Project structure (browser files)
 
-Lives under `app/static/`. The server side of the tree is in
+Two directories carry the browser surface:
+
+- `app/templates/` -- Jinja2 shells the server renders per request
+  (chrome wrapper + locale-resolved labels + per-page page-shape).
+  Lives there rather than under `static/` because it's *rendered*, not
+  served as-is. Backed by the locale resolver in `app/i18n.py`; details
+  in [`backend.md`](backend.md#tech-stack).
+- `app/static/` -- everything served by `StaticFiles` as-is: stylesheets,
+  scripts, image assets, vendored Swagger UI, JSON i18n catalogues for
+  the client-side string shim.
+
+The server side of the tree is in
 [`backend.md`](backend.md#project-structure).
 
 ```
+app/templates/
+  _layout.html          # Chrome shell every page extends: <head>, top-chrome pills,
+                        #   bottom wordmark, hamburger drawer, scripts manifest
+  _docs.html            # Swagger UI shell (auth-gated) -- loads /static/swagger/* only
+  login.html            # Password + TOTP / recovery-code sign-in form
+  sender.html           # Secret-creation form + tracked-list section
+  landing.html          # Receiver: explanation, reveal button, "gone" / "burned" /
+                        #   "expired" branches; JS toggles passphrase UI from /meta
+
 app/static/
-  login.html           # Password + TOTP (or recovery) sign-in form
-  sender.html          # Secret creation form; tracked-list section; logout button
-  landing.html         # Receiver: explanation + reveal button; JS toggles passphrase UI
-  gone.html            # Secret expired, already viewed, or burned (fallback page)
-  style.css            # Design tokens + light/dark themes via [data-theme]
-  theme.js             # Theme picker: persists `ephemera_theme_v1`, applied pre-render
-  copy.js              # Shared copy-to-clipboard with label-swap feedback
-  login.js             # Login submit, password visibility toggle, one-time-code field wipe
-  sender.js            # Form submit, tab toggle, drag-drop, tracked-list render + 5s poll
-  reveal.js            # Calls /meta, reads URL fragment, sends reveal POST, renders result
+  # ---- Design tokens + base + chrome (split-by-concern stylesheets) ----
+  tokens.css            # CSS custom properties: palette, spacing, type, motion;
+                        #   the [data-theme="dark"] override block is here too
+  base.css              # Reset, typography baseline, layout primitives
+  forms.css             # Input + button + tab + dropdown + global :hover / :focus
+  components.css        # Reusable UI components: cards, pills, switches, popovers
+  chrome.css            # Top-chrome pills (desktop) + mobile hamburger drawer
+                        #   shape; the 720px breakpoint that flips between them
+  responsive.css        # Viewport-specific overrides above the chrome split
+
+  # ---- Per-feature JS modules; loaded by template-level <script> tags ----
+  theme.js              # Persists `ephemera_theme_v1`; loaded in <head> so
+                        #   data-theme is set on <html> before paint (no flash)
+  i18n.js               # t(key, vars) shim + language-picker change handler
+                        #   (writes cookie + localStorage, fires PATCH
+                        #    /api/me/language, reloads to repaint chrome)
+  lang-confirm.js       # Intercepts a picker change while the form is dirty
+                        #   (typed content / attached image) so a reload doesn't
+                        #   silently destroy the user's draft
+  chrome-menu.js        # Mobile drawer: open / close, focus trap, scrim tap
+  copy.js               # Shared copy-to-clipboard with label-swap feedback
+  mask-toggle.js        # show/hide affordance for password + passphrase fields
+  two-click.js          # Two-step confirm wrapper for destructive actions
+                        #   (clear-history, untrack)
+  analytics-toggle.js   # Analytics-opt-in switch in the chrome-menu;
+                        #   PATCHes /api/me/preferences and updates the pill
+  login.js              # Login submit, in-flight guard, error-state restore
+  reveal.js             # Calls /meta, reads URL fragment, sends reveal POST,
+                        #   paints the JSON response (text or image) into the DOM
+  sender.js             # Sender-page entry: bootstraps the modules below
+
+  sender/               # Sender form sub-package (split when the file
+                        #   crossed the readability threshold)
+    form.js             # Compose-form orchestration: submit, tab toggle,
+                        #   "create another" reset, /api/me opt-in gate
+    dropzone.js         # Image-tab click + drag-drop + paste wiring
+    hints.js            # Char-counter / paste-warning / near-cap hints
+    status-poll.js      # Live status pill for the just-created secret
+    tracked-list.js     # Tracked-secrets render + 5s polling loop
+    url-cache.js        # `ephemera_urls_v1` localStorage cache (per the
+                        #   client-side-state section above)
+
+  # ---- Static assets ----
+  i18n/                 # Per-locale JSON catalogues: en.json, ja.json,
+                        #   pt-BR.json, ar.json, ... -- read by i18n.js
+                        #   via the <script type="application/json"> embed
+  icons/                # PWA icon set (any + maskable, light + dark, 192/512);
+                        #   apple-touch-icon variants for iOS standalone install
+  favicon-light.svg     # Theme-aware favicons (linked from _layout.html)
+  favicon-dark.svg
+  swagger/              # Vendored Swagger UI bundle (pinned versions);
+                        #   served behind /docs and /openapi.json (auth-gated)
 ```
 
-Each HTML file loads only the scripts it needs; nothing is shared by
-accident. `copy.js` and `theme.js` are the two that multiple pages share.
+The split-by-concern stylesheets and the per-feature JS modules are deliberate:
+each file owns one concern, the dependency graph between them is shallow, and a
+bug in (say) the analytics toggle never has to read or modify code in
+chrome.css. The cost of "more files" is paid once; the win is editability and
+not having to rebuild a mental cache to touch any single piece.
 
 ### Tests
 
 | Suite | Tool | What it covers |
 |---|---|---|
-| `tests-js/` | Vitest + jsdom | Each handler (login submit, sender submit, reveal) run against a DOM fixture; in-flight guards, error-path button restore, success-path state swap |
-| `tests-e2e/` | Playwright | Golden path (login -> create text secret -> open URL in a second browser context -> reveal -> second visit shows "gone") |
+| `tests-js/` | Vitest + jsdom | Per-module unit tests: each module run against a DOM fixture under `tests-js/fixtures/`. Covers in-flight guards, error-path button restore, success-state swap, polling cadence, the analytics opt-in PATCH wiring, the language-picker dirty-form guard, etc. The fitness-functions test (`tests-js/fitness-functions.test.js`) pins JS-side architecture invariants in the same shape `tests/test_fitness_functions.py` pins them on the Python side. |
+| `tests-e2e/` | Playwright (Chromium) | Acceptance suite: the system's spec layer (per [`AGENTS.md`](../AGENTS.md) §3). Covers the smoke path, image-secret creation + reveal, passphrase flow, expired-secret state, rate-limit-hit surface, mobile viewport, css-cascade regressions, and sender-side cancel. Implementation gives if e2e fails, not the other way. |
 
 Seed and boot live in `tests-e2e/start.sh` (wipes a scoped DB, provisions a
-known user with a fixed TOTP secret, then execs uvicorn on a test port).
+known user with a fixed TOTP secret, then execs uvicorn on a test port with
+the `EPHEMERA_E2E_TEST_HOOKS` gate enabled so the suite can reset the
+in-memory limiter and force-expire secrets without sleeping through real
+time -- see [`backend.md`](backend.md#_test--env-gated-e2e-only) for the
+gate's posture).
