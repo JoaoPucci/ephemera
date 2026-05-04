@@ -23,8 +23,11 @@ in [`frontend.md`](frontend.md); deployment details are in
 **Note on Jinja and the locale story**: Page chrome is rendered server-side
 through Jinja so every label, button, and aria-string is wrapped in a gettext
 call resolved against the request's locale. The locale is decided per request
-by middleware (`app/i18n.py::locale_middleware` -> cookie / Accept-Language
-/ user `preferred_language`) and injected into every template via the
+by middleware (`app/i18n.py::locale_middleware` ->
+`resolve_locale(request)`); the precedence walk is `?lang=` query param →
+`ephemera_lang_v1` cookie → `users.preferred_language` (authenticated
+callers only) → `Accept-Language` header. The resolved locale is stashed
+on `request.state` and injected into every template via the
 `template_context()` helper. Templates live in `app/templates/`; the
 `jinja2.ext.i18n` extension is what binds `{{ _("...") }}` to the request's
 translations object.
@@ -361,7 +364,7 @@ CREATE TABLE users (
     failed_attempts       INTEGER NOT NULL DEFAULT 0,
     lockout_until         TEXT,                    -- ISO8601 or NULL
     session_generation    INTEGER NOT NULL DEFAULT 0,    -- bumped on credential rotation; signed into every session cookie
-    preferred_language    TEXT,                    -- BCP-47 tag (e.g. 'ja', 'pt-BR'); NULL falls back to cookie / Accept-Language / default
+    preferred_language    TEXT,                    -- BCP-47 tag (e.g. 'ja', 'pt-BR'); NULL means the request-level chain (query param → cookie → Accept-Language) decides
     analytics_opt_in      INTEGER NOT NULL DEFAULT 0
         CHECK (analytics_opt_in IN (0,1)),         -- 1 = user explicitly consented; "never saw the toggle" and "explicitly declined" are operationally identical (both mean "do not emit") and indistinguishable in the row by design
     created_at            TEXT NOT NULL,
@@ -594,8 +597,9 @@ Response 200: <same shape as GET /api/me>
 #### `PATCH /api/me/language`
 Persist the user's preferred UI language as a BCP-47 tag (`'ja'`, `'pt-BR'`,
 etc.) on `users.preferred_language`. Passing `null` clears the preference
-so locale resolution falls back to the cookie / Accept-Language / project
-default chain in `app/i18n.py`.
+so locale resolution falls through to the request-level chain in
+`app/i18n.py::resolve_locale` (`?lang=` query param → `ephemera_lang_v1`
+cookie → `Accept-Language` header → project default).
 
 Authenticated callers only — anonymous callers hit 401 *without* learning
 whether the supplied tag is valid (the alternative would leak the
