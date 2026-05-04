@@ -80,9 +80,7 @@ def _verify_bcrypt_test_override_applied() -> None:
 
 
 @pytest.fixture
-def tmp_db_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Path]:
+def tmp_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Isolated SQLite DB file, wired in via env vars and settings cache reset."""
     db = tmp_path / "test.db"
     monkeypatch.setenv("EPHEMERA_DB_PATH", str(db))
@@ -180,9 +178,7 @@ def client(tmp_db_path: Path) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def authed_client(
-    client: TestClient, provisioned_user: dict[str, Any]
-) -> TestClient:
+def authed_client(client: TestClient, provisioned_user: dict[str, Any]) -> TestClient:
     """A TestClient already logged in as the default provisioned user."""
     code = provisioned_user["totp"].now()
     r = client.post(

@@ -116,7 +116,9 @@ def test_property_detect_mime_returns_known_or_none(data: bytes) -> None:
     cap=st.integers(min_value=1, max_value=64),
 )
 @settings(max_examples=50)
-def test_property_validate_image_rejects_oversize_for_any_cap(data: bytes, cap: int) -> None:
+def test_property_validate_image_rejects_oversize_for_any_cap(
+    data: bytes, cap: int
+) -> None:
     """For any byte payload whose length exceeds the cap, validation
     rejects with ValidationError regardless of declared MIME. Pins the
     cap as a hard ceiling: it isn't bypassed by valid magic bytes,

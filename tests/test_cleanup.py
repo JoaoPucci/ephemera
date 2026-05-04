@@ -33,7 +33,9 @@ def test_run_cleanup_purges_expired_rows(provisioned_user: dict[str, Any]) -> No
     assert models.get_by_token(fresh["token"]) is not None
 
 
-def test_run_cleanup_purges_tracked_metadata_past_retention(provisioned_user: dict[str, Any]) -> None:
+def test_run_cleanup_purges_tracked_metadata_past_retention(
+    provisioned_user: dict[str, Any],
+) -> None:
     uid = provisioned_user["id"]
     r = models.create_secret(
         user_id=uid,

@@ -45,7 +45,9 @@ def test_healthz_returns_200_with_ok_true_when_db_reachable(client: TestClient) 
     assert body == {"ok": True}
 
 
-def test_healthz_returns_503_when_db_unreachable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_healthz_returns_503_when_db_unreachable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Simulate DB open/read failure; must surface as 503, not 200.
 
     The point of /healthz over the prior `/send` smoke test is that /send
@@ -69,7 +71,9 @@ def test_healthz_returns_503_when_db_unreachable(client: TestClient, monkeypatch
     assert body["reason"] == "db_unreachable"
 
 
-def test_healthz_is_not_advertised_in_openapi_schema(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_healthz_is_not_advertised_in_openapi_schema(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """Same posture as /docs and /openapi.json -- do not leak the endpoint
     via the schema. Ops can curl it directly; probes get nothing from a
     schema read."""
@@ -94,7 +98,9 @@ def test_openapi_json_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def test_openapi_json_accessible_with_bearer(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_openapi_json_accessible_with_bearer(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     r = client.get("/openapi.json", headers=auth_headers)
     assert r.status_code == 200
     body = r.json()
@@ -168,7 +174,9 @@ def test_docs_html_contains_no_inline_scripts(authed_client: TestClient) -> None
         assert body == "", f"inline script body found in /docs HTML: {body!r}"
 
 
-def test_docs_is_not_advertised_in_openapi_schema(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_docs_is_not_advertised_in_openapi_schema(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """/docs and /openapi.json themselves shouldn't appear as API routes
     in the schema they serve. include_in_schema=False on both prevents
     the meta-surface from bloating the docs."""
@@ -186,7 +194,9 @@ def test_redoc_stays_disabled(client: TestClient, auth_headers: dict[str, str]) 
     assert client.get("/redoc", headers=auth_headers).status_code == 404
 
 
-def test_security_headers_present_on_api_response(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_security_headers_present_on_api_response(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     r = client.post(
         "/api/secrets",
         json={"content": "x", "content_type": "text", "expires_in": 300},
@@ -305,7 +315,9 @@ def test_permissions_policy_denies_sensitive_features(client: TestClient) -> Non
         )
 
 
-def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_client: TestClient) -> None:
+def test_post_api_secrets_without_origin_and_with_session_is_rejected(
+    authed_client: TestClient,
+) -> None:
     """Browser clients must send Origin on state-changing requests. A
     session-cookie-authenticated POST with no Origin header is the
     CSRF-gap shape we refuse."""
@@ -316,7 +328,9 @@ def test_post_api_secrets_without_origin_and_with_session_is_rejected(authed_cli
     assert r.status_code == 403
 
 
-def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client: TestClient, api_token: str) -> None:
+def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(
+    client: TestClient, api_token: str
+) -> None:
     """Bearer-token (CLI/curl) callers have no ambient credentials and thus
     no CSRF risk. Missing Origin stays allowed for them."""
     r = client.post(
@@ -327,7 +341,9 @@ def test_post_api_secrets_without_origin_but_with_bearer_is_accepted(client: Tes
     assert r.status_code == 201
 
 
-def test_post_api_secrets_without_origin_and_with_garbage_bearer_is_rejected(client: TestClient) -> None:
+def test_post_api_secrets_without_origin_and_with_garbage_bearer_is_rejected(
+    client: TestClient,
+) -> None:
     """`Authorization: Bearer anything` used to bypass the Origin gate
     because verify_same_origin only checked the prefix. Now the token is
     validated against the DB before missing-Origin is accepted; a bogus
@@ -346,7 +362,9 @@ def test_post_api_secrets_without_origin_and_with_garbage_bearer_is_rejected(cli
     assert r.status_code == 403
 
 
-def test_post_api_secrets_without_origin_and_with_empty_bearer_is_rejected(client: TestClient) -> None:
+def test_post_api_secrets_without_origin_and_with_empty_bearer_is_rejected(
+    client: TestClient,
+) -> None:
     """`Authorization: Bearer ` (with no token after the space) is
     obviously-bogus and must be treated like any other missing-auth
     browser case -- 403 at the origin gate, not 401 at the auth layer."""
@@ -358,14 +376,18 @@ def test_post_api_secrets_without_origin_and_with_empty_bearer_is_rejected(clien
     assert r.status_code == 403
 
 
-def test_delete_without_origin_and_with_session_is_rejected(authed_client: TestClient) -> None:
+def test_delete_without_origin_and_with_session_is_rejected(
+    authed_client: TestClient,
+) -> None:
     """Same policy on the DELETE verb, where historical browser Origin
     coverage is less uniform than POST."""
     r = authed_client.delete("/api/secrets/some-id")
     assert r.status_code == 403
 
 
-def test_reveal_rejects_cross_origin_post(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_reveal_rejects_cross_origin_post(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     # Create a secret first with a valid origin.
     r = client.post(
         "/api/secrets",
@@ -383,7 +405,9 @@ def test_reveal_rejects_cross_origin_post(client: TestClient, auth_headers: dict
     assert bad.status_code == 403
 
 
-def test_rate_limiter_recovers_after_window_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rate_limiter_recovers_after_window_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Once the window elapses, old hits get popped from the queue and the
     same key can take a fresh round of hits. Deterministic via patching
     time.monotonic -- no wall-clock sleeping in the test."""
@@ -429,7 +453,9 @@ def test_limiter_evicts_empty_buckets_on_check(monkeypatch: pytest.MonkeyPatch) 
     assert all(len(q) > 0 for q in rl._hits.values())
 
 
-def test_limiter_sweep_evicts_keys_that_never_return(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_limiter_sweep_evicts_keys_that_never_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The "attacker rotates source IPs, each hits once, never comes
     back" case. In-check lazy GC can't help -- nothing triggers a
     re-read of a key that's never queried again. sweep() walks the
@@ -452,7 +478,9 @@ def test_limiter_sweep_evicts_keys_that_never_return(monkeypatch: pytest.MonkeyP
     assert len(rl._hits) == 0
 
 
-def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_limiter_sweep_keeps_keys_still_in_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """sweep() must not drop entries whose deques still have hits inside
     the window -- those are live buckets, not litter."""
     from app import limiter
@@ -474,7 +502,9 @@ def test_limiter_sweep_keeps_keys_still_in_window(monkeypatch: pytest.MonkeyPatc
     assert "even-more-recent" in rl._hits
 
 
-def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch: pytest.MonkeyPatch, tmp_db_path: Path) -> None:
+def test_cleanup_run_once_calls_sweep_on_every_limiter(
+    monkeypatch: pytest.MonkeyPatch, tmp_db_path: Path
+) -> None:
     """cleanup.run_once() must advance sweep() across all four limiter
     instances so the bounded-memory invariant holds uniformly.
 
@@ -504,7 +534,9 @@ def test_cleanup_run_once_calls_sweep_on_every_limiter(monkeypatch: pytest.Monke
     }
 
 
-def test_read_rate_limit_kicks_in_on_meta_spam(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_read_rate_limit_kicks_in_on_meta_spam(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """`/s/{token}/meta` used to have no rate limiter; a bogus-token probe
     loop could hammer the app indefinitely. The generic read limiter
     catches that past 300 req/min."""
@@ -518,7 +550,9 @@ def test_read_rate_limit_kicks_in_on_meta_spam(client: TestClient, auth_headers:
     assert 429 in statuses
 
 
-def test_api_me_covered_by_read_rate_limit(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_api_me_covered_by_read_rate_limit(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """Hitting /api/me past the 300/min budget must 429 -- the endpoint
     used to have no limiter at all."""
     from app.limiter import read_limiter
@@ -530,7 +564,9 @@ def test_api_me_covered_by_read_rate_limit(client: TestClient, auth_headers: dic
     assert 429 in statuses
 
 
-def test_reveal_rate_limit_kicks_in(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_reveal_rate_limit_kicks_in(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     # Hammer the reveal endpoint with bogus tokens. After the limit, responses are 429.
     statuses = []
     for i in range(15):
@@ -846,7 +882,9 @@ def test_property_session_cookie_rejects_byte_flip(
     # round-trip property -- we sign and verify with the same key.
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-def test_property_session_cookie_rejects_arbitrary_strings(tmp_db_path: Path, raw: str) -> None:
+def test_property_session_cookie_rejects_arbitrary_strings(
+    tmp_db_path: Path, raw: str
+) -> None:
     """For any random printable-ASCII string that we did NOT mint, the
     cookie reader returns None. Catches edge cases: empty string,
     string with colons but no signature, signed-looking string with

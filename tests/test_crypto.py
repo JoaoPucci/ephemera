@@ -120,7 +120,9 @@ def test_encrypt_at_rest_roundtrips(tmp_db_path: Path) -> None:
     assert crypto.decrypt_at_rest(token) == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 
 
-def test_encrypt_at_rest_produces_distinct_ciphertexts_for_same_input(tmp_db_path: Path) -> None:
+def test_encrypt_at_rest_produces_distinct_ciphertexts_for_same_input(
+    tmp_db_path: Path,
+) -> None:
     """Fernet embeds a random IV, so two encryptions of the same plaintext
     must differ -- otherwise an attacker can tell which users share a secret."""
     a = crypto.encrypt_at_rest("same-plaintext")
@@ -138,7 +140,9 @@ def test_decrypt_at_rest_rejects_non_v1_string(tmp_db_path: Path) -> None:
         crypto.decrypt_at_rest("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
 
 
-def test_decrypt_at_rest_fails_after_secret_key_rotation(tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_decrypt_at_rest_fails_after_secret_key_rotation(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Rotating EPHEMERA_SECRET_KEY makes existing ciphertexts unreadable.
     This is the documented operator cost of at-rest encryption; the test
     pins that the failure is a loud AtRestDecryptionError, not a silent
@@ -193,7 +197,9 @@ def test_property_encrypt_decrypt_roundtrip_on_any_bytes(plaintext: bytes) -> No
     wrong_key=st.binary(min_size=32, max_size=32),
 )
 @settings(max_examples=50)
-def test_property_decrypt_with_unrelated_key_raises(plaintext: bytes, wrong_key: bytes) -> None:
+def test_property_decrypt_with_unrelated_key_raises(
+    plaintext: bytes, wrong_key: bytes
+) -> None:
     """For any plaintext encrypted under one key, decrypting under any
     OTHER 32-byte key raises DecryptionError. Pins that the failure
     mode is an exception (loud) rather than silent wrong-bytes (which

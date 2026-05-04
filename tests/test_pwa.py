@@ -240,7 +240,9 @@ def test_head_sets_apple_status_bar_style(client: TestClient) -> None:
     )
 
 
-def test_head_default_apple_mobile_web_app_title_is_unsuffixed(client: TestClient) -> None:
+def test_head_default_apple_mobile_web_app_title_is_unsuffixed(
+    client: TestClient,
+) -> None:
     html = client.get("/send").text
     assert '<meta name="apple-mobile-web-app-title" content="ephemera">' in html, (
         "iOS uses this for the home-screen label; without it the <title> is used"
@@ -306,7 +308,9 @@ def test_manifest_icon_targets_resolve(client: TestClient) -> None:
 
 
 @pytest.fixture
-def dev_label_client(tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def dev_label_client(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
     """TestClient with EPHEMERA_DEPLOYMENT_LABEL=dev wired through the
     settings cache before the app is built. Mirrors conftest.py's
     `client` shape but interposes the env var + cache_clear so
@@ -341,7 +345,9 @@ def test_dev_manifest_name_is_suffixed(dev_label_client: TestClient) -> None:
     assert data["short_name"] == "ephemera-dev"
 
 
-def test_dev_manifest_lists_only_visually_dark_icons(dev_label_client: TestClient) -> None:
+def test_dev_manifest_lists_only_visually_dark_icons(
+    dev_label_client: TestClient,
+) -> None:
     # In our naming, icon-*-light-* is the dark-bg/light-glyph asset
     # (intended for a light OS -- visually a dark tile). The dev
     # manifest pins ONLY these so a fresh install on a dev box
@@ -357,7 +363,9 @@ def test_dev_manifest_lists_only_visually_dark_icons(dev_label_client: TestClien
     )
 
 
-def test_dev_manifest_keeps_stable_id_and_start_url(dev_label_client: TestClient) -> None:
+def test_dev_manifest_keeps_stable_id_and_start_url(
+    dev_label_client: TestClient,
+) -> None:
     # The dev / prod cohorts must remain *the same app* in browsers
     # that respect manifest id. The label affects presentation, not
     # identity.
@@ -367,7 +375,9 @@ def test_dev_manifest_keeps_stable_id_and_start_url(dev_label_client: TestClient
     assert data["start_url"] == "/send?source=pwa"
 
 
-def test_dev_head_apple_touch_icon_uses_dev_variant(dev_label_client: TestClient) -> None:
+def test_dev_head_apple_touch_icon_uses_dev_variant(
+    dev_label_client: TestClient,
+) -> None:
     html = dev_label_client.get("/send").text
     assert (
         '<link rel="apple-touch-icon" '
@@ -375,7 +385,9 @@ def test_dev_head_apple_touch_icon_uses_dev_variant(dev_label_client: TestClient
     ), "dev head must point apple-touch-icon at the visually-dark variant"
 
 
-def test_dev_head_apple_mobile_web_app_title_is_suffixed(dev_label_client: TestClient) -> None:
+def test_dev_head_apple_mobile_web_app_title_is_suffixed(
+    dev_label_client: TestClient,
+) -> None:
     html = dev_label_client.get("/send").text
     assert '<meta name="apple-mobile-web-app-title" content="ephemera-dev">' in html, (
         "dev head's iOS home-screen label must match the suffixed manifest name"

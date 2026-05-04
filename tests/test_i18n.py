@@ -182,7 +182,9 @@ def test_html_dir_attribute_reflects_rtl_locale(client: TestClient) -> None:
     assert 'lang="ar"' in r.text
 
 
-def test_discover_requires_po_for_non_default_locales(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_requires_po_for_non_default_locales(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A locale with a JSON catalog but no gettext .po is half-shipped and
     must be skipped. Drop a fake es.json into an otherwise-empty tree and
     confirm discovery refuses to include it."""
@@ -207,7 +209,9 @@ def test_discover_requires_po_for_non_default_locales(tmp_path: Path, monkeypatc
     i18n_mod._discover.cache_clear()
 
 
-def test_discover_default_does_not_require_po(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_default_does_not_require_po(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """English is the source of truth -- the msgids inside templates ARE
     the English strings, so no .po is required. Only the JSON catalog
     needs to exist."""
@@ -229,7 +233,9 @@ def test_discover_default_does_not_require_po(tmp_path: Path, monkeypatch: pytes
     i18n_mod._discover.cache_clear()
 
 
-def test_discover_skips_tags_babel_does_not_recognize(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_skips_tags_babel_does_not_recognize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """If someone drops a JSON file whose stem isn't a real BCP-47 tag,
     Babel raises UnknownLocaleError during parsing and discovery skips
     it silently rather than crashing the app."""
@@ -251,7 +257,9 @@ def test_discover_skips_tags_babel_does_not_recognize(tmp_path: Path, monkeypatc
     i18n_mod._discover.cache_clear()
 
 
-def test_launch_opt_out_excludes_from_launched_but_keeps_in_supported(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_launch_opt_out_excludes_from_launched_but_keeps_in_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Adding a tag to _LAUNCH_OPT_OUT must keep it resolvable (SUPPORTED)
     while hiding it from the picker (LAUNCHED). The feature is for
     staging a locale before exposing it in the UI."""
@@ -379,7 +387,9 @@ def test_negotiate_chinese_exact_match_still_wins() -> None:
     assert negotiate("zh-TW") == "zh-TW"
 
 
-def test_negotiate_chinese_routing_respects_supported(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_negotiate_chinese_routing_respects_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """If a future deployment drops zh-CN from SUPPORTED, the zh-SG alias
     must NOT return a tag that doesn't resolve. Verified by monkeypatching
     SUPPORTED to exclude zh-CN and confirming the alias silently disables
@@ -482,7 +492,9 @@ def test_js_catalog_non_en_locales_are_populated() -> None:
         assert cat["button"]["creating"]
 
 
-def test_js_catalog_returns_empty_dict_for_unknown_locale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_js_catalog_returns_empty_dict_for_unknown_locale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Locales without a `<tag>.json` file under the catalog dir get
     an empty dict, not a 500. The shim's fallback chain re-resolves
     against English on miss, so a tag with no shipped catalog still
@@ -493,7 +505,9 @@ def test_js_catalog_returns_empty_dict_for_unknown_locale(tmp_path: Path, monkey
     assert i18n_mod.js_catalog("xx-NOT-A-REAL-LOCALE") == {}
 
 
-def test_js_catalog_returns_empty_dict_for_malformed_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_js_catalog_returns_empty_dict_for_malformed_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A truncated / corrupted `.json` catalog returns `{}` rather
     than letting the JSONDecodeError propagate. Ensures a partial
     deploy or a hand-edit-gone-wrong doesn't 500 the page."""
@@ -583,7 +597,9 @@ def test_locale_unknown_falls_through_silently(client: TestClient) -> None:
     assert 'lang="ja"' in r.text
 
 
-def test_locale_authed_user_preference_wins_over_header(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
+def test_locale_authed_user_preference_wins_over_header(
+    authed_client: TestClient, provisioned_user: dict[str, Any]
+) -> None:
     # Persist a preference on the authed user, then verify a request with
     # a conflicting Accept-Language still gets the stored locale.
     from app.models import users as users_model
@@ -593,7 +609,9 @@ def test_locale_authed_user_preference_wins_over_header(authed_client: TestClien
     assert 'lang="zh-CN"' in r.text
 
 
-def test_locale_cookie_beats_user_preference(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
+def test_locale_cookie_beats_user_preference(
+    authed_client: TestClient, provisioned_user: dict[str, Any]
+) -> None:
     # A user who temporarily picks a different language via the widget
     # (cookie) should see it even though their stored preference differs.
     from app.models import users as users_model
@@ -628,7 +646,9 @@ def test_fresh_db_has_preferred_language_column(tmp_db_path: Path) -> None:
     assert "preferred_language" in cols
 
 
-def test_v1_legacy_db_upgrades_through_to_current(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v1_legacy_db_upgrades_through_to_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Seed a v1 DB (no preferred_language column, version stamped at 1),
     boot the current code, and confirm migrations chain through to the
     latest stamped version. As schema_version bumps, the assertion
@@ -706,7 +726,9 @@ def test_patch_language_anonymous_rejected_401(client: TestClient) -> None:
     assert r.json()["detail"]["code"] == "not_authenticated"
 
 
-def test_patch_language_anonymous_does_not_leak_language_validation(client: TestClient) -> None:
+def test_patch_language_anonymous_does_not_leak_language_validation(
+    client: TestClient,
+) -> None:
     """Even with a body the authed-flow would reject at 400 (unsupported
     language), the anonymous caller must still see 401 first. Otherwise
     the endpoint would leak whether a tag is in SUPPORTED to anyone
@@ -719,7 +741,9 @@ def test_patch_language_anonymous_does_not_leak_language_validation(client: Test
     assert r.status_code == 401
 
 
-def test_patch_language_null_clears(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
+def test_patch_language_null_clears(
+    authed_client: TestClient, provisioned_user: dict[str, Any]
+) -> None:
     from app.models import users as users_model
 
     users_model.set_preferred_language(provisioned_user["id"], "ja")
@@ -734,7 +758,9 @@ def test_patch_language_null_clears(authed_client: TestClient, provisioned_user:
     assert user["preferred_language"] is None
 
 
-def test_patch_language_authed_persists(authed_client: TestClient, provisioned_user: dict[str, Any]) -> None:
+def test_patch_language_authed_persists(
+    authed_client: TestClient, provisioned_user: dict[str, Any]
+) -> None:
     from app.models import users as users_model
 
     r = authed_client.patch(
@@ -828,7 +854,9 @@ def test_page_inlines_active_and_fallback_catalogs(client: TestClient) -> None:
     assert "Wrong passphrase" in body
 
 
-def test_picker_hidden_when_launched_has_fewer_than_two(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_picker_hidden_when_launched_has_fewer_than_two(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Structural test for the picker-gate. A single-option <select> is a
     UX wart (nothing to actually pick), so the template hides the picker
     entirely when LAUNCHED has <2 members. Monkeypatches LAUNCHED because
@@ -845,7 +873,9 @@ def test_picker_hidden_when_launched_has_fewer_than_two(client: TestClient, monk
     assert 'lang="pt-BR"' in r2.text
 
 
-def test_picker_renders_when_multiple_locales_launched(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_picker_renders_when_multiple_locales_launched(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Structural test for the two-or-more-locales render path.
     Monkeypatches LAUNCHED to a small set so the assertion is stable
     against future additions to the shipped LAUNCHED tuple."""
@@ -1068,7 +1098,9 @@ def test_version_module_returns_non_empty_string() -> None:
     assert VERSION, "VERSION must not be empty -- fallback should be 'unknown'"
 
 
-def test_version_fallback_on_subprocess_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_version_fallback_on_subprocess_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """If `git describe` errors or times out, the function must return
     'unknown' rather than raising or returning an empty string. Verified
     by monkeypatching subprocess.run to raise, then re-running the

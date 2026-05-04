@@ -17,7 +17,11 @@ def _patch_input(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setattr("builtins.input", lambda *a, **kw: value)
 
 
-def test_force_removal_rejects_same_user(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_force_removal_rejects_same_user(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Force mode demands a DIFFERENT user than the target."""
     _patch_input(monkeypatch, provisioned_user["username"])
     with pytest.raises(SystemExit) as exc:
@@ -26,7 +30,11 @@ def test_force_removal_rejects_same_user(provisioned_user: dict[str, Any], monke
     assert "different user" in capsys.readouterr().err.lower()
 
 
-def test_force_removal_rejects_empty_username(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_force_removal_rejects_empty_username(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Empty input aborts -- no accidental skip of the authenticator prompt."""
     _patch_input(monkeypatch, "")
     with pytest.raises(SystemExit) as exc:
@@ -35,7 +43,11 @@ def test_force_removal_rejects_empty_username(provisioned_user: dict[str, Any], 
     assert "empty" in capsys.readouterr().err.lower()
 
 
-def test_force_removal_rejects_unknown_authenticator(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_force_removal_rejects_unknown_authenticator(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Typing a username that doesn't exist fails fast."""
     _patch_input(monkeypatch, "ghost-nobody-here")
     with pytest.raises(SystemExit) as exc:
@@ -44,7 +56,11 @@ def test_force_removal_rejects_unknown_authenticator(provisioned_user: dict[str,
     assert "no user named" in capsys.readouterr().err.lower()
 
 
-def test_force_removal_reauths_as_named_user(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_force_removal_reauths_as_named_user(
+    provisioned_user: dict[str, Any],
+    make_user: Callable[..., dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Happy path: named user exists and is NOT the target -> _reauth runs against them."""
     bob = make_user("bob")
     _patch_input(monkeypatch, "bob")
@@ -56,7 +72,9 @@ def test_force_removal_reauths_as_named_user(provisioned_user: dict[str, Any], m
     assert reauth_calls == ["bob"]
 
 
-def test_remove_user_refuses_to_empty_the_db(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_remove_user_refuses_to_empty_the_db(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """The only-remaining-user guard fires before either auth path."""
     with pytest.raises(SystemExit) as exc:
         admin.cmd_remove_user(provisioned_user["username"], force=True)
@@ -64,7 +82,9 @@ def test_remove_user_refuses_to_empty_the_db(provisioned_user: dict[str, Any], c
     assert "only remaining user" in capsys.readouterr().err.lower()
 
 
-def test_prompt_new_password_rejects_pwned_password(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_prompt_new_password_rejects_pwned_password(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A password that the HIBP API reports as breached must be refused
     and re-prompted; the final accepted value is the one that comes back
     clean."""
@@ -89,7 +109,9 @@ def test_prompt_new_password_rejects_pwned_password(monkeypatch: pytest.MonkeyPa
     assert "99,999 known breaches" in out
 
 
-def test_prompt_new_password_warns_and_accepts_when_hibp_unreachable(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_prompt_new_password_warns_and_accepts_when_hibp_unreachable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Offline host / DNS blip: pwned_count returns None. The caller prints
     a warning and accepts the password rather than blocking admin ops."""
     from app import admin
@@ -103,7 +125,11 @@ def test_prompt_new_password_warns_and_accepts_when_hibp_unreachable(monkeypatch
     assert "couldn't reach" in capsys.readouterr().out.lower()
 
 
-def test_remove_user_with_force_deletes_target_and_cascades(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_remove_user_with_force_deletes_target_and_cascades(
+    provisioned_user: dict[str, Any],
+    make_user: Callable[..., dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """End-to-end in force mode: target is dropped, cascade fires, other user survives."""
     bob = make_user("bob")
     _patch_input(monkeypatch, "bob")
@@ -142,7 +168,9 @@ def test_remove_user_with_force_deletes_target_and_cascades(provisioned_user: di
 # ---------------------------------------------------------------------------
 
 
-def test_diagnose_default_does_not_print_totp_secret(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_diagnose_default_does_not_print_totp_secret(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """cmd_diagnose(..., show_secret=False) suppresses the raw base32
     seed. The three candidate TOTP codes still print so the clock-drift
     use case is covered."""
@@ -157,7 +185,9 @@ def test_diagnose_default_does_not_print_totp_secret(provisioned_user: dict[str,
     assert "--show-secret" in out
 
 
-def test_diagnose_with_show_secret_prints_totp_secret(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_diagnose_with_show_secret_prints_totp_secret(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     admin.cmd_diagnose(provisioned_user["username"], show_secret=True)
     out = capsys.readouterr().out
 
@@ -166,7 +196,9 @@ def test_diagnose_with_show_secret_prints_totp_secret(provisioned_user: dict[str
     assert "DO NOT paste" in out
 
 
-def test_diagnose_defaults_show_secret_false_when_called_via_main(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_diagnose_defaults_show_secret_false_when_called_via_main(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """Bare `python -m app.admin diagnose` (no --show-secret) must omit
     the raw seed -- the whole point of gating the print is that the
     routine case doesn't carry it. Route through admin.main() to cover
@@ -177,7 +209,9 @@ def test_diagnose_defaults_show_secret_false_when_called_via_main(provisioned_us
     assert provisioned_user["totp_secret"] not in out
 
 
-def test_diagnose_main_recognises_show_secret_flag(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_diagnose_main_recognises_show_secret_flag(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """Dispatcher strips --show-secret from argv (so the arity check
     doesn't see it as a positional) and passes show_secret=True."""
     admin.main(
@@ -222,7 +256,9 @@ def _stub_interactive(
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_init_refuses_when_a_user_already_exists(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_init_refuses_when_a_user_already_exists(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """init is a one-shot bootstrap. Running it on a non-empty DB must
     refuse rather than silently provision a second user (which would also
     side-step the re-auth gate add-user enforces)."""
@@ -235,7 +271,11 @@ def test_cmd_init_refuses_when_a_user_already_exists(provisioned_user: dict[str,
     assert "add-user" in err
 
 
-def test_cmd_init_creates_first_user_and_emits_audit(tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_init_creates_first_user_and_emits_audit(
+    tmp_db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Happy path: empty DB -> init creates user + writes a user.added audit
     line. We assert on observable side effects, not the QR print itself."""
     _stub_interactive(monkeypatch)
@@ -257,7 +297,9 @@ def test_cmd_init_creates_first_user_and_emits_audit(tmp_db_path: Path, monkeypa
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_add_user_refuses_when_no_users_exist(tmp_db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_add_user_refuses_when_no_users_exist(
+    tmp_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """add-user requires reauth as an existing user. With no users present,
     the reauth subject doesn't exist -- bail with a hint to run init first."""
     with pytest.raises(SystemExit) as exc:
@@ -266,7 +308,11 @@ def test_cmd_add_user_refuses_when_no_users_exist(tmp_db_path: Path, capsys: pyt
     assert "init" in capsys.readouterr().err.lower()
 
 
-def test_cmd_add_user_provisions_after_reauth(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_add_user_provisions_after_reauth(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Existing user signs in; new user is created + audit fires."""
     _stub_interactive(monkeypatch)
     audit_events = []
@@ -287,12 +333,18 @@ def test_cmd_add_user_provisions_after_reauth(provisioned_user: dict[str, Any], 
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_list_users_prints_no_users_marker_on_empty_db(tmp_db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_list_users_prints_no_users_marker_on_empty_db(
+    tmp_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     admin.cmd_list_users()
     assert capsys.readouterr().out.strip() == "(no users)"
 
 
-def test_cmd_list_users_prints_each_user_with_id_and_creation_date(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]], capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_list_users_prints_each_user_with_id_and_creation_date(
+    provisioned_user: dict[str, Any],
+    make_user: Callable[..., dict[str, Any]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     bob = make_user("bob")
     admin.cmd_list_users()
     out = capsys.readouterr().out
@@ -308,7 +360,9 @@ def test_cmd_list_users_prints_each_user_with_id_and_creation_date(provisioned_u
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_remove_user_rejects_unknown_username(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_remove_user_rejects_unknown_username(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """Targeting a non-existent username fails fast before any reauth flow."""
     with pytest.raises(SystemExit) as exc:
         admin.cmd_remove_user("ghost-nobody-here")
@@ -316,7 +370,11 @@ def test_cmd_remove_user_rejects_unknown_username(provisioned_user: dict[str, An
     assert "no user named" in capsys.readouterr().err.lower()
 
 
-def test_cmd_remove_user_normal_mode_reauths_as_target_and_cascades(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_remove_user_normal_mode_reauths_as_target_and_cascades(
+    provisioned_user: dict[str, Any],
+    make_user: Callable[..., dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Non-force path: target authenticates as themselves (we stub _reauth);
     their row is dropped + their secrets cascade."""
     bob = make_user("bob")
@@ -347,7 +405,9 @@ def test_cmd_remove_user_normal_mode_reauths_as_target_and_cascades(provisioned_
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_reset_password_bumps_session_generation_and_swaps_hash(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_reset_password_bumps_session_generation_and_swaps_hash(
+    provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _stub_interactive(monkeypatch, new_password="another-strong-phrase-1!")
     before = models.get_user_by_id(provisioned_user["id"])
     assert before is not None
@@ -365,7 +425,9 @@ def test_cmd_reset_password_bumps_session_generation_and_swaps_hash(provisioned_
     assert after_full["password_hash"] != old_hash
 
 
-def test_cmd_rotate_totp_writes_new_secret_resets_step_and_bumps_session(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_rotate_totp_writes_new_secret_resets_step_and_bumps_session(
+    provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _stub_interactive(monkeypatch)
     before = models.get_user_with_totp_by_id(provisioned_user["id"])
     assert before is not None
@@ -381,7 +443,11 @@ def test_cmd_rotate_totp_writes_new_secret_resets_step_and_bumps_session(provisi
     assert int(after["session_generation"]) == old_gen + 1
 
 
-def test_cmd_regen_recovery_codes_replaces_hashes_and_bumps_session(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_regen_recovery_codes_replaces_hashes_and_bumps_session(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     _stub_interactive(monkeypatch)
     before = models.get_user_with_totp_by_id(provisioned_user["id"])
     assert before is not None
@@ -404,12 +470,16 @@ def test_cmd_regen_recovery_codes_replaces_hashes_and_bumps_session(provisioned_
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_list_tokens_prints_empty_marker_when_user_has_none(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_list_tokens_prints_empty_marker_when_user_has_none(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     admin.cmd_list_tokens(provisioned_user["username"])
     assert capsys.readouterr().out.strip() == "(no tokens)"
 
 
-def test_cmd_list_tokens_prints_active_and_revoked_status_per_row(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_list_tokens_prints_active_and_revoked_status_per_row(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """Status string in the output distinguishes [active] vs [revoked]."""
     from app import auth
 
@@ -437,7 +507,11 @@ def test_cmd_list_tokens_prints_active_and_revoked_status_per_row(provisioned_us
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_create_token_mints_and_prints_plaintext_once(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_create_token_mints_and_prints_plaintext_once(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
 
     admin.cmd_create_token("ci-runner", provisioned_user["username"])
@@ -449,7 +523,11 @@ def test_cmd_create_token_mints_and_prints_plaintext_once(provisioned_user: dict
     assert any(r["name"] == "ci-runner" and r["revoked_at"] is None for r in rows)
 
 
-def test_cmd_create_token_rejects_duplicate_name_per_user(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_create_token_rejects_duplicate_name_per_user(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Token names are unique per user. A second create with the same name
     must fail with a clear message rather than a raw IntegrityError."""
     monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
@@ -463,7 +541,11 @@ def test_cmd_create_token_rejects_duplicate_name_per_user(provisioned_user: dict
     assert "already exists" in err
 
 
-def test_cmd_revoke_token_marks_token_revoked(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_revoke_token_marks_token_revoked(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Mints, revokes, asserts revoked_at set + token no longer authenticates."""
     monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
     admin.cmd_create_token("ci-runner", provisioned_user["username"])
@@ -475,7 +557,11 @@ def test_cmd_revoke_token_marks_token_revoked(provisioned_user: dict[str, Any], 
     assert any(r["name"] == "ci-runner" and r["revoked_at"] is not None for r in rows)
 
 
-def test_cmd_revoke_token_errors_on_unknown_name(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_revoke_token_errors_on_unknown_name(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Revoking a name that doesn't exist (or is already revoked) exits 1
     with a clear message -- silent success would hide a typo."""
     monkeypatch.setattr(admin._core, "_reauth", lambda user: None)
@@ -491,7 +577,11 @@ def test_cmd_revoke_token_errors_on_unknown_name(provisioned_user: dict[str, Any
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_verify_reports_both_correct(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_verify_reports_both_correct(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(
         "getpass.getpass", lambda *a, **kw: provisioned_user["password"]
     )
@@ -507,7 +597,11 @@ def test_cmd_verify_reports_both_correct(provisioned_user: dict[str, Any], monke
     assert "totp:      OK" in out
 
 
-def test_cmd_verify_reports_password_wrong_totp_right(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_verify_reports_password_wrong_totp_right(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "definitely-wrong-password")
     monkeypatch.setattr(
         "builtins.input", lambda *a, **kw: provisioned_user["totp"].now()
@@ -520,7 +614,11 @@ def test_cmd_verify_reports_password_wrong_totp_right(provisioned_user: dict[str
     assert "password:  MISMATCH" in out
 
 
-def test_cmd_verify_reports_both_wrong(provisioned_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_verify_reports_both_wrong(
+    provisioned_user: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr("getpass.getpass", lambda *a, **kw: "definitely-wrong")
     monkeypatch.setattr("builtins.input", lambda *a, **kw: "000000")
 
@@ -535,7 +633,9 @@ def test_cmd_verify_reports_both_wrong(provisioned_user: dict[str, Any], monkeyp
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_analytics_summary_rejects_unknown_event_type(tmp_db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_analytics_summary_rejects_unknown_event_type(
+    tmp_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit) as exc:
         admin.cmd_analytics_summary("not.a.real.event")
     assert exc.value.code == 2
@@ -543,7 +643,9 @@ def test_cmd_analytics_summary_rejects_unknown_event_type(tmp_db_path: Path, cap
     assert "unknown event_type" in err
 
 
-def test_cmd_analytics_summary_handles_empty_table(tmp_db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_analytics_summary_handles_empty_table(
+    tmp_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Known event type but no rows yet -- prints count: 0, no field stats."""
     admin.cmd_analytics_summary("content.limit_hit")
     out = capsys.readouterr().out
@@ -556,7 +658,9 @@ def test_cmd_analytics_summary_handles_empty_table(tmp_db_path: Path, capsys: py
 # ---------------------------------------------------------------------------
 
 
-def test_main_with_no_args_prints_usage_and_exits_zero(tmp_db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_with_no_args_prints_usage_and_exits_zero(
+    tmp_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Bare `python -m app.admin` is documentation -- prints help, exit 0."""
     with pytest.raises(SystemExit) as exc:
         admin.main([])
@@ -566,14 +670,18 @@ def test_main_with_no_args_prints_usage_and_exits_zero(tmp_db_path: Path, capsys
     assert "init" in out and "add-user" in out
 
 
-def test_main_with_unknown_command_exits_two(tmp_db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_with_unknown_command_exits_two(
+    tmp_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Mistyped subcommand -- exit 2 (argv error), print usage."""
     with pytest.raises(SystemExit) as exc:
         admin.main(["totally-not-a-command"])
     assert exc.value.code == 2
 
 
-def test_main_arity_mismatch_exits_two(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_arity_mismatch_exits_two(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     """`init` takes one positional username; calling it with two trips the
     arity check before any DB work happens."""
     with pytest.raises(SystemExit) as exc:
@@ -582,7 +690,11 @@ def test_main_arity_mismatch_exits_two(provisioned_user: dict[str, Any], capsys:
     assert "expects" in capsys.readouterr().err.lower()
 
 
-def test_main_strips_force_flag_before_arity_check(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_strips_force_flag_before_arity_check(
+    provisioned_user: dict[str, Any],
+    make_user: Callable[..., dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`--force` is a flag on remove-user; the dispatcher must filter it
     out of the positional count so `remove-user --force <name>` parses as
     one positional, not two."""
@@ -618,14 +730,20 @@ def test_parse_user_flag_returns_none_when_absent() -> None:
     assert rest == ["create-token", "ci"]
 
 
-def test_resolve_user_returns_sole_user_when_no_flag_passed(provisioned_user: dict[str, Any]) -> None:
+def test_resolve_user_returns_sole_user_when_no_flag_passed(
+    provisioned_user: dict[str, Any],
+) -> None:
     """With exactly one user in the DB, omitting --user is a convenience
     shortcut -- pick them automatically."""
     user = admin._resolve_user(None)
     assert user["username"] == provisioned_user["username"]
 
 
-def test_resolve_user_errors_when_multiple_users_and_no_flag(provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]], capsys: pytest.CaptureFixture[str]) -> None:
+def test_resolve_user_errors_when_multiple_users_and_no_flag(
+    provisioned_user: dict[str, Any],
+    make_user: Callable[..., dict[str, Any]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     make_user("bob")
     with pytest.raises(SystemExit) as exc:
         admin._resolve_user(None)
@@ -637,14 +755,18 @@ def test_resolve_user_errors_when_multiple_users_and_no_flag(provisioned_user: d
     assert provisioned_user["username"] in err
 
 
-def test_resolve_user_errors_when_named_user_does_not_exist(provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_resolve_user_errors_when_named_user_does_not_exist(
+    provisioned_user: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit) as exc:
         admin._resolve_user("ghost-nobody-here")
     assert exc.value.code == 1
     assert "no user named" in capsys.readouterr().err.lower()
 
 
-def test_resolve_user_errors_when_db_has_no_users(tmp_db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_resolve_user_errors_when_db_has_no_users(
+    tmp_db_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit) as exc:
         admin._resolve_user(None)
     assert exc.value.code == 1

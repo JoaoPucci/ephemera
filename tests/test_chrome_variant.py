@@ -83,7 +83,9 @@ def test_receiver_does_not_render_lang_confirm_dialog(client: TestClient) -> Non
     )
 
 
-def test_pages_without_chrome_variant_default_to_no_lang_confirm_dialog(client: TestClient) -> None:
+def test_pages_without_chrome_variant_default_to_no_lang_confirm_dialog(
+    client: TestClient,
+) -> None:
     # Login / docs / other auth-gated pages don't pass a chrome_variant
     # and default to the unsuffixed (no dialog) shape -- the dialog is
     # specifically for the sender form's dirty-state path. /send/login

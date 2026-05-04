@@ -259,7 +259,9 @@ def test_record_event_writes_presence_only_row(opted_in_user: dict[str, Any]) ->
     assert json.loads(payload_json) == {}
 
 
-def test_record_event_writes_validated_row(cap_metric_event: str, opted_in_user: dict[str, Any]) -> None:
+def test_record_event_writes_validated_row(
+    cap_metric_event: str, opted_in_user: dict[str, Any]
+) -> None:
     """A non-presence-only event round-trips its payload through the
     validator. Uses the synthetic test event so we exercise int + bool
     fields without coupling to a shipped event's payload shape."""
@@ -280,7 +282,9 @@ def test_record_event_writes_validated_row(cap_metric_event: str, opted_in_user:
     }
 
 
-def test_record_event_propagates_validation_error(opted_in_user: dict[str, Any]) -> None:
+def test_record_event_propagates_validation_error(
+    opted_in_user: dict[str, Any],
+) -> None:
     """A bad call doesn't silently no-op on validation; the writer raises
     so the call site sees the bug at first run. (Distinct from the gate-
     closed silent-no-op path: gates are policy, validation is correctness.)
@@ -319,7 +323,9 @@ def test_gate_silent_noop_when_user_opted_out(opted_out_user: dict[str, Any]) ->
     assert rows[0] == 0
 
 
-def test_gate_silent_noop_when_operator_disabled(opted_in_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gate_silent_noop_when_operator_disabled(
+    opted_in_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Operator off, user on -> no row. Operator kill switch wins."""
     _set_operator_gate(False, monkeypatch)
     conn = _make_in_memory_db()
@@ -328,7 +334,9 @@ def test_gate_silent_noop_when_operator_disabled(opted_in_user: dict[str, Any], 
     assert rows[0] == 0
 
 
-def test_gate_silent_noop_when_both_closed(opted_out_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gate_silent_noop_when_both_closed(
+    opted_out_user: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     _set_operator_gate(False, monkeypatch)
     conn = _make_in_memory_db()
     analytics.record_event(conn, "content.limit_hit", user=opted_out_user)
@@ -397,7 +405,9 @@ def test_summarize_zero_events(tmp_db_path: Path) -> None:
     assert out == {"count": 0, "fields": {}}
 
 
-def test_summarize_presence_only_event_returns_count(tmp_db_path: Path, opted_in_user: dict[str, Any]) -> None:
+def test_summarize_presence_only_event_returns_count(
+    tmp_db_path: Path, opted_in_user: dict[str, Any]
+) -> None:
     """For presence-only events (`content.limit_hit`), summarize should
     return only count -- there are no int fields to percentile-aggregate.
     Counts over time are the entire query surface for these events."""
