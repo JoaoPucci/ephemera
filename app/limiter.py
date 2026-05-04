@@ -100,19 +100,42 @@ def login_rate_limit(request: Request) -> None:
 
 
 def create_rate_limit(request: Request) -> None:
-    """Per-session rate limit on secret creation. Falls back to IP if unauthenticated
-    (which shouldn't happen on authed routes, but keeps the limiter safe)."""
-    from .config import get_settings
-    from .dependencies import read_session_cookie
+    """Per-credential rate limit on secret creation. Three keying shapes
+    in priority order, all stringified to a stable namespace so the
+    limiter's dict key is always `str` and the prefixes can't collide:
 
-    raw = request.cookies.get(get_settings().session_cookie_name)
-    key = read_session_cookie(raw) if raw else None
-    # Stringify the (user_id, generation) tuple into a stable namespace
-    # so the limiter's dict key is always `str`. The IP fallback also
-    # produces a string, so `check`'s parameter type stays clean. The
-    # `session:` prefix can't collide with any IP-shaped string the
-    # fallback path produces.
-    identity = f"session:{key[0]}:{key[1]}" if key else _client_ip(request)
+      bearer:<token_id>          -- the caller authenticated via a
+                                    valid `Authorization: Bearer ...`
+                                    token. Each token gets its own
+                                    bucket regardless of source IP, so
+                                    two tokens from the same office NAT
+                                    don't compete for one shared budget.
+      session:<user_id>:<gen>    -- the caller has a valid session cookie.
+                                    Two browsers logged in as the same
+                                    user share the bucket; rotating
+                                    credentials advances <gen> and so
+                                    starts a fresh bucket.
+      <client_ip>                -- unauthenticated fallback. Authed
+                                    routes refuse the request after
+                                    this dep runs, but the IP key keeps
+                                    the limiter safe even if a future
+                                    route mounts this dep without an
+                                    auth dep behind it.
+
+    Bearer keying takes precedence over session keying so a CI script
+    that happens to also send a session cookie (unusual but possible
+    under shared-laptop dev flows) is still bucketed by the credential
+    it actively presents."""
+    from .config import get_settings
+    from .dependencies import read_session_cookie, resolve_bearer_token
+
+    bearer_row = resolve_bearer_token(request)
+    if bearer_row is not None:
+        identity = f"bearer:{bearer_row['id']}"
+    else:
+        raw = request.cookies.get(get_settings().session_cookie_name)
+        key = read_session_cookie(raw) if raw else None
+        identity = f"session:{key[0]}:{key[1]}" if key else _client_ip(request)
     create_limiter.check(identity)
 
 

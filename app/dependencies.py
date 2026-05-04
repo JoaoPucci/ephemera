@@ -6,7 +6,7 @@ a user as well. A request is "authenticated as user X" if either credential
 resolves to a user row; dependencies below return that row (or raise 401).
 """
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Header, Request
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
@@ -77,6 +77,40 @@ def is_logged_in(request: Request) -> bool:
 # ---------------------------------------------------------------------------
 
 
+_BEARER_CACHE_UNSET = object()
+
+
+def resolve_bearer_token(request: Request) -> dict[str, Any] | None:
+    """Look up the bearer token in the Authorization header, once per
+    request. The result (an `api_tokens` row, or None) is memoised on
+    `request.state` so the lookup runs at most once even when several
+    deps want it -- `verify_same_origin`'s missing-Origin branch,
+    `verify_api_token_or_session`'s bearer-auth path, and the limiter's
+    per-token keying all share this single resolution.
+
+    Returns None if there's no Authorization header, the header isn't
+    a Bearer scheme, or the token doesn't resolve to an active row in
+    `api_tokens`. Callers that distinguish "no bearer attempted" from
+    "bearer attempted but invalid" should also read the Authorization
+    header themselves; this helper collapses both into None on the
+    keying side, which is what the limiter wants (a garbage Bearer
+    string falls through to IP keying, exactly as if no bearer had
+    been attempted)."""
+    cached = getattr(request.state, "_bearer_token_row", _BEARER_CACHE_UNSET)
+    if cached is not _BEARER_CACHE_UNSET:
+        # `cached` is the row from a previous call (or None if no bearer);
+        # the sentinel is the only `object` value the attribute can hold,
+        # and the `is not` narrows mypy off it.
+        return cast("dict[str, Any] | None", cached)
+    auth = request.headers.get("authorization", "")
+    row: dict[str, Any] | None = None
+    if auth.lower().startswith("bearer "):
+        plaintext = auth.split(" ", 1)[1].strip()
+        row = auth_mod.lookup_api_token(plaintext)
+    request.state._bearer_token_row = row
+    return row
+
+
 def verify_api_token_or_session(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -84,8 +118,7 @@ def verify_api_token_or_session(
     """Accept either a valid DB-issued API token OR a valid session cookie,
     and return the authenticated user row."""
     if authorization and authorization.lower().startswith("bearer "):
-        provided = authorization.split(" ", 1)[1].strip()
-        token_row = auth_mod.lookup_api_token(provided)
+        token_row = resolve_bearer_token(request)
         if token_row is not None:
             user = models.get_user_by_id(token_row["user_id"])
             if user is not None:
@@ -128,11 +161,8 @@ def verify_same_origin(request: Request) -> None:
     """
     origin = request.headers.get("origin")
     if origin is None:
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            provided = auth_header.split(" ", 1)[1].strip()
-            if provided and auth_mod.lookup_api_token(provided) is not None:
-                return
+        if resolve_bearer_token(request) is not None:
+            return
         raise http_error(403, "missing_origin")
     allowed = get_settings().origins
     if origin not in allowed:
