@@ -67,7 +67,38 @@ _logger = logging.getLogger("ephemera.security")
 
 
 def emit(event: str, **fields: Any) -> None:
-    """Write one structured security event as a single JSON line."""
+    """Write one structured security event as a single JSON line.
+
+    Field-shape conventions (the audit log's posture, applied at every
+    call site -- see docs/threat_model.md for the rationale):
+
+    - **Authenticated subject events** carry both `user_id` (canonical
+      int identifier) AND `username` (the user-facing handle).
+      user_id alone would force an operator to re-resolve identity from
+      the DB on every triage read; username alone would lose the
+      forward-compat handle if the schema ever permits username
+      rotation. Both means an immediate-readable line and a stable
+      identifier, accepting the small redundancy at log-write time.
+    - **Receiver-side events** (reveal.* family) carry the `secret_id`
+      but NOT `client_ip`. Receivers are anonymous-by-design in this
+      product (didn't sign up, didn't consent to identity capture);
+      logging the IP would create a "this address reached this
+      secret" correlation in journald that doesn't sit anywhere else
+      in the system.
+    - **`unknown_user` login failures** carry `client_ip` + `reason`
+      but NOT the user-submitted username string. Form-field stuffing
+      in a probe loop shouldn't accumulate as logged data the project
+      never asked for.
+    - **No plaintext-equivalent fields ever** -- never pass
+      passphrase / client_half / password / totp_code / server_key /
+      ciphertext into a field. The emit-site is the boundary; the
+      caller-side filter is documented at every call site.
+
+    Adding a new event type: pick fields per the rules above. If a
+    new field is borderline (user-submitted strings, identifying
+    metadata about a non-user, etc.), that's a posture decision and
+    belongs in docs/threat_model.md, not silently in a single emit
+    call."""
     payload = {
         "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "event": event,

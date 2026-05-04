@@ -78,6 +78,10 @@ Before filing, it can be worth checking the project's
 spec-shaped tests — the answer to "is this behaviour intended"
 is often there:
 
+- [`docs/threat_model.md`](docs/threat_model.md) — what's in
+  scope to defend, what's deliberately not, and the known
+  posture observations (token-in-access-log, receiver
+  anonymity, audit-log retention).
 - `tests/test_security.py` — security headers, CSP, CSRF gate,
   auth response-shape invariants (canonical "invalid credentials"
   on every auth-failure path), rate-limiter behaviour.

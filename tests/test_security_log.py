@@ -102,9 +102,17 @@ def test_login_failure_wrong_password_emits_event_with_reason(
     assert failures[0]["username"] == provisioned_user["username"]
 
 
-def test_login_failure_unknown_user_emits_event_without_user_id(
+def test_login_failure_unknown_user_emits_event_without_user_id_or_username(
     client: TestClient, audit_caplog: pytest.LogCaptureFixture
 ) -> None:
+    """`unknown_user` is the only login.failure variant where the
+    `username` field would carry the *user-submitted string* rather
+    than the canonical username on a real users row. The audit posture
+    is not to accumulate user-submitted strings as logged data: form-
+    field stuffing (passwords, emails, junk in the username slot of a
+    probe loop) shouldn't end up in journald. The defender's signal
+    -- "an account is being probed" -- is preserved by the
+    `client_ip` + `reason="unknown_user"` combination."""
     r = client.post(
         "/send/login",
         data={"username": "ghost", "password": "nope", "code": "000000"},
@@ -114,8 +122,11 @@ def test_login_failure_unknown_user_emits_event_without_user_id(
     events = _events(audit_caplog)
     failures = [e for e in events if e["event"] == "login.failure"]
     assert failures and failures[0]["reason"] == "unknown_user"
-    assert failures[0]["username"] == "ghost"
     assert "user_id" not in failures[0]
+    # Submitted-username-as-data is what we're *not* logging now.
+    assert "username" not in failures[0]
+    # Defender signal (IP + reason) is still there.
+    assert "client_ip" in failures[0]
 
 
 def test_login_lockout_event_emitted_when_threshold_crossed(
@@ -166,11 +177,21 @@ def _create_and_get_reveal_parts(
     return sid, token, frag
 
 
-def test_reveal_success_emits_event_with_secret_id(
+def test_reveal_success_does_not_emit_audit_event(
     client: TestClient,
     auth_headers: dict[str, str],
     audit_caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """A successful reveal is the product's happy path -- not a security
+    incident -- so it deliberately does NOT emit a security_log event.
+    Logging "secret X opened from IP Y at time T" with no accountability
+    target (receivers are unauthenticated by design) would create a
+    permanent who-opened-what record in journald that doesn't fit the
+    audit log's accountability posture. The DB already records the
+    lifecycle event in `secrets.viewed_at` (tracked rows) or the row's
+    deletion (untracked rows). Symmetric with the deliberate absence
+    of `secret.created`: log destructive / authentication / abuse-shaped
+    events, not happy-path use."""
     sid, token, frag = _create_and_get_reveal_parts(client, auth_headers)
     r = client.post(
         f"/s/{token}/reveal",
@@ -179,7 +200,7 @@ def test_reveal_success_emits_event_with_secret_id(
     )
     assert r.status_code == 200
     events = _events(audit_caplog)
-    assert any(e["event"] == "reveal.success" and e["secret_id"] == sid for e in events)
+    assert not any(e["event"] == "reveal.success" for e in events)
 
 
 def test_reveal_wrong_passphrase_emits_event_with_attempts(
@@ -201,6 +222,37 @@ def test_reveal_wrong_passphrase_emits_event_with_attempts(
     assert wrongs
     assert wrongs[0]["secret_id"] == sid
     assert wrongs[0]["attempts"] == 1
+    # Receivers are anonymous-by-design (no signup, no consent to
+    # identity capture). The receiver's IP must NOT be logged on
+    # reveal events; secret_id + attempts is the abuse-detection
+    # signal. See the comment block at the wrong-passphrase emit
+    # site in app/routes/receiver.py.
+    assert "client_ip" not in wrongs[0]
+
+
+def test_reveal_burned_event_does_not_carry_receiver_ip(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same posture as wrong_passphrase: receiver-side events are
+    anonymous-by-design. Burn after N wrong attempts logs the
+    secret_id (so the operator can correlate with the wrong_passphrase
+    sequence that led up to it) but not the receiver's IP."""
+    sid, token, frag = _create_and_get_reveal_parts(
+        client, auth_headers, passphrase="right"
+    )
+    # Drive past the burn threshold (max_passphrase_attempts = 5).
+    for _ in range(6):
+        client.post(
+            f"/s/{token}/reveal",
+            json={"key": frag, "passphrase": "wrong"},
+            headers={"Origin": "http://testserver"},
+        )
+    events = _events(audit_caplog)
+    burns = [e for e in events if e["event"] == "reveal.burned"]
+    assert burns and burns[0]["secret_id"] == sid
+    assert "client_ip" not in burns[0]
 
 
 # ---------------------------------------------------------------------------

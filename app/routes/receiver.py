@@ -70,12 +70,10 @@ def landing_meta(token: str) -> LandingMetaResponse:
     dependencies=[Depends(verify_same_origin), Depends(reveal_rate_limit)],
 )
 def reveal(
-    request: Request,
     token: str,
     body: RevealBody,
     settings: Settings = Depends(get_settings),
 ) -> RevealResponse:
-    ip = security_log.client_ip(request)
     row = _load_live_row(token)
     if row is None:
         raise _gone()
@@ -97,11 +95,24 @@ def reveal(
         if len(body.passphrase) > 200 or not bcrypt.checkpw(
             body.passphrase.encode(), row["passphrase"].encode()
         ):
+            # Receiver-side audit events: secret_id + the attempts counter
+            # is the abuse-detection signal. The receiver's IP is
+            # deliberately NOT logged. Receivers are anonymous-by-design
+            # in this product (they didn't sign up, they didn't consent
+            # to identity capture, they just clicked a link someone
+            # sent them); recording their IP next to the secret_id
+            # would create a permanent "this IP reached this secret"
+            # correlation in journald that doesn't sit anywhere else
+            # in the system. The same secret_id repeating across N
+            # `reveal.wrong_passphrase` lines tells the operator
+            # "secret X is being attacked"; whether the attacker is
+            # behind one IP or rotating doesn't change the response
+            # (the burn-after-N-fails defense fires on the secret_id,
+            # not on the IP).
             attempts = models.increment_attempts(row["id"])
             security_log.emit(
                 "reveal.wrong_passphrase",
                 secret_id=row["id"],
-                client_ip=ip,
                 attempts=attempts,
             )
             if attempts >= settings.max_passphrase_attempts:
@@ -109,7 +120,6 @@ def reveal(
                 security_log.emit(
                     "reveal.burned",
                     secret_id=row["id"],
-                    client_ip=ip,
                 )
                 raise http_error(410, "too_many_attempts_burned")
             raise http_error(401, "wrong_passphrase")
@@ -133,7 +143,16 @@ def reveal(
     if not models.consume_for_reveal(row["id"], track=bool(row["track"])):
         raise _gone()
 
-    security_log.emit("reveal.success", secret_id=row["id"], client_ip=ip)
+    # No `reveal.success` audit event by design. A successful reveal is
+    # the product's happy path -- not a security incident -- and emitting
+    # one tied to `secret_id` (the only stable identifier we have here,
+    # since the receiver is unauthenticated) would create an indefinite
+    # "secret X was opened at time T" record in journald with no
+    # accountability target to balance it. The DB already records the
+    # event in the row's lifecycle (`viewed_at` + status flip on tracked
+    # rows; deletion on untracked rows). Symmetric with the deliberate
+    # absence of `secret.created`: log destructive / authentication /
+    # abuse-shaped events, not happy-path use.
 
     if row["content_type"] == "image":
         return RevealImageResponse(
