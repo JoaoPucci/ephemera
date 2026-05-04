@@ -46,7 +46,7 @@ jobs:
       #   push         -> fetch-depth: 1, because we only use `git ls-files`
       #     below; no history needed, and a full-depth push-event clone is
       #     the slow path.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # Quote the values: in GitHub Actions expressions, bare `0` is
           # falsy, so `x && 0 || 1` always collapses to `1`. Using strings
