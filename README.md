@@ -3,6 +3,7 @@
 [![CI](https://github.com/JoaoPucci/ephemera/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPucci/ephemera/actions/workflows/ci.yml)
 [![Deploy](https://github.com/JoaoPucci/ephemera/actions/workflows/deploy.yml/badge.svg)](https://github.com/JoaoPucci/ephemera/actions/workflows/deploy.yml)
 [![codecov](https://codecov.io/gh/JoaoPucci/ephemera/branch/main/graph/badge.svg)](https://codecov.io/gh/JoaoPucci/ephemera)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/JoaoPucci/ephemera/badge)](https://scorecard.dev/viewer/?uri=github.com/JoaoPucci/ephemera)
 [![Release](https://img.shields.io/github/v/release/JoaoPucci/ephemera?sort=semver&color=blue)](https://github.com/JoaoPucci/ephemera/releases/latest)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](.github/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -48,7 +49,7 @@ yourself.
 |---|---|
 | DB breach exposing plaintext | Fernet + key splitting: the URL fragment (half the encryption key) never reaches the server. A database dump alone cannot decrypt anything. |
 | Plaintext in logs | Uvicorn access log excludes request bodies; FastAPI exception handlers scrub sensitive data. |
-| Weak authentication | bcrypt cost 12, TOTP with ±1-step tolerance and anti-replay, 10 one-time recovery codes, per-user lockout (10 failures in 15 min → 1 h). |
+| Weak authentication | bcrypt cost 12, TOTP with ±1-step tolerance and anti-replay, 10 one-time recovery codes, per-user lockout (10 failed attempts → 1 h lockout; counter is monotonic, no decay window — a slow-burn attacker can't sit just below the threshold indefinitely). |
 | Username enumeration | Constant-time bcrypt check even when the username doesn't exist. |
 | Session hijacking / fixation | `HttpOnly` + `SameSite=Strict` + `Secure` cookie; session value rotated on every successful login. |
 | CSRF | `Origin` header validated on every state-changing POST. Cross-origin returns 403. |
@@ -62,13 +63,16 @@ yourself.
 </details>
 
 <details>
-<summary><b>Test coverage</b> — backend, frontend, and end-to-end layers</summary>
+<summary><b>Test coverage</b> — six layers from per-PR unit tests to weekly mutation runs</summary>
 
-| Layer | Tool |
-|---|---|
-| Backend unit + integration | pytest |
-| Frontend handlers (in-flight guards, error paths) | Vitest + jsdom |
-| End-to-end golden path in a real browser | Playwright (Chromium) |
+| Layer | Tool | When |
+|---|---|---|
+| Backend unit + integration | pytest | every PR + push |
+| Frontend handlers (in-flight guards, error paths) | Vitest + jsdom | every PR + push |
+| End-to-end acceptance suite (the system's spec layer per [`AGENTS.md`](AGENTS.md) §3) | Playwright (Chromium) | every PR + push |
+| Architecture invariants | AST-level fitness functions in `tests/test_fitness_functions.py` + `tests-js/fitness-functions.test.js` (every state-mutating route carries an origin gate AND a rate limiter, in that order; `totp_secret` only reads inside `with_totp`-named getters; source-pinned `BCRYPT_ROUNDS`; ...) | every PR + push |
+| Static analysis | mypy `strict = true` on both `app/` and `tests/`, ruff (Python lint + format), biome (JS/CSS/JSON), CodeQL (Python + JS + Actions) | every PR + push |
+| Mutation testing | cosmic-ray on security-leverage Python (`crypto`, `auth/*`, `limiter`, `security_log`); Stryker on the JS compose / reveal / login modules | weekly Sun, 03:17 + 04:23 UTC |
 
 Tests run with bcrypt cost dropped to 4 via an explicit env-var gate that
 [`tests/conftest.py`](tests/conftest.py) sets automatically (production keeps
@@ -76,11 +80,18 @@ cost 12). The reduction is purely a wall-clock optimisation — every
 constant-time test in the suite counts `bcrypt.checkpw` invocations via
 `monkeypatch` rather than measuring elapsed time, so the security signal is
 identical at either cost. The cost-12 source constant stays pinned by
-`tests/test_fitness_functions.py::test_security_constants_are_not_silently_weakened`.
-The E2E test drives a real browser through login → create → reveal across two
-separate browser contexts, exercising the full pipeline including the
-browser's fragment handling. For exact counts and runtimes, run the suites
-(see below).
+`tests/test_fitness_functions.py::test_security_constants_are_not_silently_weakened`,
+and a session-scoped autouse fixture in `conftest.py` kills cosmic-ray
+mutations that disable the cost-4 override gate in <1 s instead of letting
+them survive a 19-min cost-12 run.
+
+The acceptance suite drives a real browser through login → create → reveal
+across two separate browser contexts (smoke), plus dedicated specs for
+image upload, passphrase flow, expired-secret state, rate-limit hit, mobile
+viewport, css-cascade regressions, and sender-side cancel. The Playwright
+runner uses an env-gated `/_test/*` router (`EPHEMERA_E2E_TEST_HOOKS=1`)
+to reset the in-memory limiter and force-expire secrets without sleeping
+through real-time. For exact counts and runtimes, run the suites (see below).
 
 </details>
 
@@ -335,19 +346,25 @@ reveal → assert content → assert a second visit shows "gone".
 <details>
 <summary>Key source files, one-liner each</summary>
 
-- `app/crypto.py` — Fernet + key splitting
+- `app/crypto.py` — Fernet + key splitting; HKDF-derived KEK for at-rest TOTP
 - `app/validation.py` — MIME + magic-byte check
-- `app/models.py` — SQLite data layer (secrets, users, api_tokens)
-- `app/auth.py` — password + TOTP + backup codes + lockout + API-token mint/lookup
-- `app/admin.py` — CLI for provisioning and credential rotation
-- `app/routes/sender.py` — `/send`, `/send/login`, `/send/logout`, `/api/secrets`, status
+- `app/models/` — SQLite data layer (split per table) + the `migrations/` versioned registry
+- `app/auth/` — password / TOTP / recovery codes / lockout / API-token mint+lookup / HIBP k-anonymity (split by concern)
+- `app/admin/` — CLI for provisioning, credential rotation, token management, diagnostics
+- `app/routes/sender.py` — `/send`, `/send/login`, `/send/logout`, `/api/secrets` family (create, status, tracked list, cancel, untrack, clear-history)
 - `app/routes/receiver.py` — `/s/{token}`, `/s/{token}/meta`, `/s/{token}/reveal`
+- `app/routes/prefs.py` — `/api/me` + `PATCH /api/me/preferences` (analytics opt-in) + `PATCH /api/me/language`
 - `app/dependencies.py` — bearer/session auth, session cookie, origin check
-- `app/limiter.py` — in-memory sliding-window rate limiters (login, create, reveal)
+- `app/limiter.py` — in-memory sliding-window rate limiters (reveal, login, create, read)
 - `app/cleanup.py` — background task purging expired + old tracked rows
-- `app/analytics.py` — append-only event table for capacity-planning telemetry
+- `app/i18n.py` — locale resolver (`?lang=` → cookie → `users.preferred_language` → Accept-Language) + Jinja `template_context()` injector
+- `app/security_headers.py` — CSP / HSTS / Permissions-Policy block applied as middleware
+- `app/security_log.py` — structured audit log (`emit()` → one JSON line per security-relevant event)
+- `app/analytics.py` — aggregate-only event table for capacity-planning telemetry
   (sizes, counts, durations); never secret content, passphrases, or labels
-- `app/static/` — plain HTML/CSS/JS frontend with light/dark theme
+- `app/_test_hooks.py` — `/_test/*` routes; only registered when `EPHEMERA_E2E_TEST_HOOKS=1`
+- `app/templates/` — Jinja chrome shells (`_layout.html`, page templates)
+- `app/static/` — CSS / JS / icons / i18n catalogues, plain unbundled, light + dark theme
 
 </details>
 
