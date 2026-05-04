@@ -114,18 +114,7 @@ precision = 1
 # Mypy
 #
 # Runs in CI as a parallel job under .github/workflows/lint.yml against
-# both `app/` and `tests/`. `app/` runs under full `strict = true`;
-# `tests/` runs under the high-value strict subset
-# (no_implicit_optional, warn_return_any, strict_equality,
-# warn_redundant_casts, warn_unused_configs) but exempts the
-# function-annotation flags (`disallow_untyped_defs`,
-# `disallow_untyped_calls`, `disallow_any_generics`,
-# `disallow_subclassing_any`) -- pytest test functions returning
-# `None` is a low-signal annotation chore on a codebase this size
-# (~860 mechanical additions for a bug class -- "test function
-# silently returns wrong type" -- pytest discards anyway). If a
-# future test-side type bug suggests otherwise, that exemption is
-# the next ratchet step.
+# both `app/` and `tests/`. Both trees run under full `strict = true`.
 # ---------------------------------------------------------------------------
 
 [tool.mypy]
@@ -140,34 +129,3 @@ strict = true
 [[tool.mypy.overrides]]
 module = "qrcode.*"
 ignore_missing_imports = true
-
-# Tests stay on the high-value strict subset: the four flags below are
-# the ones `strict = true` adds that don't carry their weight on a
-# pytest test suite. Everything else strict turns on -- including
-# warn_unused_ignores, no_implicit_optional, warn_return_any,
-# strict_equality -- still applies to tests.
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-disallow_untyped_decorators = false
-disallow_any_generics = false
-disallow_subclassing_any = false
-# `check_untyped_defs = true` (which `strict = true` adds) starts type-
-# checking the bodies of pytest test functions. The body errors that
-# surface are mostly Optional-narrowing noise around `models.get_user_by_id(uid)["x"]`
-# patterns where the test just created the row -- mechanical to fix
-# (`assert row is not None`) but high-volume and low-signal. Mirrors
-# the high-value-subset posture pinned for tests at PR #143; if a
-# future test-side type bug suggests otherwise, this is the obvious
-# next ratchet step.
-check_untyped_defs = false
-# Tests reach into module-private bindings (`app.limiter.time` under
-# monkeypatch, `app.routes.prefs.models` re-export) that the strict
-# `no_implicit_reexport = true` flag rejects on the consumer side
-# without a `from x import y as y` shape on the producer side. Tests
-# routinely need access to these attrs to monkeypatch them; relaxing
-# the flag here keeps the producer modules from having to broadcast
-# private bindings as public re-exports purely for the test suite.
-no_implicit_reexport = false

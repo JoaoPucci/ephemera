@@ -22,6 +22,7 @@ import ast
 import pathlib
 import re
 import string
+from collections.abc import Iterator
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP_DIR = REPO_ROOT / "app"
@@ -31,7 +32,7 @@ def _py_files(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
 
 
-def _walk_local(node: ast.AST):
+def _walk_local(node: ast.AST) -> Iterator[ast.AST]:
     """`ast.walk` variant that yields the input node + descendants but
     does NOT recurse into nested `FunctionDef` / `AsyncFunctionDef`
     bodies. Use this for per-function analysis: a nested function
@@ -60,7 +61,7 @@ def _walk_local(node: ast.AST):
             queue.append((child, False))
 
 
-def _string_text_outside_docstrings(tree: ast.AST):
+def _string_text_outside_docstrings(tree: ast.AST) -> Iterator[tuple[str, int]]:
     """Yield `(text, lineno)` for every string-shaped expression that is
     NOT a module / function / class docstring. Covers two AST shapes:
 
@@ -212,7 +213,7 @@ def _is_autherror_construction(call: ast.Call, autherror_names: set[str]) -> boo
     return name == "AuthError" or name in autherror_names
 
 
-def test_authentication_only_raises_canonical_credential_error():
+def test_authentication_only_raises_canonical_credential_error() -> None:
     """AGENTS.md §5: 'User-facing error copy on auth failures should not
     distinguish *why* a credential was rejected. "Invalid credentials" is
     the canonical surface; per-factor wording (wrong password vs. wrong
@@ -925,7 +926,7 @@ def _apply_walrus_in_expr(
     return nt, na
 
 
-def _walrus_rebinds_in_order(node: ast.AST):
+def _walrus_rebinds_in_order(node: ast.AST) -> Iterator[ast.NamedExpr]:
     """Yield every `NamedExpr` (walrus) inside `node` whose target
     is a `Name`, in Python's evaluation order. Stops at nested
     scope boundaries (`FunctionDef` / `AsyncFunctionDef` /
@@ -1882,7 +1883,7 @@ def _name_is_bound_in_scope(
     )
 
 
-def _walk_local_for_bindings(node: ast.AST):
+def _walk_local_for_bindings(node: ast.AST) -> Iterator[ast.AST]:
     """`ast.walk` variant for the "is `name` shadowed in this scope?"
     question. Yields the input node + descendants but stops at every
     nested scope boundary -- `FunctionDef` / `AsyncFunctionDef`
@@ -2062,7 +2063,7 @@ def _names_from_match_cases(cases: list[ast.match_case]) -> list[str]:
     return out
 
 
-def _walk_module_scope(node: ast.AST):
+def _walk_module_scope(node: ast.AST) -> Iterator[ast.AST]:
     """`ast.walk` variant for module-scope rebound detection. Yields
     the input node + descendants but does NOT descend into nested
     `FunctionDef` / `AsyncFunctionDef` / `ClassDef` / `Lambda`
@@ -2162,7 +2163,7 @@ def _scope_totp_reads_are_quarantined(
     return ok
 
 
-def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
+def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters() -> None:
     """app/models/users.py module docstring pins the convention: the
     plaintext TOTP seed is exposed only via `get_user_with_totp_*`
     getters; every other read path returns a dict that omits the column.
@@ -2220,7 +2221,7 @@ def test_totp_secret_reads_only_in_functions_that_use_with_totp_getters():
 # ---------------------------------------------------------------------------
 
 
-def test_analytics_events_table_has_a_single_writer():
+def test_analytics_events_table_has_a_single_writer() -> None:
     """app/analytics.py docstring: 'The gate is checked inside record_event*,
     not at the call site -- a future emitter that forgets the gate is a
     class of bug we want the audit-internal contract to make impossible.'
@@ -2313,7 +2314,10 @@ def test_analytics_events_table_has_a_single_writer():
                 segments = _string_assembly_segments(node, file_aliases)
                 candidates = _candidates_from_segments(segments)
                 if any(sql_ref.search(c) for c in candidates):
-                    offender_lineno = node.lineno
+                    # _is_string_assembly_node narrows to JoinedStr / BinOp /
+                    # Call, all of which carry lineno; mypy can't follow that
+                    # through the bool predicate.
+                    offender_lineno = node.lineno  # type: ignore[attr-defined]
                     break
         if offender_lineno is not None:
             offenders.append(f"{rel}:{offender_lineno}")
@@ -3126,7 +3130,7 @@ def _is_origin_dependency(
     return False
 
 
-def test_state_mutating_routes_all_carry_origin_gate():
+def test_state_mutating_routes_all_carry_origin_gate() -> None:
     """Every POST/PUT/PATCH/DELETE handler under app/ must depend on
     `Depends(verify_same_origin)`, either inside the decorator's
     `dependencies=[...]` keyword or as a parameter default
@@ -3220,6 +3224,9 @@ def test_state_mutating_routes_all_carry_origin_gate():
         for node in ast.walk(tree):
             if not _is_imperative_mutating_registration(node, callable_aliases):
                 continue
+            # The predicate above only returns True for ast.Call nodes;
+            # narrow explicitly for mypy.
+            assert isinstance(node, ast.Call)
             # For two-step shapes, the dependency lives in the factory
             # call held under the alias, not in the `register(handler)`
             # call itself. Walk both -- the registration node AND every
@@ -3296,7 +3303,7 @@ def _is_rate_limit_dependency(
     return arg_name not in rate_limit_shadowed
 
 
-def test_state_mutating_routes_all_carry_rate_limiter():
+def test_state_mutating_routes_all_carry_rate_limiter() -> None:
     """Every POST/PUT/PATCH/DELETE handler under app/ must depend on
     one of the canonical rate-limit dependencies in `app/limiter.py`
     (`reveal_rate_limit`, `login_rate_limit`, `create_rate_limit`,
@@ -3365,6 +3372,8 @@ def test_state_mutating_routes_all_carry_rate_limiter():
         for node in ast.walk(tree):
             if not _is_imperative_mutating_registration(node, callable_aliases):
                 continue
+            # Predicate only returns True for ast.Call; narrow for mypy.
+            assert isinstance(node, ast.Call)
             ok = any(
                 _is_rate_limit_dependency(inner, rate_limit_shadowed, depends_shadowed)
                 for candidate in _imperative_dependency_candidates(
@@ -3407,7 +3416,7 @@ def _ordered_dep_classifications(
     return out
 
 
-def test_origin_gate_precedes_rate_limit_when_both_present():
+def test_origin_gate_precedes_rate_limit_when_both_present() -> None:
     """Within a single `dependencies=[...]` list (or parameter-default
     chain) that declares BOTH `verify_same_origin` and a rate-limit
     callable, the origin dep MUST appear first.
@@ -3498,7 +3507,7 @@ def test_origin_gate_precedes_rate_limit_when_both_present():
 # ---------------------------------------------------------------------------
 
 
-def test_no_print_calls_in_request_path_or_data_layer():
+def test_no_print_calls_in_request_path_or_data_layer() -> None:
     """`print()` inside the request-serving / data-layer surface lands
     in journalctl as unstructured text and bypasses the structured
     `app/security_log.py` conduit the codebase otherwise enforces. The
@@ -3567,7 +3576,7 @@ def _read_module_int_constants(path: pathlib.Path) -> dict[str, int]:
     return out
 
 
-def test_security_constants_are_not_silently_weakened():
+def test_security_constants_are_not_silently_weakened() -> None:
     """Pin the deliberate tuning knobs in app/auth/_core.py so a future
     "tests are too slow, drop bcrypt cost" or "let's accept 4-digit TOTP"
     diff fails in source rather than at release.

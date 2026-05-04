@@ -1,14 +1,17 @@
 """Tests for app.models: CRUD, expiry queries, tracking behavior, user scoping."""
 
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from app import models
 
 
-def _utcnow():
+def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
@@ -16,7 +19,7 @@ def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _mk(user_id: int, **overrides) -> dict:
+def _mk(user_id: int, **overrides: Any) -> dict[str, Any]:
     """Small helper to keep tests compact."""
     params = dict(
         content_type="text",
@@ -34,7 +37,7 @@ def _mk(user_id: int, **overrides) -> dict:
     return models.create_secret(user_id=user_id, **params)  # type: ignore[arg-type]
 
 
-def test_init_db_creates_secrets_users_and_tokens_tables(tmp_db_path):
+def test_init_db_creates_secrets_users_and_tokens_tables(tmp_db_path: Path) -> None:
     import sqlite3
 
     with sqlite3.connect(tmp_db_path) as conn:
@@ -47,7 +50,9 @@ def test_init_db_creates_secrets_users_and_tokens_tables(tmp_db_path):
     assert {"secrets", "users", "api_tokens"} <= names
 
 
-def test_create_secret_returns_id_token_and_expires_at(provisioned_user):
+def test_create_secret_returns_id_token_and_expires_at(
+    provisioned_user: dict[str, Any],
+) -> None:
     result = _mk(provisioned_user["id"])
     assert "id" in result
     assert "token" in result
@@ -55,12 +60,12 @@ def test_create_secret_returns_id_token_and_expires_at(provisioned_user):
     assert len(result["token"]) >= 16
 
 
-def test_token_is_unique(provisioned_user):
+def test_token_is_unique(provisioned_user: dict[str, Any]) -> None:
     tokens = {_mk(provisioned_user["id"])["token"] for _ in range(30)}
     assert len(tokens) == 30
 
 
-def test_get_by_token_returns_row(provisioned_user):
+def test_get_by_token_returns_row(provisioned_user: dict[str, Any]) -> None:
     r = _mk(provisioned_user["id"], ciphertext=b"cipher")
     row = models.get_by_token(r["token"])
     assert row is not None
@@ -70,17 +75,19 @@ def test_get_by_token_returns_row(provisioned_user):
     assert row["user_id"] == provisioned_user["id"]
 
 
-def test_get_by_missing_token_returns_none(tmp_db_path):
+def test_get_by_missing_token_returns_none(tmp_db_path: Path) -> None:
     assert models.get_by_token("does-not-exist") is None
 
 
-def test_delete_secret_removes_row(provisioned_user):
+def test_delete_secret_removes_row(provisioned_user: dict[str, Any]) -> None:
     r = _mk(provisioned_user["id"])
     models.delete_secret(r["id"])
     assert models.get_by_token(r["token"]) is None
 
 
-def test_mark_viewed_on_tracked_nulls_payload_keeps_metadata(provisioned_user):
+def test_mark_viewed_on_tracked_nulls_payload_keeps_metadata(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True, passphrase_hash="hash")
     models.mark_viewed(r["id"])
     row = models.get_by_id(r["id"], provisioned_user["id"])
@@ -92,20 +99,24 @@ def test_mark_viewed_on_tracked_nulls_payload_keeps_metadata(provisioned_user):
     assert row["viewed_at"] is not None
 
 
-def test_mark_viewed_on_untracked_deletes_row(provisioned_user):
+def test_mark_viewed_on_untracked_deletes_row(provisioned_user: dict[str, Any]) -> None:
     r = _mk(provisioned_user["id"])
     models.mark_viewed(r["id"])
     assert models.get_by_id(r["id"], provisioned_user["id"]) is None
 
 
-def test_consume_for_reveal_first_call_wins_second_loses_untracked(provisioned_user):
+def test_consume_for_reveal_first_call_wins_second_loses_untracked(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"])
     assert models.consume_for_reveal(r["id"], track=False) is True
     assert models.consume_for_reveal(r["id"], track=False) is False
     assert models.get_by_id(r["id"], provisioned_user["id"]) is None
 
 
-def test_consume_for_reveal_first_call_wins_second_loses_tracked(provisioned_user):
+def test_consume_for_reveal_first_call_wins_second_loses_tracked(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True)
     assert models.consume_for_reveal(r["id"], track=True) is True
     assert models.consume_for_reveal(r["id"], track=True) is False
@@ -118,7 +129,9 @@ def test_consume_for_reveal_first_call_wins_second_loses_tracked(provisioned_use
     assert row["viewed_at"] is not None
 
 
-def test_consume_for_reveal_under_concurrency_exactly_one_winner(provisioned_user):
+def test_consume_for_reveal_under_concurrency_exactly_one_winner(
+    provisioned_user: dict[str, Any],
+) -> None:
     """Two threads racing through consume_for_reveal: exactly one True."""
     import threading
 
@@ -127,7 +140,7 @@ def test_consume_for_reveal_under_concurrency_exactly_one_winner(provisioned_use
     results: list[bool] = []
     lock = threading.Lock()
 
-    def attempt():
+    def attempt() -> None:
         barrier.wait()
         won = models.consume_for_reveal(r["id"], track=False)
         with lock:
@@ -143,13 +156,17 @@ def test_consume_for_reveal_under_concurrency_exactly_one_winner(provisioned_use
     assert sorted(results) == [False, True]
 
 
-def test_get_status_returns_pending_before_view(provisioned_user):
+def test_get_status_returns_pending_before_view(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True)
     status = models.get_status(r["id"], provisioned_user["id"])
     assert status is not None and status["status"] == "pending"
 
 
-def test_get_status_returns_viewed_after_reveal_on_tracked(provisioned_user):
+def test_get_status_returns_viewed_after_reveal_on_tracked(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True)
     models.mark_viewed(r["id"])
     status = models.get_status(r["id"], provisioned_user["id"])
@@ -158,12 +175,16 @@ def test_get_status_returns_viewed_after_reveal_on_tracked(provisioned_user):
     assert status["viewed_at"] is not None
 
 
-def test_get_status_returns_none_for_untracked(provisioned_user):
+def test_get_status_returns_none_for_untracked(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"])
     assert models.get_status(r["id"], provisioned_user["id"]) is None
 
 
-def test_get_status_returns_none_for_other_users_secret(provisioned_user, make_user):
+def test_get_status_returns_none_for_other_users_secret(
+    provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]
+) -> None:
     bob = make_user("bob")
     r = _mk(provisioned_user["id"], track=True)
     # Bob cannot read Alice's status.
@@ -172,14 +193,16 @@ def test_get_status_returns_none_for_other_users_secret(provisioned_user, make_u
     assert models.get_status(r["id"], provisioned_user["id"]) is not None
 
 
-def test_increment_attempts_increments_counter(provisioned_user):
+def test_increment_attempts_increments_counter(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], passphrase_hash="hash")
     assert models.increment_attempts(r["id"]) == 1
     assert models.increment_attempts(r["id"]) == 2
     assert models.increment_attempts(r["id"]) == 3
 
 
-def test_purge_expired_removes_expired_rows(provisioned_user):
+def test_purge_expired_removes_expired_rows(provisioned_user: dict[str, Any]) -> None:
     fresh = _mk(provisioned_user["id"])
     stale = _mk(provisioned_user["id"], expires_in=-60)
     purged = models.purge_expired()
@@ -188,7 +211,9 @@ def test_purge_expired_removes_expired_rows(provisioned_user):
     assert models.get_by_token(stale["token"]) is None
 
 
-def test_purge_tracked_metadata_after_retention_window(provisioned_user):
+def test_purge_tracked_metadata_after_retention_window(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True)
     models.mark_viewed(r["id"])
     models._force_viewed_at(r["id"], _iso(_utcnow() - timedelta(days=31)))
@@ -197,14 +222,22 @@ def test_purge_tracked_metadata_after_retention_window(provisioned_user):
     assert models.get_status(r["id"], provisioned_user["id"]) is None
 
 
-def test_is_expired_returns_true_after_expires_at(provisioned_user):
+def test_is_expired_returns_true_after_expires_at(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], expires_in=-1)
-    assert models.is_expired(models.get_by_token(r["token"])) is True
+    row = models.get_by_token(r["token"])
+    assert row is not None
+    assert models.is_expired(row) is True
 
 
-def test_is_expired_returns_false_for_fresh_secret(provisioned_user):
+def test_is_expired_returns_false_for_fresh_secret(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"])
-    assert models.is_expired(models.get_by_token(r["token"])) is False
+    row = models.get_by_token(r["token"])
+    assert row is not None
+    assert models.is_expired(row) is False
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +245,9 @@ def test_is_expired_returns_false_for_fresh_secret(provisioned_user):
 # ---------------------------------------------------------------------------
 
 
-def test_list_tracked_secrets_scopes_by_user(provisioned_user, make_user):
+def test_list_tracked_secrets_scopes_by_user(
+    provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]
+) -> None:
     bob = make_user("bob")
     _mk(provisioned_user["id"], track=True, label="alice-one")
     _mk(provisioned_user["id"], track=True, label="alice-two")
@@ -225,7 +260,9 @@ def test_list_tracked_secrets_scopes_by_user(provisioned_user, make_user):
     assert {r["label"] for r in bob_rows} == {"bob-one"}
 
 
-def test_cancel_tracked_wipes_payload_and_flags_status(provisioned_user):
+def test_cancel_tracked_wipes_payload_and_flags_status(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True, passphrase_hash="hash")
     ok = models.cancel(r["id"], provisioned_user["id"])
     assert ok is True
@@ -238,19 +275,23 @@ def test_cancel_tracked_wipes_payload_and_flags_status(provisioned_user):
     assert row["viewed_at"] is not None
 
 
-def test_cancel_untracked_deletes_row(provisioned_user):
+def test_cancel_untracked_deletes_row(provisioned_user: dict[str, Any]) -> None:
     r = _mk(provisioned_user["id"])
     assert models.cancel(r["id"], provisioned_user["id"]) is True
     assert models.get_by_id(r["id"], provisioned_user["id"]) is None
 
 
-def test_cancel_on_already_viewed_secret_returns_false(provisioned_user):
+def test_cancel_on_already_viewed_secret_returns_false(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True)
     models.mark_viewed(r["id"])
     assert models.cancel(r["id"], provisioned_user["id"]) is False
 
 
-def test_cancel_cannot_touch_other_users_secret(provisioned_user, make_user):
+def test_cancel_cannot_touch_other_users_secret(
+    provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]
+) -> None:
     bob = make_user("bob")
     r = _mk(provisioned_user["id"], track=True)
     assert models.cancel(r["id"], bob["id"]) is False
@@ -258,15 +299,19 @@ def test_cancel_cannot_touch_other_users_secret(provisioned_user, make_user):
     assert row is not None and row["ciphertext"] is not None  # untouched
 
 
-def test_cancel_receiver_url_stops_working(provisioned_user):
+def test_cancel_receiver_url_stops_working(provisioned_user: dict[str, Any]) -> None:
     r = _mk(provisioned_user["id"], track=True)
     token = r["token"]
-    assert models.get_by_token(token)["ciphertext"] is not None
+    before = models.get_by_token(token)
+    assert before is not None and before["ciphertext"] is not None
     models.cancel(r["id"], provisioned_user["id"])
-    assert models.get_by_token(token)["ciphertext"] is None
+    after = models.get_by_token(token)
+    assert after is not None and after["ciphertext"] is None
 
 
-def test_clear_non_pending_tracked_removes_only_non_live(provisioned_user):
+def test_clear_non_pending_tracked_removes_only_non_live(
+    provisioned_user: dict[str, Any],
+) -> None:
     uid = provisioned_user["id"]
     live = _mk(uid, track=True)  # pending, live
     viewed = _mk(uid, track=True)
@@ -283,7 +328,9 @@ def test_clear_non_pending_tracked_removes_only_non_live(provisioned_user):
     assert [r["id"] for r in rows] == [live["id"]]
 
 
-def test_clear_non_pending_tracked_scopes_by_user(provisioned_user, make_user):
+def test_clear_non_pending_tracked_scopes_by_user(
+    provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]
+) -> None:
     alice_id = provisioned_user["id"]
     bob = make_user("bob")
 
@@ -298,12 +345,14 @@ def test_clear_non_pending_tracked_scopes_by_user(provisioned_user, make_user):
     assert len(models.list_tracked_secrets(bob["id"])) == 1
 
 
-def test_clear_non_pending_tracked_returns_zero_when_nothing_to_clear(provisioned_user):
+def test_clear_non_pending_tracked_returns_zero_when_nothing_to_clear(
+    provisioned_user: dict[str, Any],
+) -> None:
     _mk(provisioned_user["id"], track=True)  # only a live one
     assert models.clear_non_pending_tracked(provisioned_user["id"]) == 0
 
 
-def test_list_tracked_reports_canceled_status(provisioned_user):
+def test_list_tracked_reports_canceled_status(provisioned_user: dict[str, Any]) -> None:
     r = _mk(provisioned_user["id"], track=True)
     models.cancel(r["id"], provisioned_user["id"])
     items = models.list_tracked_secrets(provisioned_user["id"])
@@ -312,7 +361,9 @@ def test_list_tracked_reports_canceled_status(provisioned_user):
     assert items[0]["viewed_at"] is not None
 
 
-def test_untrack_scopes_by_user(provisioned_user, make_user):
+def test_untrack_scopes_by_user(
+    provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]
+) -> None:
     bob = make_user("bob")
     r = _mk(provisioned_user["id"], track=True)
     # Bob cannot untrack Alice's secret.
@@ -323,7 +374,9 @@ def test_untrack_scopes_by_user(provisioned_user, make_user):
     assert models.untrack(r["id"], provisioned_user["id"]) is True
 
 
-def test_cascade_on_delete_user_drops_their_secrets_and_tokens(provisioned_user):
+def test_cascade_on_delete_user_drops_their_secrets_and_tokens(
+    provisioned_user: dict[str, Any],
+) -> None:
     r = _mk(provisioned_user["id"], track=True)
     from app import auth
 
@@ -340,7 +393,7 @@ def test_cascade_on_delete_user_drops_their_secrets_and_tokens(provisioned_user)
 # ---------------------------------------------------------------------------
 
 
-def test_user_count_and_lookup_by_username(tmp_db_path):
+def test_user_count_and_lookup_by_username(tmp_db_path: Path) -> None:
     from app import auth
 
     assert models.user_count() == 0
@@ -356,7 +409,7 @@ def test_user_count_and_lookup_by_username(tmp_db_path):
     assert models.get_user_by_username("bob") is None
 
 
-def test_username_is_unique(tmp_db_path):
+def test_username_is_unique(tmp_db_path: Path) -> None:
     from app import auth
 
     models.create_user(
@@ -379,7 +432,9 @@ def test_username_is_unique(tmp_db_path):
 # ---------------------------------------------------------------------------
 
 
-def test_list_users_returns_every_row(provisioned_user, make_user):
+def test_list_users_returns_every_row(
+    provisioned_user: dict[str, Any], make_user: Callable[..., dict[str, Any]]
+) -> None:
     """Sanity check on list_users -- covered indirectly by the admin CLI
     list-users command but not exercised at the model layer."""
     make_user("bob")
@@ -389,16 +444,17 @@ def test_list_users_returns_every_row(provisioned_user, make_user):
     assert usernames == {provisioned_user["username"], "bob", "carol"}
 
 
-def test_update_user_with_no_fields_is_a_noop(provisioned_user):
+def test_update_user_with_no_fields_is_a_noop(provisioned_user: dict[str, Any]) -> None:
     """Edge case: an empty kwargs dict shouldn't produce an empty UPDATE
     statement (SQLite would error); the function should return early."""
     before = models.get_user_by_id(provisioned_user["id"])
     models.update_user(provisioned_user["id"])  # no fields at all
     after = models.get_user_by_id(provisioned_user["id"])
+    assert before is not None and after is not None
     assert before["updated_at"] == after["updated_at"]  # no-op means no timestamp bump
 
 
-def test_update_user_rejects_unknown_columns(provisioned_user):
+def test_update_user_rejects_unknown_columns(provisioned_user: dict[str, Any]) -> None:
     """update_user builds the SET clause via f-string interpolation over
     its kwargs (values are parameterised; column names are not). A future
     caller that accidentally threaded user-influenced dict keys through
@@ -418,10 +474,13 @@ def test_update_user_rejects_unknown_columns(provisioned_user):
     # Sanity: the known-good kwarg was never applied because the whole
     # call was rejected before any SQL ran.
     row = models.get_user_by_id(provisioned_user["id"])
+    assert row is not None
     assert row["password_hash"] != "looks-fine"
 
 
-def test_update_user_accepts_every_documented_writable_column(provisioned_user):
+def test_update_user_accepts_every_documented_writable_column(
+    provisioned_user: dict[str, Any],
+) -> None:
     """The whitelist has to include every column that real callers update.
     Catch the regression where adding a new column to the users schema
     without also naming it in _ALLOWED_UPDATE_COLUMNS would break the
@@ -441,7 +500,9 @@ def test_update_user_accepts_every_documented_writable_column(provisioned_user):
     )
 
 
-def test_set_analytics_opt_in_returns_new_value_on_actual_change(provisioned_user):
+def test_set_analytics_opt_in_returns_new_value_on_actual_change(
+    provisioned_user: dict[str, Any],
+) -> None:
     """Atomic toggle: when the desired value differs from the current
     one, the SQL UPDATE fires and returns the new value. This is the
     "real change" path the route uses to gate security_log emission."""
@@ -449,10 +510,13 @@ def test_set_analytics_opt_in_returns_new_value_on_actual_change(provisioned_use
     persisted = models.set_analytics_opt_in(provisioned_user["id"], 1)
     assert persisted == 1
     fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh is not None
     assert fresh["analytics_opt_in"] == 1
 
 
-def test_set_analytics_opt_in_returns_none_when_value_already_matches(provisioned_user):
+def test_set_analytics_opt_in_returns_none_when_value_already_matches(
+    provisioned_user: dict[str, Any],
+) -> None:
     """Concurrency-safe no-op: when the desired value matches what's
     already in the row, the conditional WHERE clause skips the UPDATE
     and RETURNING produces no row. The route uses None as the signal
@@ -466,10 +530,11 @@ def test_set_analytics_opt_in_returns_none_when_value_already_matches(provisione
     persisted = models.set_analytics_opt_in(provisioned_user["id"], 0)
     assert persisted is None
     fresh = models.get_user_by_id(provisioned_user["id"])
+    assert fresh is not None
     assert fresh["analytics_opt_in"] == 0
 
 
-def test_set_analytics_opt_in_returns_none_for_unknown_user(tmp_db_path):
+def test_set_analytics_opt_in_returns_none_for_unknown_user(tmp_db_path: Path) -> None:
     """Defensive: a stale or hand-crafted call against a nonexistent
     user_id must not silently succeed. RETURNING on a zero-row UPDATE
     yields no row; the function reports None and the caller knows
@@ -478,7 +543,9 @@ def test_set_analytics_opt_in_returns_none_for_unknown_user(tmp_db_path):
     assert persisted is None
 
 
-def test_default_user_getters_do_not_return_totp_secret(provisioned_user):
+def test_default_user_getters_do_not_return_totp_secret(
+    provisioned_user: dict[str, Any],
+) -> None:
     """The default user-row accessors must never hand back the TOTP
     plaintext. Most call sites (session auth, bearer auth, admin flows
     that aren't TOTP-facing) have no business seeing the seed; the two
@@ -493,14 +560,16 @@ def test_default_user_getters_do_not_return_totp_secret(provisioned_user):
     assert "totp_secret" not in by_name
     # Opt-in variant still works for the callers that need it.
     with_totp = models.get_user_with_totp_by_id(provisioned_user["id"])
+    assert with_totp is not None
     assert with_totp["totp_secret"] == provisioned_user["totp_secret"]
     with_totp_by_name = models.get_user_with_totp_by_username(
         provisioned_user["username"]
     )
+    assert with_totp_by_name is not None
     assert with_totp_by_name["totp_secret"] == provisioned_user["totp_secret"]
 
 
-def test_fresh_db_is_stamped_to_current_schema_version(tmp_db_path):
+def test_fresh_db_is_stamped_to_current_schema_version(tmp_db_path: Path) -> None:
     """init_db on a fresh DB must leave schema_version at CURRENT_SCHEMA_VERSION;
     a later boot can then compare and refuse downgrade."""
     import sqlite3
@@ -513,7 +582,7 @@ def test_fresh_db_is_stamped_to_current_schema_version(tmp_db_path):
     assert int(row[0]) == CURRENT_SCHEMA_VERSION
 
 
-def test_init_db_is_idempotent_across_reruns(tmp_db_path):
+def test_init_db_is_idempotent_across_reruns(tmp_db_path: Path) -> None:
     """Running init_db a second time must not regress the version or duplicate
     the single schema_version row (the CHECK constraint would reject)."""
     import sqlite3
@@ -527,7 +596,7 @@ def test_init_db_is_idempotent_across_reruns(tmp_db_path):
     assert int(rows[0][1]) == CURRENT_SCHEMA_VERSION
 
 
-def test_init_db_refuses_to_run_against_newer_schema(tmp_db_path):
+def test_init_db_refuses_to_run_against_newer_schema(tmp_db_path: Path) -> None:
     """Operator rolled the code back onto a DB that a newer build already
     migrated. We'd rather fail loudly than quietly query with an assumed-
     older column layout."""
@@ -547,7 +616,9 @@ def test_init_db_refuses_to_run_against_newer_schema(tmp_db_path):
         models.init_db()
 
 
-def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
+def test_legacy_db_migrates_to_multiuser_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A DB written by the pre-multi-user schema should gain username on users
     and user_id on secrets/api_tokens when init_db() runs over it."""
     import sqlite3
@@ -617,7 +688,7 @@ def test_legacy_db_migrates_to_multiuser_schema(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_v3_check_constraints_present_on_fresh_db(tmp_db_path):
+def test_v3_check_constraints_present_on_fresh_db(tmp_db_path: Path) -> None:
     """Fresh DBs land at v3 directly via TABLES_SCRIPT, which now embeds the
     CHECK clauses inline. The migration's table-rebuild path is for legacy
     v2 DBs and is exercised in test_v2_legacy_db_clean_upgrades_to_v3 below.
@@ -634,7 +705,7 @@ def test_v3_check_constraints_present_on_fresh_db(tmp_db_path):
     assert "length(username) <= 256" in users_sql
 
 
-def test_v3_check_rejects_oversized_passphrase(tmp_db_path):
+def test_v3_check_rejects_oversized_passphrase(tmp_db_path: Path) -> None:
     with sqlite3.connect(str(tmp_db_path)) as conn:
         # Insert a user first so the FK has a target.
         conn.execute(
@@ -650,7 +721,7 @@ def test_v3_check_rejects_oversized_passphrase(tmp_db_path):
             )
 
 
-def test_v3_check_rejects_oversized_label(tmp_db_path):
+def test_v3_check_rejects_oversized_label(tmp_db_path: Path) -> None:
     with sqlite3.connect(str(tmp_db_path)) as conn:
         conn.execute(
             "INSERT INTO users (username, password_hash, totp_secret, "
@@ -665,7 +736,7 @@ def test_v3_check_rejects_oversized_label(tmp_db_path):
             )
 
 
-def test_v3_check_rejects_oversized_username(tmp_db_path):
+def test_v3_check_rejects_oversized_username(tmp_db_path: Path) -> None:
     with (
         sqlite3.connect(str(tmp_db_path)) as conn,
         pytest.raises(sqlite3.IntegrityError),
@@ -677,7 +748,7 @@ def test_v3_check_rejects_oversized_username(tmp_db_path):
         )
 
 
-def test_v3_check_allows_null_optional_columns(tmp_db_path):
+def test_v3_check_allows_null_optional_columns(tmp_db_path: Path) -> None:
     """passphrase and label are nullable; the CHECK clauses must not fire
     on NULL values (the IS NULL OR length(...) form preserves nullability)."""
     with sqlite3.connect(str(tmp_db_path)) as conn:
@@ -693,7 +764,7 @@ def test_v3_check_allows_null_optional_columns(tmp_db_path):
         )
 
 
-def _seed_v2_db(db_path):
+def _seed_v2_db(db_path: Path) -> None:
     """Hand-roll a v2 DB shape (tables WITHOUT CHECK clauses, schema_version
     stamped to 2). Used by the v2->v3 migration tests below."""
     with sqlite3.connect(str(db_path)) as conn:
@@ -749,7 +820,9 @@ def _seed_v2_db(db_path):
         )
 
 
-def test_v2_legacy_db_clean_upgrades_to_v3(tmp_path, monkeypatch):
+def test_v2_legacy_db_clean_upgrades_to_v3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A v2 DB with no rows that violate the new CHECKs upgrades through to
     v3. After migration: tables carry the CHECK clauses, schema_version is
     stamped to 3, indices are present, FKs are intact."""
@@ -796,7 +869,9 @@ def test_v2_legacy_db_clean_upgrades_to_v3(tmp_path, monkeypatch):
         config.get_settings.cache_clear()
 
 
-def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypatch):
+def test_v3_migration_preserves_users_autoincrement_no_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Regression guard: the four-step table swap MUST preserve sqlite_sequence
     for the users table so AUTOINCREMENT keeps its no-reuse guarantee. Without
     the explicit restore, the post-migration counter collapses to MAX(id) of
@@ -864,7 +939,7 @@ def test_v3_migration_preserves_users_autoincrement_no_reuse(tmp_path, monkeypat
 # ---------------------------------------------------------------------------
 
 
-def _run_init_db_against(db, monkeypatch):
+def _run_init_db_against(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Boilerplate-cutter for the v3 violation tests below: point settings at
     the supplied path and call init_db, returning whatever it raises (or None
     on success)."""
@@ -879,7 +954,9 @@ def _run_init_db_against(db, monkeypatch):
         config.get_settings.cache_clear()
 
 
-def test_v3_migration_aborts_when_passphrase_exceeds_check_limit(tmp_path, monkeypatch):
+def test_v3_migration_aborts_when_passphrase_exceeds_check_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db = tmp_path / "v2_passphrase.db"
     _seed_v2_db(db)
     with sqlite3.connect(str(db)) as conn:
@@ -905,7 +982,9 @@ def test_v3_migration_aborts_when_passphrase_exceeds_check_limit(tmp_path, monke
     assert "1 row(s) exceed 80 chars" in msg
 
 
-def test_v3_migration_aborts_when_label_exceeds_check_limit(tmp_path, monkeypatch):
+def test_v3_migration_aborts_when_label_exceeds_check_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db = tmp_path / "v2_label.db"
     _seed_v2_db(db)
     with sqlite3.connect(str(db)) as conn:
@@ -931,7 +1010,9 @@ def test_v3_migration_aborts_when_label_exceeds_check_limit(tmp_path, monkeypatc
     assert "1 row(s) exceed 60 chars" in msg
 
 
-def test_v3_migration_aborts_when_username_exceeds_check_limit(tmp_path, monkeypatch):
+def test_v3_migration_aborts_when_username_exceeds_check_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db = tmp_path / "v2_username.db"
     _seed_v2_db(db)
     with sqlite3.connect(str(db)) as conn:
@@ -952,7 +1033,9 @@ def test_v3_migration_aborts_when_username_exceeds_check_limit(tmp_path, monkeyp
     assert "1 row(s) exceed 256 chars" in msg
 
 
-def test_v3_migration_aborts_with_all_violations_in_one_message(tmp_path, monkeypatch):
+def test_v3_migration_aborts_with_all_violations_in_one_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Multiple violations across columns are all reported together so an
     operator can fix them in one pass instead of replaying init_db three times."""
     db = tmp_path / "v2_all.db"
@@ -997,7 +1080,7 @@ def test_v3_migration_aborts_with_all_violations_in_one_message(tmp_path, monkey
 # ---------------------------------------------------------------------------
 
 
-def test_analytics_events_table_present_on_fresh_db(tmp_db_path):
+def test_analytics_events_table_present_on_fresh_db(tmp_db_path: Path) -> None:
     """Fresh DBs land at the current version directly via TABLES_SCRIPT.
     Schema is in v5 shape: no user_id column (aggregate-only), no FK
     child-column index."""
@@ -1020,7 +1103,7 @@ def test_analytics_events_table_present_on_fresh_db(tmp_db_path):
     assert "idx_analytics_events_user_id" not in idx_names
 
 
-def test_analytics_events_columns_match_v5_design(tmp_db_path):
+def test_analytics_events_columns_match_v5_design(tmp_db_path: Path) -> None:
     """v5 dropped `user_id` (aggregate-only by design). The table now
     carries only the bare minimum: id, event_type, occurred_at, payload."""
     with sqlite3.connect(str(tmp_db_path)) as conn:
@@ -1037,7 +1120,9 @@ def test_analytics_events_columns_match_v5_design(tmp_db_path):
     assert "user_id" not in cols
 
 
-def test_v3_legacy_db_upgrades_to_current(tmp_path, monkeypatch):
+def test_v3_legacy_db_upgrades_to_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Seed a v3 DB (CHECK clauses present, no analytics_events table,
     schema_version stamped at 3), boot the current code, and confirm
     migrations walk it forward through v4 (creates analytics_events with
@@ -1143,7 +1228,9 @@ def test_v3_legacy_db_upgrades_to_current(tmp_path, monkeypatch):
         config.get_settings.cache_clear()
 
 
-def test_v5_migration_resumes_after_rename_interrupt(tmp_path, monkeypatch):
+def test_v5_migration_resumes_after_rename_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Crash recovery: if a previous boot got killed between the v5 migration's
     RENAME and the version stamp, the next boot finds:
         * `_analytics_events_v4` (the renamed real data, never copied)
@@ -1263,7 +1350,9 @@ def test_v5_migration_resumes_after_rename_interrupt(tmp_path, monkeypatch):
         config.get_settings.cache_clear()
 
 
-def test_v6_migration_adds_analytics_opt_in_with_default_zero(tmp_path, monkeypatch):
+def test_v6_migration_adds_analytics_opt_in_with_default_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Seed a v5-shape DB with a row that lacks `analytics_opt_in` (legacy
     v5 was the last version where the column didn't exist). Boot the
     current code and confirm v6 added the column, defaulted existing rows
@@ -1365,7 +1454,9 @@ def test_v6_migration_adds_analytics_opt_in_with_default_zero(tmp_path, monkeypa
         config.get_settings.cache_clear()
 
 
-def test_v2_legacy_db_with_violating_rows_aborts_v3_migration(tmp_path, monkeypatch):
+def test_v2_legacy_db_with_violating_rows_aborts_v3_migration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A v2 DB with a row that exceeds a new CHECK ceiling must abort the
     migration with a remediable error message rather than failing mid-INSERT
     inside the table-rebuild step."""

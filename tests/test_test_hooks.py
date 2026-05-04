@@ -13,7 +13,9 @@ pin the same behaviour at the pytest level so:
     joins the cosmic-ray scope) have a fast-killing test surface.
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +25,9 @@ from app.limiter import create_limiter, login_limiter, read_limiter, reveal_limi
 
 
 @pytest.fixture
-def hooks_client(tmp_db_path, monkeypatch):
+def hooks_client(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
     """TestClient with `EPHEMERA_E2E_TEST_HOOKS=1` set BEFORE
     `create_app()` runs, so the `/_test/*` router gets registered.
     Resets all limiters before AND after the test (the limiters are
@@ -50,7 +54,9 @@ def hooks_client(tmp_db_path, monkeypatch):
         lim.reset()
 
 
-def test_test_hooks_router_not_registered_in_default_pytest_mode(client):
+def test_test_hooks_router_not_registered_in_default_pytest_mode(
+    client: TestClient,
+) -> None:
     """The default `client` fixture doesn't set
     `EPHEMERA_E2E_TEST_HOOKS`, so the /_test/* routes return 404.
     Pins the production posture -- prod deploys never set the env
@@ -62,7 +68,9 @@ def test_test_hooks_router_not_registered_in_default_pytest_mode(client):
     assert r.status_code == 404
 
 
-def test_limiter_reset_endpoint_clears_in_memory_state(hooks_client):
+def test_limiter_reset_endpoint_clears_in_memory_state(
+    hooks_client: TestClient,
+) -> None:
     """POST /_test/limiter/reset returns 200 and the limiter's
     `_hits` dict is empty afterwards. Burns one hit on each named
     limiter to ensure pre-state isn't already empty (otherwise the
@@ -84,7 +92,9 @@ def test_limiter_reset_endpoint_clears_in_memory_state(hooks_client):
     assert read_limiter._hits == {}
 
 
-def test_expire_secret_now_flips_expires_at_into_past(hooks_client, auth_headers):
+def test_expire_secret_now_flips_expires_at_into_past(
+    hooks_client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """POST /_test/secret/{token}/expire-now updates the matching
     secret's `expires_at` column to a past timestamp so the next
     reveal lookup classifies it as expired. Pins the SQL behaviour
@@ -117,7 +127,9 @@ def test_expire_secret_now_flips_expires_at_into_past(hooks_client, auth_headers
     assert expires_at < datetime.now(UTC) - timedelta(seconds=10)
 
 
-def test_expire_secret_now_returns_404_for_unknown_token(hooks_client):
+def test_expire_secret_now_returns_404_for_unknown_token(
+    hooks_client: TestClient,
+) -> None:
     """A misnamed token on the e2e side would otherwise look like a
     silent no-op; the 404 fires loudly so the spec author knows the
     token didn't match. Pins the rowcount==0 branch in the handler."""
@@ -128,7 +140,9 @@ def test_expire_secret_now_returns_404_for_unknown_token(hooks_client):
     assert r.status_code == 404
 
 
-def test_test_hooks_origin_gate_blocks_calls_from_other_origins(hooks_client):
+def test_test_hooks_origin_gate_blocks_calls_from_other_origins(
+    hooks_client: TestClient,
+) -> None:
     """Both /_test/* endpoints carry Depends(verify_same_origin) so the
     `test_state_mutating_routes_all_carry_origin_gate` fitness invariant
     stays exception-free. Pins that the gate is actually applied at

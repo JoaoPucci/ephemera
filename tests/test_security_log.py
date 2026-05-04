@@ -3,12 +3,14 @@
 import contextlib
 import json
 import logging
+from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 
-def _events(caplog):
-    out = []
+def _events(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     for rec in caplog.records:
         if rec.name != "ephemera.security":
             continue
@@ -18,7 +20,7 @@ def _events(caplog):
 
 
 @pytest.fixture
-def audit_caplog(caplog):
+def audit_caplog(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
     caplog.set_level(logging.INFO, logger="ephemera.security")
     return caplog
 
@@ -28,7 +30,9 @@ def audit_caplog(caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_emit_writes_json_with_event_ts_and_extra_fields(audit_caplog):
+def test_emit_writes_json_with_event_ts_and_extra_fields(
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     from app import security_log
 
     security_log.emit("test.event", user_id=42, username="alice")
@@ -47,7 +51,7 @@ def test_emit_writes_json_with_event_ts_and_extra_fields(audit_caplog):
 # ---------------------------------------------------------------------------
 
 
-def _login_body(provisioned_user):
+def _login_body(provisioned_user: dict[str, Any]) -> dict[str, str]:
     return {
         "username": provisioned_user["username"],
         "password": provisioned_user["password"],
@@ -55,7 +59,11 @@ def _login_body(provisioned_user):
     }
 
 
-def test_login_success_emits_event(client, provisioned_user, audit_caplog):
+def test_login_success_emits_event(
+    client: TestClient,
+    provisioned_user: dict[str, Any],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     r = client.post(
         "/send/login",
         data=_login_body(provisioned_user),
@@ -73,8 +81,10 @@ def test_login_success_emits_event(client, provisioned_user, audit_caplog):
 
 
 def test_login_failure_wrong_password_emits_event_with_reason(
-    client, provisioned_user, audit_caplog
-):
+    client: TestClient,
+    provisioned_user: dict[str, Any],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     r = client.post(
         "/send/login",
         data={
@@ -92,7 +102,9 @@ def test_login_failure_wrong_password_emits_event_with_reason(
     assert failures[0]["username"] == provisioned_user["username"]
 
 
-def test_login_failure_unknown_user_emits_event_without_user_id(client, audit_caplog):
+def test_login_failure_unknown_user_emits_event_without_user_id(
+    client: TestClient, audit_caplog: pytest.LogCaptureFixture
+) -> None:
     r = client.post(
         "/send/login",
         data={"username": "ghost", "password": "nope", "code": "000000"},
@@ -107,8 +119,10 @@ def test_login_failure_unknown_user_emits_event_without_user_id(client, audit_ca
 
 
 def test_login_lockout_event_emitted_when_threshold_crossed(
-    client, provisioned_user, audit_caplog
-):
+    client: TestClient,
+    provisioned_user: dict[str, Any],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     """After MAX_FAILURES wrong attempts, the next failure emits login.lockout
     alongside the final login.failure."""
     from app.auth import MAX_FAILURES
@@ -136,8 +150,12 @@ def test_login_lockout_event_emitted_when_threshold_crossed(
 # ---------------------------------------------------------------------------
 
 
-def _create_and_get_reveal_parts(client, auth_headers, passphrase=None):
-    body = {"content": "hi", "content_type": "text", "expires_in": 3600}
+def _create_and_get_reveal_parts(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    passphrase: str | None = None,
+) -> tuple[int, str, str]:
+    body: dict[str, Any] = {"content": "hi", "content_type": "text", "expires_in": 3600}
     if passphrase is not None:
         body["passphrase"] = passphrase
     r = client.post("/api/secrets", json=body, headers=auth_headers)
@@ -148,7 +166,11 @@ def _create_and_get_reveal_parts(client, auth_headers, passphrase=None):
     return sid, token, frag
 
 
-def test_reveal_success_emits_event_with_secret_id(client, auth_headers, audit_caplog):
+def test_reveal_success_emits_event_with_secret_id(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     sid, token, frag = _create_and_get_reveal_parts(client, auth_headers)
     r = client.post(
         f"/s/{token}/reveal",
@@ -161,8 +183,10 @@ def test_reveal_success_emits_event_with_secret_id(client, auth_headers, audit_c
 
 
 def test_reveal_wrong_passphrase_emits_event_with_attempts(
-    client, auth_headers, audit_caplog
-):
+    client: TestClient,
+    auth_headers: dict[str, str],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     sid, token, frag = _create_and_get_reveal_parts(
         client, auth_headers, passphrase="right"
     )
@@ -184,7 +208,11 @@ def test_reveal_wrong_passphrase_emits_event_with_attempts(
 # ---------------------------------------------------------------------------
 
 
-def test_secret_canceled_emits_event(client, auth_headers, audit_caplog):
+def test_secret_canceled_emits_event(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     r = client.post(
         "/api/secrets",
         json={"content": "x", "content_type": "text", "expires_in": 300, "track": True},
@@ -199,7 +227,11 @@ def test_secret_canceled_emits_event(client, auth_headers, audit_caplog):
     )
 
 
-def test_tracked_cleared_emits_event_with_count(client, auth_headers, audit_caplog):
+def test_tracked_cleared_emits_event_with_count(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    audit_caplog: pytest.LogCaptureFixture,
+) -> None:
     # Create one tracked secret and consume it so the clear actually removes something.
     r = client.post(
         "/api/secrets",

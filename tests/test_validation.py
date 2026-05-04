@@ -7,63 +7,63 @@ from hypothesis import strategies as st
 from app import validation
 
 
-def test_png_magic_bytes_accepted(sample_png_bytes):
+def test_png_magic_bytes_accepted(sample_png_bytes: bytes) -> None:
     mime = validation.validate_image(
         sample_png_bytes, "image/png", max_bytes=10_000_000
     )
     assert mime == "image/png"
 
 
-def test_jpeg_magic_bytes_accepted(sample_jpeg_bytes):
+def test_jpeg_magic_bytes_accepted(sample_jpeg_bytes: bytes) -> None:
     mime = validation.validate_image(
         sample_jpeg_bytes, "image/jpeg", max_bytes=10_000_000
     )
     assert mime == "image/jpeg"
 
 
-def test_gif_magic_bytes_accepted(sample_gif_bytes):
+def test_gif_magic_bytes_accepted(sample_gif_bytes: bytes) -> None:
     mime = validation.validate_image(
         sample_gif_bytes, "image/gif", max_bytes=10_000_000
     )
     assert mime == "image/gif"
 
 
-def test_webp_magic_bytes_accepted(sample_webp_bytes):
+def test_webp_magic_bytes_accepted(sample_webp_bytes: bytes) -> None:
     mime = validation.validate_image(
         sample_webp_bytes, "image/webp", max_bytes=10_000_000
     )
     assert mime == "image/webp"
 
 
-def test_svg_rejected(sample_svg_bytes):
+def test_svg_rejected(sample_svg_bytes: bytes) -> None:
     with pytest.raises(validation.ValidationError):
         validation.validate_image(
             sample_svg_bytes, "image/svg+xml", max_bytes=10_000_000
         )
 
 
-def test_content_type_header_must_match_magic_bytes(sample_png_bytes):
+def test_content_type_header_must_match_magic_bytes(sample_png_bytes: bytes) -> None:
     with pytest.raises(validation.ValidationError):
         validation.validate_image(sample_png_bytes, "image/jpeg", max_bytes=10_000_000)
 
 
-def test_file_larger_than_limit_rejected(sample_png_bytes):
+def test_file_larger_than_limit_rejected(sample_png_bytes: bytes) -> None:
     padded = sample_png_bytes + b"\x00" * 2000
     with pytest.raises(validation.ValidationError):
         validation.validate_image(padded, "image/png", max_bytes=1000)
 
 
-def test_empty_file_rejected():
+def test_empty_file_rejected() -> None:
     with pytest.raises(validation.ValidationError):
         validation.validate_image(b"", "image/png", max_bytes=10_000_000)
 
 
-def test_unknown_binary_blob_rejected():
+def test_unknown_binary_blob_rejected() -> None:
     with pytest.raises(validation.ValidationError):
         validation.validate_image(b"\x00" * 64, "image/png", max_bytes=10_000_000)
 
 
-def test_content_type_whitelist_is_enforced(sample_png_bytes):
+def test_content_type_whitelist_is_enforced(sample_png_bytes: bytes) -> None:
     with pytest.raises(validation.ValidationError):
         validation.validate_image(
             sample_png_bytes, "application/octet-stream", max_bytes=10_000_000
@@ -71,15 +71,18 @@ def test_content_type_whitelist_is_enforced(sample_png_bytes):
 
 
 def test_detect_mime_returns_correct_values_for_all_formats(
-    sample_png_bytes, sample_jpeg_bytes, sample_gif_bytes, sample_webp_bytes
-):
+    sample_png_bytes: bytes,
+    sample_jpeg_bytes: bytes,
+    sample_gif_bytes: bytes,
+    sample_webp_bytes: bytes,
+) -> None:
     assert validation.detect_mime(sample_png_bytes) == "image/png"
     assert validation.detect_mime(sample_jpeg_bytes) == "image/jpeg"
     assert validation.detect_mime(sample_gif_bytes) == "image/gif"
     assert validation.detect_mime(sample_webp_bytes) == "image/webp"
 
 
-def test_detect_mime_returns_none_for_svg(sample_svg_bytes):
+def test_detect_mime_returns_none_for_svg(sample_svg_bytes: bytes) -> None:
     assert validation.detect_mime(sample_svg_bytes) is None
 
 
@@ -98,7 +101,7 @@ def test_detect_mime_returns_none_for_svg(sample_svg_bytes):
 
 @given(data=st.binary(min_size=0, max_size=64))
 @settings(max_examples=300)
-def test_property_detect_mime_returns_known_or_none(data: bytes):
+def test_property_detect_mime_returns_known_or_none(data: bytes) -> None:
     """For any short byte string, detect_mime returns either a value in
     ALLOWED_MIME_TYPES or None. It does not raise, and it does not
     return arbitrary strings. Run with a higher example count because
@@ -113,7 +116,9 @@ def test_property_detect_mime_returns_known_or_none(data: bytes):
     cap=st.integers(min_value=1, max_value=64),
 )
 @settings(max_examples=50)
-def test_property_validate_image_rejects_oversize_for_any_cap(data: bytes, cap: int):
+def test_property_validate_image_rejects_oversize_for_any_cap(
+    data: bytes, cap: int
+) -> None:
     """For any byte payload whose length exceeds the cap, validation
     rejects with ValidationError regardless of declared MIME. Pins the
     cap as a hard ceiling: it isn't bypassed by valid magic bytes,

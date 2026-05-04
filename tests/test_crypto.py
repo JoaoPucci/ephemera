@@ -1,5 +1,7 @@
 """Tests for app.crypto: key generation, splitting, encryption round-trips."""
 
+from pathlib import Path
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -7,13 +9,13 @@ from hypothesis import strategies as st
 from app import crypto
 
 
-def test_generate_key_returns_32_bytes():
+def test_generate_key_returns_32_bytes() -> None:
     key = crypto.generate_key()
     assert isinstance(key, bytes)
     assert len(key) == 32
 
 
-def test_split_key_returns_two_16_byte_halves():
+def test_split_key_returns_two_16_byte_halves() -> None:
     key = crypto.generate_key()
     server_half, client_half = crypto.split_key(key)
     assert len(server_half) == 16
@@ -21,13 +23,13 @@ def test_split_key_returns_two_16_byte_halves():
     assert server_half + client_half == key
 
 
-def test_reconstruct_key_from_halves_matches_original():
+def test_reconstruct_key_from_halves_matches_original() -> None:
     key = crypto.generate_key()
     server_half, client_half = crypto.split_key(key)
     assert crypto.reconstruct_key(server_half, client_half) == key
 
 
-def test_client_half_encoded_is_urlsafe_string():
+def test_client_half_encoded_is_urlsafe_string() -> None:
     key = crypto.generate_key()
     _, client_half = crypto.split_key(key)
     encoded = crypto.encode_half(client_half)
@@ -37,7 +39,7 @@ def test_client_half_encoded_is_urlsafe_string():
     assert crypto.decode_half(encoded) == client_half
 
 
-def test_encrypt_then_decrypt_text_roundtrip():
+def test_encrypt_then_decrypt_text_roundtrip() -> None:
     key = crypto.generate_key()
     plaintext = "hello, ephemera — a secret message".encode()
     ciphertext = crypto.encrypt(plaintext, key)
@@ -45,14 +47,14 @@ def test_encrypt_then_decrypt_text_roundtrip():
     assert crypto.decrypt(ciphertext, key) == plaintext
 
 
-def test_encrypt_then_decrypt_binary_roundtrip():
+def test_encrypt_then_decrypt_binary_roundtrip() -> None:
     key = crypto.generate_key()
     blob = bytes(range(256)) * 10
     ciphertext = crypto.encrypt(blob, key)
     assert crypto.decrypt(ciphertext, key) == blob
 
 
-def test_decrypt_with_wrong_key_raises():
+def test_decrypt_with_wrong_key_raises() -> None:
     key_a = crypto.generate_key()
     key_b = crypto.generate_key()
     ciphertext = crypto.encrypt(b"secret", key_a)
@@ -60,7 +62,7 @@ def test_decrypt_with_wrong_key_raises():
         crypto.decrypt(ciphertext, key_b)
 
 
-def test_decrypt_with_corrupted_ciphertext_raises():
+def test_decrypt_with_corrupted_ciphertext_raises() -> None:
     key = crypto.generate_key()
     ciphertext = bytearray(crypto.encrypt(b"secret", key))
     ciphertext[10] ^= 0xFF
@@ -68,7 +70,7 @@ def test_decrypt_with_corrupted_ciphertext_raises():
         crypto.decrypt(bytes(ciphertext), key)
 
 
-def test_decrypt_with_wrong_client_half_raises():
+def test_decrypt_with_wrong_client_half_raises() -> None:
     key = crypto.generate_key()
     server_half, _ = crypto.split_key(key)
     bad_client = b"\x00" * 16
@@ -78,12 +80,12 @@ def test_decrypt_with_wrong_client_half_raises():
         crypto.decrypt(ciphertext, reconstructed)
 
 
-def test_two_generated_keys_differ():
+def test_two_generated_keys_differ() -> None:
     keys = {crypto.generate_key() for _ in range(50)}
     assert len(keys) == 50
 
 
-def test_split_key_rejects_wrong_size():
+def test_split_key_rejects_wrong_size() -> None:
     """split_key demands exactly KEY_SIZE bytes -- catches callers that pass
     an already-halved key or some other blob."""
     import pytest
@@ -94,7 +96,7 @@ def test_split_key_rejects_wrong_size():
         crypto.split_key(b"\x00" * 64)  # too long
 
 
-def test_reconstruct_key_rejects_wrong_half_sizes():
+def test_reconstruct_key_rejects_wrong_half_sizes() -> None:
     """reconstruct_key demands exactly HALF_SIZE bytes on each side so a
     silent "oops I concatenated something else" produces a key we actively
     reject rather than a 32-byte thing that just decrypts to garbage."""
@@ -111,14 +113,16 @@ def test_reconstruct_key_rejects_wrong_half_sizes():
 # ---------------------------------------------------------------------------
 
 
-def test_encrypt_at_rest_roundtrips(tmp_db_path):
+def test_encrypt_at_rest_roundtrips(tmp_db_path: Path) -> None:
     """tmp_db_path indirectly sets EPHEMERA_SECRET_KEY via the fixture."""
     token = crypto.encrypt_at_rest("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
     assert token.startswith("v1:")
     assert crypto.decrypt_at_rest(token) == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 
 
-def test_encrypt_at_rest_produces_distinct_ciphertexts_for_same_input(tmp_db_path):
+def test_encrypt_at_rest_produces_distinct_ciphertexts_for_same_input(
+    tmp_db_path: Path,
+) -> None:
     """Fernet embeds a random IV, so two encryptions of the same plaintext
     must differ -- otherwise an attacker can tell which users share a secret."""
     a = crypto.encrypt_at_rest("same-plaintext")
@@ -127,7 +131,7 @@ def test_encrypt_at_rest_produces_distinct_ciphertexts_for_same_input(tmp_db_pat
     assert crypto.decrypt_at_rest(a) == crypto.decrypt_at_rest(b) == "same-plaintext"
 
 
-def test_decrypt_at_rest_rejects_non_v1_string(tmp_db_path):
+def test_decrypt_at_rest_rejects_non_v1_string(tmp_db_path: Path) -> None:
     """is_at_rest_ciphertext gates migration detection -- a bare plaintext
     string must NEVER be treated as a decryptable token."""
     import pytest
@@ -136,7 +140,9 @@ def test_decrypt_at_rest_rejects_non_v1_string(tmp_db_path):
         crypto.decrypt_at_rest("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
 
 
-def test_decrypt_at_rest_fails_after_secret_key_rotation(tmp_db_path, monkeypatch):
+def test_decrypt_at_rest_fails_after_secret_key_rotation(
+    tmp_db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Rotating EPHEMERA_SECRET_KEY makes existing ciphertexts unreadable.
     This is the documented operator cost of at-rest encryption; the test
     pins that the failure is a loud AtRestDecryptionError, not a silent
@@ -177,7 +183,7 @@ def test_decrypt_at_rest_fails_after_secret_key_rotation(tmp_db_path, monkeypatc
 
 @given(plaintext=st.binary(min_size=0, max_size=512))
 @settings(max_examples=100)
-def test_property_encrypt_decrypt_roundtrip_on_any_bytes(plaintext: bytes):
+def test_property_encrypt_decrypt_roundtrip_on_any_bytes(plaintext: bytes) -> None:
     """For any bytes value (including empty, NUL-laden, and full byte
     range), encrypt-then-decrypt with a freshly-generated key returns
     the original. Checks the Fernet framing layer survives every input
@@ -191,7 +197,9 @@ def test_property_encrypt_decrypt_roundtrip_on_any_bytes(plaintext: bytes):
     wrong_key=st.binary(min_size=32, max_size=32),
 )
 @settings(max_examples=50)
-def test_property_decrypt_with_unrelated_key_raises(plaintext: bytes, wrong_key: bytes):
+def test_property_decrypt_with_unrelated_key_raises(
+    plaintext: bytes, wrong_key: bytes
+) -> None:
     """For any plaintext encrypted under one key, decrypting under any
     OTHER 32-byte key raises DecryptionError. Pins that the failure
     mode is an exception (loud) rather than silent wrong-bytes (which
