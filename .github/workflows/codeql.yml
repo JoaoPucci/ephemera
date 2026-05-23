@@ -1,0 +1,89 @@
+# CodeQL (Advanced Setup)
+#
+# Replaces GitHub's Default Setup so the workflow file is in-repo and
+# controllable. Two operational reasons to move:
+#
+#   1. Default Setup fans out one parallel shard per language on every
+#      push. All three shards download the same ~25 MB
+#      github/codeql-action archive from codeload.github.com at the same
+#      second; codeload's per-IP / per-account throttle has returned
+#      HTTP 429 on whichever shard's request landed during a closed
+#      window, leaving the run red on a non-required check.
+#      max-parallel: 1 below serialises the matrix so only one shard
+#      hits codeload at a time.
+#
+#   2. paths-ignore: on pull_request, skip CodeQL when the PR's diff is
+#      pure dependency-pin updates. Lockfile contents aren't analysed
+#      by the default CodeQL query suite; dependency CVEs are owned by
+#      pip-audit + npm audit in the (required) test-suite Dependency
+#      audit job and by Dependency review. Skipping the analysis saves
+#      runner time without losing coverage.
+#
+# paths-ignore only applies to pull_request, not push or schedule -- so
+# pushes to main and the weekly cron always get a full three-language
+# run regardless of what's in the diff.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/requirements*.txt'
+      - '**/package*.json'
+      - '**/package-lock.json'
+  schedule:
+    - cron: '27 6 * * 2'   # Tuesdays, 06:27 UTC (off the half-hour cron-spike;
+                           # scorecard.yml is Tuesdays 22:31 UTC, no overlap)
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write   # upload SARIF to Code-scanning dashboard
+      actions: read            # required by analyze for Actions extraction
+      contents: read
+
+    strategy:
+      fail-fast: false
+      # Serialise the matrix: with three shards downloading the same
+      # github/codeql-action archive concurrently, codeload's edge
+      # throttle returns 429 on whichever request lands during the
+      # closed window. Sequential downloads space the requests out.
+      # Cost: ~3x wall-clock (~6 min -> ~18 min). Nothing policy-side
+      # gates on CodeQL latency in this repo.
+      max-parallel: 1
+      matrix:
+        language: [actions, python, javascript-typescript]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Per Scorecard Token-Permissions guidance: don't leave the
+          # checkout's git credentials around for later steps.
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          languages: ${{ matrix.language }}
+          # No build step for any of our targets: actions = YAML, python
+          # = pure source, javascript-typescript = unbundled vanilla JS
+          # (no TypeScript, no bundler, no build script in package.json).
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          category: "/language:${{ matrix.language }}"
