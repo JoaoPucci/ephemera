@@ -19,7 +19,7 @@ pytest-cov>=6.0
 # against a hand-picked example. Catches edge cases that human/AI-
 # written example tests miss, particularly on cryptographic round-
 # trips and size-cap boundaries.
-hypothesis>=6.100
+hypothesis>=6.152.9
 # radon is the cyclomatic-complexity meter used by
 # scripts/crap_report.py in CI. Pinned only as a floor; the report is
 # informational and a minor bump won't change rank order in practice.
