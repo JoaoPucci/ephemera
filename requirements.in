@@ -30,7 +30,7 @@ pip>=26.1.1
 
 fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
-python-multipart>=0.0.27
+python-multipart>=0.0.32
 pydantic-settings>=2.14.1
 cryptography>=48.0.0
 bcrypt>=4.1
