@@ -26,7 +26,7 @@
 # the lockfile carries no pip pin, and pip on the VPS drifts behind
 # whatever was installed at server-setup time -- which is how the
 # CVE-2026-3219 era of pip persisted on the droplet.
-pip>=26.1.1
+pip>=26.1.2
 
 fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
