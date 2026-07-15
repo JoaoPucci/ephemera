@@ -18,6 +18,9 @@ test('sender-initiated cancel: tracked secret two-click revoke kills the URL', a
   await senderPage.fill('#code', generateSync({ secret: TOTP_SECRET, strategy: 'totp' }));
   await senderPage.click('#login-form button[type="submit"]');
   await expect(senderPage.locator('#content')).toBeVisible();
+  // Beacon set once form.js finishes wiring after the post-login reload,
+  // so the interactions below can't race the handler attach.
+  await expect(senderPage.locator('body[data-sender-ready]')).toBeAttached();
 
   await senderPage.fill('#content', `cancel test ${Date.now()}`);
   // Tracking is what surfaces the secret in the tracked-list panel and
