@@ -23,6 +23,9 @@ test('golden path: sign in, create a text secret, receiver reveals it exactly on
 
   // Page reloads into the sender form.
   await expect(senderPage.locator('#content')).toBeVisible();
+  // Beacon set once form.js finishes wiring after the post-login reload,
+  // so the submit below can't race the handler attach.
+  await expect(senderPage.locator('body[data-sender-ready]')).toBeAttached();
 
   const plaintext = `e2e message ${Date.now()}`;
   await senderPage.fill('#content', plaintext);

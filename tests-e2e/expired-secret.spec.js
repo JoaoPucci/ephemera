@@ -38,6 +38,9 @@ test('receiver lands on the gone state when secret expired between create and re
   await senderPage.fill('#code', generateSync({ secret: TOTP_SECRET, strategy: 'totp' }));
   await senderPage.click('#login-form button[type="submit"]');
   await expect(senderPage.locator('#content')).toBeVisible();
+  // Beacon set once form.js finishes wiring after the post-login reload,
+  // so the submit below can't race the handler attach.
+  await expect(senderPage.locator('body[data-sender-ready]')).toBeAttached();
 
   await senderPage.fill('#content', `e2e-expired ${Date.now()}`);
   await senderPage.click('#submit-btn');

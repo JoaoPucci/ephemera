@@ -52,6 +52,9 @@ test('golden path on iPhone viewport: sign in, create a text secret, reveal it',
   await senderPage.click('#login-form button[type="submit"]');
 
   await expect(senderPage.locator('#content')).toBeVisible();
+  // Beacon set once form.js finishes wiring after the post-login reload,
+  // so the submit below can't race the handler attach.
+  await expect(senderPage.locator('body[data-sender-ready]')).toBeAttached();
 
   const plaintext = `e2e-mobile ${Date.now()}`;
   await senderPage.fill('#content', plaintext);

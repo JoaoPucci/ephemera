@@ -26,6 +26,9 @@ test('passphrase + burn-after-5: wrong passphrase 5 times destroys the secret', 
   await senderPage.fill('#code', generateSync({ secret: TOTP_SECRET, strategy: 'totp' }));
   await senderPage.click('#login-form button[type="submit"]');
   await expect(senderPage.locator('#content')).toBeVisible();
+  // Beacon set once form.js finishes wiring after the post-login reload,
+  // so the submit below can't race the handler attach.
+  await expect(senderPage.locator('body[data-sender-ready]')).toBeAttached();
 
   await senderPage.fill('#content', `protected message ${Date.now()}`);
   await senderPage.fill('#passphrase', PASSPHRASE);

@@ -27,6 +27,9 @@ test('image golden path: sender drops a PNG, receiver reveals the data: URI', as
   await senderPage.fill('#code', generateSync({ secret: TOTP_SECRET, strategy: 'totp' }));
   await senderPage.click('#login-form button[type="submit"]');
   await expect(senderPage.locator('#content')).toBeVisible();
+  // Beacon set once form.js finishes wiring after the post-login reload,
+  // so the tab/submit clicks below can't race the handler attach.
+  await expect(senderPage.locator('body[data-sender-ready]')).toBeAttached();
 
   // Switch to the Image tab; the dropzone + file input swap in.
   await senderPage.click('.tab[data-tab="image"]');

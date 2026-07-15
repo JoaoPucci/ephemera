@@ -376,3 +376,12 @@ trackCheckbox.addEventListener('change', syncLabelVisibility);
 
 setTab('text');
 syncLabelVisibility();
+
+// Readiness beacon. Every interactive handler above -- tab switching,
+// dropzone, the submit listener, track/label -- is now attached. Login
+// posts via fetch and then window.location.reload()s, so the
+// authenticated page paints #content from server HTML before this module
+// (an unbundled ES module) finishes wiring; a click landing in that gap
+// hits a dead control. Flipping this flag last lets callers wait for "the
+// compose form is live" instead of guessing from element visibility.
+document.body.dataset.senderReady = '1';
