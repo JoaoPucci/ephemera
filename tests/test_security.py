@@ -635,14 +635,18 @@ def test_reveal_rate_limit_kicks_in(
 def _create_secret_with_token(client: TestClient, token: str) -> int:
     """Helper: POST a tiny text secret authenticated by `token`. Returns
     the response status so the caller can count 201s vs 429s."""
-    return client.post(
+    # starlette 1.3.1's TestClient.post is typed as Any (its httpx
+    # integration is deprecated in favour of httpx2); bind through a
+    # typed local so .status_code resolves to int, not Any.
+    resp: httpx.Response = client.post(
         "/api/secrets",
         json={"content": "x", "content_type": "text", "expires_in": 300},
         headers={
             "Authorization": f"Bearer {token}",
             "Origin": "http://testserver",
         },
-    ).status_code
+    )
+    return resp.status_code
 
 
 def test_two_bearer_tokens_get_independent_create_buckets(
