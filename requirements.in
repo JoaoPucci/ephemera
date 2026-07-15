@@ -29,7 +29,7 @@
 pip>=26.1.2
 
 fastapi>=0.136.1
-uvicorn[standard]>=0.46.0
+uvicorn[standard]>=0.51.0
 python-multipart>=0.0.31
 pydantic-settings>=2.14.2
 # Floor holds the OpenSSL-in-wheel advisory fix (GHSA-537c-gmf6-5ccf,
