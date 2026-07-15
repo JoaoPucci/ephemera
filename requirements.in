@@ -26,13 +26,16 @@
 # the lockfile carries no pip pin, and pip on the VPS drifts behind
 # whatever was installed at server-setup time -- which is how the
 # CVE-2026-3219 era of pip persisted on the droplet.
-pip>=26.1.1
+pip>=26.1.2
 
 fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
-python-multipart>=0.0.27
-pydantic-settings>=2.14.1
-cryptography>=48.0.0
+python-multipart>=0.0.31
+pydantic-settings>=2.14.2
+# Floor holds the OpenSSL-in-wheel advisory fix (GHSA-537c-gmf6-5ccf,
+# patched in 48.0.1). The <49 cap keeps the 49.x major bump out of this
+# security-patch sweep so it can land as its own reviewed change.
+cryptography>=48.0.1,<49
 bcrypt>=4.1
 itsdangerous>=2.1
 pyotp>=2.9
