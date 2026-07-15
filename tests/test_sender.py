@@ -36,11 +36,15 @@ def test_send_get_with_session_returns_form(authed_client: TestClient) -> None:
 def _login(
     client: TestClient, username: str, password: str, code: str
 ) -> "httpx.Response":
-    return client.post(
+    # starlette 1.3.1's TestClient.post is typed as Any (its httpx
+    # integration is deprecated in favour of httpx2); bind through a
+    # typed local so the declared httpx.Response return still holds.
+    resp: httpx.Response = client.post(
         "/send/login",
         data={"username": username, "password": password, "code": code},
         headers={"Origin": "http://testserver"},
     )
+    return resp
 
 
 def test_login_wrong_username_rejected(
