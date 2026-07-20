@@ -28,7 +28,7 @@
 # CVE-2026-3219 era of pip persisted on the droplet.
 pip>=26.1.2
 
-fastapi>=0.139.0
+fastapi>=0.139.2
 uvicorn[standard]>=0.51.0
 python-multipart>=0.0.31
 pydantic-settings>=2.14.2
