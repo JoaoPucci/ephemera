@@ -12,7 +12,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.61.1",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",
     "@vitest/coverage-v8": "4.1.10",
