@@ -11,7 +11,7 @@
 
 -r requirements.in
 
-pytest>=8.0
+pytest>=9.1.1
 pytest-cov>=6.0
 # hypothesis powers property-based tests in tests/test_crypto.py and
 # tests/test_validation.py -- the framework generates random inputs to
