@@ -49,4 +49,4 @@ pip-tools>=7.4
 # `ignore_errors = true`, and subsequent PRs remove modules from the
 # overrides list as their type debt is cleaned up. When the list is
 # empty we flip to global strict mode.
-mypy>=2.1.0
+mypy>=2.3.0
