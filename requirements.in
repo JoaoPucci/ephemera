@@ -38,7 +38,7 @@ pydantic-settings>=2.14.2
 cryptography>=48.0.1,<49
 bcrypt>=4.1
 itsdangerous>=2.1
-pyotp>=2.9
+pyotp>=2.10.0
 qrcode>=7.4
 # Localization: Babel provides Translations / lazy_gettext for Python; Jinja2
 # renders server-rendered templates with {% trans %} / {{ _("...") }}. Both
