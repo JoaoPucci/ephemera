@@ -35,7 +35,7 @@ pydantic-settings>=2.14.2
 # Floor holds the OpenSSL-in-wheel advisory fix (GHSA-537c-gmf6-5ccf,
 # patched in 48.0.1). The <49 cap keeps the 49.x major bump out of this
 # security-patch sweep so it can land as its own reviewed change.
-cryptography>=48.0.1,<49
+cryptography>=50.0.0,<51
 bcrypt>=4.1
 itsdangerous>=2.1
 pyotp>=2.9
